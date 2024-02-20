@@ -4,7 +4,7 @@ LIBS = -lz
 
 S2GA:
 	mkdir -p bin/
-	$(CXX) src/VCFparser_serial.cpp -o bin/VCFparser $(CPPFLAGS) $(LIBS)
+	$(CXX) src/VCFparser_mt.cpp -o bin/VCFparser $(CPPFLAGS) $(LIBS)
 
 all:
 	$(S2GA)

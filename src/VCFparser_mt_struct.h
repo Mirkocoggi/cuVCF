@@ -67,7 +67,13 @@ public:
     string filename;
     vector<var> var_df;
     string header;
+    char *filestring;
+    int header_char=0;
     int num_var = 0;
+    long filesize;
+    long variants_size;
+    long num_lines=0;
+    long *new_lines_index;
     void get_filename(string path_to_filename)
     {
         vector<string> line_el;
@@ -84,20 +90,45 @@ public:
             cout << "\nFile already uncompressed!\n" << endl;
         }
     }
+    void get_file_size(string filename){
+        filesize = filesystem::file_size(filename);
+    }
     void get_header(ifstream *file)
     {
         string line;
         //removing the header and storing it in vcf.header
         while (getline(*file, line) && line[0]=='#' && line[1]=='#'){
             header.append(line + '\n');
+            header_char += line.length() + 1;
         }
-        cout << "\nLast line: "<< line<< endl;
-        
+        header_char += line.length() + 1;
+        cout << "\nheader char: " << to_string(header_char) << endl;
+        variants_size = filesize - header_char; //ora che ho tolto l'header ho un file piu piccolo quindi una nuova size
+        cout<<"filesize: "<<filesize<<" variants_size: "<<variants_size<<endl;
     }
     void print_header()
     {
         cout << "VCF header:\n" << header << endl;
     }
+    void allocate_filestring(){
+        filestring = (char*)malloc(variants_size);
+    }
+    void find_new_lines_index(ifstream *inFile){ //popola anche il filestring
+        long num_char=0;
+        new_lines_index = (long*)malloc(variants_size); //per ora ho esagerato con la dimensione (è come se permettessi tutti \n. Si puo ridurre, pero ipotizzarlo è meglio perche senno devo passare il file due volte solo per vedere dove iniziano le linee)
+        while(num_char!=variants_size){
+            filestring[num_char] = (*inFile).get(); 
+            if(filestring[num_char]=='\n'){
+                new_lines_index[num_lines] = num_char;
+                num_lines++;
+            }
+            num_char++;
+        }
+    }
+
+
+
+
     void create_var_struct(ifstream *file)
     {
         string line;

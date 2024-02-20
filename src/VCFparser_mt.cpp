@@ -11,7 +11,8 @@
 #include <chrono>
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/predicate.hpp>
-#include "VCFparser_serial_struct.h"
+#include <filesystem>
+#include "VCFparser_mt_struct.h"
 
 using namespace std;
 
@@ -44,10 +45,21 @@ int main(int argc, char *argv[]){
     string line;
     vcf_parsed vcf;
     vcf.get_filename(filename);
-    vcf.get_header(&inFile);
-    //vcf.print_header();
-    vcf.create_var_struct(&inFile);
+    vcf.get_file_size(filename);
+    vcf.get_header(&inFile); //serve per separare l'header dal resto del file
+    vcf.allocate_filestring();
+    vcf.find_new_lines_index(&inFile);
+
+    cout<<"\nnum_char: "<<vcf.variants_size<<endl;
+    for(long i=0; i<vcf.variants_size; i++){
+        cout << vcf.filestring[i];
+    }
+    cout << "\nnew_line_inde: \n";
+    for(long i=0; i<vcf.num_lines; i++){
+        cout << vcf.new_lines_index[i] << endl;
+    }
     
+    inFile.close();
     
     
     return 0;
