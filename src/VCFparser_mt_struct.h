@@ -42,7 +42,7 @@ public:
     }
     void print_var()
     {
-        cout << "Var " << var_number << " : ";
+        cout << "Var" << var_number << ":\t";
         cout << chrom << "\t";
         cout << to_string(pos) << "\t";
         cout << id << "\t";
@@ -69,13 +69,11 @@ public:
     string header;
     char *filestring;
     int header_char=0;
-    int num_var = 0;
     long filesize;
     long variants_size;
     long num_lines=0;
     long *new_lines_index;
-    void get_filename(string path_to_filename)
-    {
+    void get_filename(string path_to_filename){
         vector<string> line_el;
         boost::split(line_el, path_to_filename, boost::is_any_of("/"));
         filename = line_el[line_el.size()-1];
@@ -93,8 +91,7 @@ public:
     void get_file_size(string filename){
         filesize = filesystem::file_size(filename);
     }
-    void get_header(ifstream *file)
-    {
+    void get_header(ifstream *file){
         string line;
         //removing the header and storing it in vcf.header
         while (getline(*file, line) && line[0]=='#' && line[1]=='#'){
@@ -106,8 +103,7 @@ public:
         variants_size = filesize - header_char; //ora che ho tolto l'header ho un file piu piccolo quindi una nuova size
         cout<<"filesize: "<<filesize<<" variants_size: "<<variants_size<<endl;
     }
-    void print_header()
-    {
+    void print_header(){
         cout << "VCF header:\n" << header << endl;
     }
     void allocate_filestring(){
@@ -116,33 +112,40 @@ public:
     void find_new_lines_index(ifstream *inFile){ //popola anche il filestring
         long num_char=0;
         new_lines_index = (long*)malloc(variants_size); //per ora ho esagerato con la dimensione (è come se permettessi tutti \n. Si puo ridurre, pero ipotizzarlo è meglio perche senno devo passare il file due volte solo per vedere dove iniziano le linee)
+        new_lines_index[0] = 0;
+        num_lines++;
         while(num_char!=variants_size){
             filestring[num_char] = (*inFile).get(); 
             if(filestring[num_char]=='\n'){
-                new_lines_index[num_lines] = num_char;
+                new_lines_index[num_lines] = num_char+1;
                 num_lines++;
             }
             num_char++;
         }
     }
-
-
-
-
-    void create_var_struct(ifstream *file)
-    {
-        string line;
+    void populate_var_struct(){
+        string tmp ="\0";
+        vector<string> line_el;
         var var_tmp;
-        while (getline(*file, line))
-        {
-            var_tmp.get_vcf_line(line);
-            num_var++;
-            var_tmp.var_number = num_var;
+        cout << "\nBegin tmp: \n" <<"newlines: "<<num_lines<<endl;
+        for(int i=0; i<num_lines-1; i++){
+            //cout << "\nnew_lines_index[num_lines]: "<<new_lines_index[i] <<" new_lines_index[num_lines+1]: "<<new_lines_index[i+1]<<endl;
+            for(int j=new_lines_index[i]; j<new_lines_index[i+1]-1; j++){
+                tmp += filestring[j];
+                //cout<<filestring[j];
+            }
+            var_tmp.get_vcf_line(tmp);
+            var_tmp.var_number = i;
             var_tmp.print_var();
             var_df.push_back(var_tmp);
             var_tmp.samples.clear();
+            tmp.clear();
+            
         }
+        
+        
     }
+
 };
 
 #endif

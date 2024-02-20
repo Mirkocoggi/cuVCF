@@ -58,7 +58,12 @@ int main(int argc, char *argv[]){
     for(long i=0; i<vcf.num_lines; i++){
         cout << vcf.new_lines_index[i] << endl;
     }
-    
+
+    vcf.populate_var_struct();
+    cout << "\nPrint from var_df: \n";
+    for(int i=0; i<vcf.num_lines-1; i++){
+        vcf.var_df[i].print_var();
+    }
     inFile.close();
     
     
