@@ -58,28 +58,54 @@ int main(int argc, char *argv[]){
     int cont=0;
     string line;
     vcf_parsed vcf;
-    vcf.get_filename(filename);
-    vcf.get_file_size(filename);
-    vcf.get_header(&inFile); //serve per separare l'header dal resto del file
-    vcf.allocate_filestring();
-    vcf.find_new_lines_index(&inFile);
+    // clock_t before, after;
 
-    cout<<"\nnum_char: "<<vcf.variants_size<<endl;
-    for(long i=0; i<vcf.variants_size; i++){
-        cout << vcf.filestring[i];
-    }
+    auto before = chrono::system_clock::now();
+    vcf.get_filename(filename);
+    auto after = chrono::system_clock::now();
+    auto get_file_size = std::chrono::duration<double>(after - before).count();
+
+    vcf.get_file_size(filename);
+
+    before = chrono::system_clock::now();
+    vcf.get_header(&inFile); //serve per separare l'header dal resto del file
+    after = chrono::system_clock::now();
+    auto get_header = std::chrono::duration<double>(after - before).count();
+
+    vcf.allocate_filestring();
+
+    before = chrono::system_clock::now();
+    vcf.find_new_lines_index(&inFile);
+    cout<<"\nafter find new lines\n";
+    after = chrono::system_clock::now();
+    auto find_new_lines = std::chrono::duration<double>(after - before).count();
+    inFile.close();
+    // cout<<"\nnum_char: "<<vcf.variants_size<<endl;
+    // for(long i=0; i<vcf.variants_size; i++){
+    //     cout << vcf.filestring[i];
+    // }
     cout << "\nnew_line_inde: \n";
     for(long i=0; i<vcf.num_lines; i++){
         cout << vcf.new_lines_index[i] << endl;
     }
 
+    before = chrono::system_clock::now();
     vcf.populate_var_struct(num_threadss);
-    cout << "\nPrint from var_df: \n";
-    for(int i=0; i<vcf.num_lines-1; i++){
-        vcf.var_df[i].print_var();
-    }
-    inFile.close();
+    after = chrono::system_clock::now();
+    auto populate_var_struct = std::chrono::duration<double>(after - before).count();
+
+
+    // cout << "\nPrint from var_df: \n";
+    // for(int i=0; i<vcf.num_lines-1; i++){
+    //     vcf.var_df[i].print_var();
+    // }
     
+    cout << "Get file size: " << get_file_size << " s" << endl;
+    cout << "get_header: " << get_header << " s" << endl;
+    cout << "find_new_lines: " << find_new_lines << " s" << endl;
+    cout << "populate_var_struct: " << populate_var_struct << " s" << endl;
+    
+    free(vcf.var_df);
     
     return 0;
 }

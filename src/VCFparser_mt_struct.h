@@ -10,15 +10,15 @@ class var
 {
 public:
     int var_number;
-	string chrom;
+	string chrom="\0";
     int pos;
-    string id;
-    string ref;
-    string alt;
+    string id="\0";
+    string ref="\0";
+    string alt="\0";
     int qual;
-    string filter;
-    string info;
-    string format;
+    string filter="\0";
+    string info="\0";
+    string format="\0";
     vector<string> samples;
     void get_vcf_line(string line)
     {
@@ -43,6 +43,7 @@ public:
         for (int i=0; i<line_el.size(); i++){
             samples.push_back(line_el[i]);
         }
+        
     }
     void print_var()
     {
@@ -129,31 +130,36 @@ public:
     }
     void populate_var_struct(int num_threads){
         
-        
-        
-        
-        var_df = (var*)malloc(sizeof(var)*(num_lines-1));
-        cout << "\nBegin tmp: \n" <<"newlines: "<<num_lines<<endl;
+        var_df = (var*)calloc((num_lines-1), sizeof(var));
+        cout << "\nBegin tmp: \n" <<"newlines: "<<num_lines<<" num threads: "<<num_threads<<endl;
         int batch_size = (num_lines-2+num_threads)/num_threads;
+        cout << "\nBatch size: "<<batch_size<<endl;
 #pragma omp parallel
         {
             int start, end;
             string tmp ="\0";
-            var var_tmp;
             int th_ID = omp_get_thread_num();
+            cout << "\nThread id: "<<th_ID<<endl;
             start = th_ID*batch_size;
             end = start + batch_size;
+            cout << "\nstart: " << start << " end: " << end << endl;
             for(int i=start; i<end && i<num_lines-1; i++){
                 //cout << "\nnew_lines_index[num_lines]: "<<new_lines_index[i] <<" new_lines_index[num_lines+1]: "<<new_lines_index[i+1]<<endl;
                 for(int j=new_lines_index[i]; j<new_lines_index[i+1]-1; j++){
                     tmp += filestring[j]; //questo è un passaggio in piu che si puo togliere passando direttamente la sottostringa di filestring a get_vcf_line
                     //cout<<filestring[j];
                 }
-                var_tmp.get_vcf_line(tmp);
-                var_tmp.var_number = i;
-                var_tmp.print_var();
-                var_df[i] = var_tmp;
-                var_tmp.samples.clear();
+                // var_tmp.get_vcf_line(tmp);
+                // var_tmp.var_number = i;
+                // var_tmp.print_var();
+                // cout << "\nHere"<<endl;
+                // var_df[i] = var_tmp;
+                // cout << "\nHere1"<<endl;
+                // var_tmp.samples.clear();
+                
+                var_df[i].get_vcf_line(tmp);
+                var_df[i].var_number = i;
+                //var_df[i].print_var();
                 tmp.clear();
             
             }
