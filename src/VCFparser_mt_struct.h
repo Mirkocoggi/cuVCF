@@ -19,30 +19,111 @@ public:
     string filter="\0";
     string info="\0";
     string format="\0";
-    vector<string> samples;
-    void get_vcf_line(string line)
+    string samples;
+    void get_vcf_line(char *line, int start, int end)
     {
         //da cambirare fare con char*
-        vector<string> line_el;
-        boost::split(line_el, line, boost::is_any_of("\t "));
-        chrom = line_el[0];
-        pos = stoi(line_el[1]);
-        id = line_el[2];
-        ref = line_el[3];
-        alt = line_el[4];
-        qual = stoi(line_el[5]);
-        filter = line_el[6];
-        info = line_el[7];
-        format = line_el[8];
-        string samples_string;
-        for(int i=9; i<line_el.size(); i++){
-            samples_string.append(line_el[i] + '\t');
+        bool find1 = false;
+        int iter=0;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+            }else{
+                chrom += line[start+iter];
+                iter++;
+            }
         }
-        line_el.clear();
-        boost::split(line_el, samples_string, boost::is_any_of("\t "));
-        for (int i=0; i<line_el.size(); i++){
-            samples.push_back(line_el[i]);
+        string tmp="\0";
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                pos = stoi(tmp); // da cambiare, ci sarà un modo più semplice??!!
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
         }
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+            }else{
+                id += line[start+iter];
+                iter++;
+            }
+        }
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+            }else{
+                ref += line[start+iter];
+                iter++;
+            }
+        }
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+            }else{
+                alt += line[start+iter];
+                iter++;
+            }
+        }
+        tmp="\0";
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                qual = stoi(tmp); // da cambiare, ci sarà un modo più semplice??!!
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+            }else{
+                filter += line[start+iter];
+                iter++;
+            }
+        }
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+            }else{
+                info += line[start+iter];
+                iter++;
+            }
+        }
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+            }else{
+                format += line[start+iter];
+                iter++;
+            }
+        }
+        
+        while((start+iter)!=(end-1)){
+            samples += line[start+iter];
+            iter++;
+        }
+        
         
     }
     void print_var()
@@ -57,10 +138,7 @@ public:
         cout << filter << "\t";
         cout << info << "\t";
         cout << format << "\t";
-        for (int i = 0; i < samples.size(); i++)
-        {
-            cout << samples[i] << "\t";
-        }
+        cout << samples;
         cout << endl;
     }
 };
@@ -140,7 +218,7 @@ public:
 #pragma omp parallel
         {
             int start, end;
-            string tmp ="\0";
+            //string tmp ="\0";
             int th_ID = omp_get_thread_num();
             cout << "\nThread id: "<<th_ID<<endl;
             start = th_ID*batch_size;
@@ -148,15 +226,15 @@ public:
             cout << "\nstart: " << start << " end: " << end << endl;
             for(int i=start; i<end && i<num_lines-1; i++){
                 //cout << "\nnew_lines_index[num_lines]: "<<new_lines_index[i] <<" new_lines_index[num_lines+1]: "<<new_lines_index[i+1]<<endl;
-                for(int j=new_lines_index[i]; j<new_lines_index[i+1]-1; j++){
-                    tmp += filestring[j]; //questo è un passaggio in piu che si puo togliere passando direttamente la sottostringa di filestring a get_vcf_line
-                    //cout<<filestring[j];
-                }
-                
-                var_df[i].get_vcf_line(tmp);
+                // for(int j=new_lines_index[i]; j<new_lines_index[i+1]-1; j++){
+                //     tmp += filestring[j]; //questo è un passaggio in piu che si puo togliere passando direttamente la sottostringa di filestring a get_vcf_line
+                //     //cout<<filestring[j];
+                // }
+                // cout << "\nNew lines i: "<<new_lines_index[i]<<" New line i+1: "<<new_lines_index[i+1];
+                var_df[i].get_vcf_line(filestring, new_lines_index[i], new_lines_index[i+1]);
                 var_df[i].var_number = i;
                 //var_df[i].print_var();
-                tmp.clear();
+                //tmp.clear();
             
             }
         

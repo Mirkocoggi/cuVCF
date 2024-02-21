@@ -76,7 +76,7 @@ int main(int argc, char *argv[]){
 
     before = chrono::system_clock::now();
     vcf.find_new_lines_index(&inFile);
-    cout<<"\nafter find new lines\n";
+    //cout<<"\nafter find new lines\n";
     after = chrono::system_clock::now();
     auto find_new_lines = std::chrono::duration<double>(after - before).count();
     inFile.close();
