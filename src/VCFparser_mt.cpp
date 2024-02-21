@@ -12,16 +12,17 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <filesystem>
+#include <omp.h>
 #include "VCFparser_mt_struct.h"
 
 using namespace std;
 
 int main(int argc, char *argv[]){
    
-    int opt;
+    int opt, num_threadss;
     char *vcf_filename; 
    
-    while ((opt = getopt(argc, argv, "v:")) != -1)
+    while ((opt = getopt(argc, argv, "v:t:")) != -1)
     {
         switch (opt)
         {
@@ -29,11 +30,24 @@ int main(int argc, char *argv[]){
             vcf_filename = optarg;
             cout << "vcf_filename: " << vcf_filename << endl;
             break;
+        case 't':
+            num_threadss = atoi(optarg);
+            if (num_threadss == 1)
+            {
+                cout << "Single thread execution, sequential process!!" << endl;
+            }
+            else
+            {
+                cout << "Multithreading execution, parallelization on " << num_threadss << " threads!!" << endl;
+            }
+            break;
         case '?':
             cout << "Unknown option: " << optopt << endl;
             break;
         }
     }
+
+    omp_set_num_threads(num_threadss);
 
     string filename = vcf_filename;
     ifstream inFile(filename);
@@ -59,7 +73,7 @@ int main(int argc, char *argv[]){
         cout << vcf.new_lines_index[i] << endl;
     }
 
-    vcf.populate_var_struct();
+    vcf.populate_var_struct(num_threadss);
     cout << "\nPrint from var_df: \n";
     for(int i=0; i<vcf.num_lines-1; i++){
         vcf.var_df[i].print_var();

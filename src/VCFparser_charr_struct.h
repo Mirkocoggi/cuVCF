@@ -22,7 +22,6 @@ public:
     vector<string> samples;
     void get_vcf_line(string line)
     {
-        //da cambirare fare con char*
         vector<string> line_el;
         boost::split(line_el, line, boost::is_any_of("\t "));
         chrom = line_el[0];
@@ -69,7 +68,7 @@ class vcf_parsed
 public:
     int id;
     string filename;
-    var *var_df;
+    vector<var> var_df;
     string header;
     char *filestring;
     int header_char=0;
@@ -127,39 +126,27 @@ public:
             num_char++;
         }
     }
-    void populate_var_struct(int num_threads){
-        
-        
-        
-        
-        var_df = (var*)malloc(sizeof(var)*(num_lines-1));
+    void populate_var_struct(){
+        string tmp ="\0";
+        vector<string> line_el;
+        var var_tmp;
         cout << "\nBegin tmp: \n" <<"newlines: "<<num_lines<<endl;
-        int batch_size = (num_lines-2+num_threads)/num_threads;
-#pragma omp parallel
-        {
-            int start, end;
-            string tmp ="\0";
-            var var_tmp;
-            int th_ID = omp_get_thread_num();
-            start = th_ID*batch_size;
-            end = start + batch_size;
-            for(int i=start; i<end && i<num_lines-1; i++){
-                //cout << "\nnew_lines_index[num_lines]: "<<new_lines_index[i] <<" new_lines_index[num_lines+1]: "<<new_lines_index[i+1]<<endl;
-                for(int j=new_lines_index[i]; j<new_lines_index[i+1]-1; j++){
-                    tmp += filestring[j]; //questo è un passaggio in piu che si puo togliere passando direttamente la sottostringa di filestring a get_vcf_line
-                    //cout<<filestring[j];
-                }
-                var_tmp.get_vcf_line(tmp);
-                var_tmp.var_number = i;
-                var_tmp.print_var();
-                var_df[i] = var_tmp;
-                var_tmp.samples.clear();
-                tmp.clear();
-            
+        for(int i=0; i<num_lines-1; i++){
+            //cout << "\nnew_lines_index[num_lines]: "<<new_lines_index[i] <<" new_lines_index[num_lines+1]: "<<new_lines_index[i+1]<<endl;
+            for(int j=new_lines_index[i]; j<new_lines_index[i+1]-1; j++){
+                tmp += filestring[j];
+                //cout<<filestring[j];
             }
-        
-        
+            var_tmp.get_vcf_line(tmp);
+            var_tmp.var_number = i;
+            var_tmp.print_var();
+            var_df.push_back(var_tmp);
+            var_tmp.samples.clear();
+            tmp.clear();
+            
         }
+        
+        
     }
 
 };
