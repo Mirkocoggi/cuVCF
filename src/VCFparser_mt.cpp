@@ -84,10 +84,10 @@ int main(int argc, char *argv[]){
     // for(long i=0; i<vcf.variants_size; i++){
     //     cout << vcf.filestring[i];
     // }
-    cout << "\nnew_line_inde: \n";
-    for(long i=0; i<vcf.num_lines; i++){
-        cout << vcf.new_lines_index[i] << endl;
-    }
+    // cout << "\nnew_line_inde: \n";
+    // for(long i=0; i<vcf.num_lines; i++){
+    //     cout << vcf.new_lines_index[i] << endl;
+    // }
 
     before = chrono::system_clock::now();
     vcf.populate_var_struct(num_threadss);

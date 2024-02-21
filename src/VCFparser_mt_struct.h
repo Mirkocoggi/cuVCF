@@ -129,11 +129,14 @@ public:
         }
     }
     void populate_var_struct(int num_threads){
-        
+        auto before = chrono::system_clock::now();
         var_df = (var*)calloc((num_lines-1), sizeof(var));
         cout << "\nBegin tmp: \n" <<"newlines: "<<num_lines<<" num threads: "<<num_threads<<endl;
         int batch_size = (num_lines-2+num_threads)/num_threads;
         cout << "\nBatch size: "<<batch_size<<endl;
+        auto after = chrono::system_clock::now();
+        auto pre_pragma = std::chrono::duration<double>(after - before).count();
+        cout << "Pre_pragma: " << pre_pragma << " s" << endl;
 #pragma omp parallel
         {
             int start, end;
@@ -149,13 +152,6 @@ public:
                     tmp += filestring[j]; //questo è un passaggio in piu che si puo togliere passando direttamente la sottostringa di filestring a get_vcf_line
                     //cout<<filestring[j];
                 }
-                // var_tmp.get_vcf_line(tmp);
-                // var_tmp.var_number = i;
-                // var_tmp.print_var();
-                // cout << "\nHere"<<endl;
-                // var_df[i] = var_tmp;
-                // cout << "\nHere1"<<endl;
-                // var_tmp.samples.clear();
                 
                 var_df[i].get_vcf_line(tmp);
                 var_df[i].var_number = i;
