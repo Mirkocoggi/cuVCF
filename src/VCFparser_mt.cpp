@@ -50,6 +50,18 @@ int main(int argc, char *argv[]){
     omp_set_num_threads(num_threadss);
 
     string filename = vcf_filename;
+    // ifstream *inFiles;
+    // stringstream filename1;
+    // filename1 << filename;
+    // cout << "\n filename.str(): " << filename1.str().c_str() << endl;
+    // inFiles = (ifstream*)calloc(num_threadss, sizeof(ifstream));
+    // cout << "\n here 1 " << endl;
+    // inFiles[0].open(filename1.str().c_str());
+    // cout << "\n here 1.5 " << endl;
+    // for(int i=0; i<num_threadss; i++){
+    //     inFiles[i].open(filename1.str().c_str());
+    // }
+    // cout << "\n here 2 " << endl;
     ifstream inFile(filename);
     if(!inFile){
         cout << "ERROR: cannot open file " << filename << endl;
@@ -75,7 +87,7 @@ int main(int argc, char *argv[]){
     vcf.allocate_filestring();
 
     before = chrono::system_clock::now();
-    vcf.find_new_lines_index(&inFile);
+    vcf.find_new_lines_index(filename, num_threadss);
     //cout<<"\nafter find new lines\n";
     after = chrono::system_clock::now();
     auto find_new_lines = std::chrono::duration<double>(after - before).count();

@@ -192,19 +192,61 @@ public:
     void allocate_filestring(){
         filestring = (char*)malloc(variants_size);
     }
-    void find_new_lines_index(ifstream *inFile){ //popola anche il filestring
+    void find_new_lines_index(string w_filename, int num_threads){ //popola anche il filestring
         long num_char=0;
         new_lines_index = (long*)malloc(variants_size); //per ora ho esagerato con la dimensione (è come se permettessi tutti \n. Si puo ridurre, pero ipotizzarlo è meglio perche senno devo passare il file due volte solo per vedere dove iniziano le linee)
         new_lines_index[0] = 0;
         num_lines++;
+        auto before = chrono::system_clock::now();
+        
+        int batch_infile = (variants_size - 1 + num_threads)/num_threads;
+        // (*inFile1).seekg(header_char + batch_infile, ios::cur);
+        
+#pragma omp parallel
+        {
+            int thr_ID = omp_get_thread_num();
+            ifstream infile(w_filename);
+            //cout << "in find head char: "<<header_char<<" thid*bs: "<<thr_ID*batch_infile << "\n first get; "<<infile.get()<<endl;
+            infile.seekg((header_char + thr_ID*batch_infile), ios::cur);
+            int start, end;
+            start = thr_ID*batch_infile;
+            end = start + batch_infile;
+            cout << "in find start: "<<start<<" end: "<<end<<endl;
+            for(int i=start; i<end && i<variants_size; i++){
+                filestring[i] = infile.get();
+                //cout << filestring[i];
+            }
+        }
+        // while(num_char!=variants_size && num_char!=batch_infile){
+        //     filestring[num_char] = (*inFile).get(); 
+        //     // if(filestring[num_char]=='\n'){
+        //     //     new_lines_index[num_lines] = num_char+1;
+        //     //     num_lines++;
+        //     // }
+        //     num_char++;
+        // }
+        // while(num_char!=variants_size){
+        //     filestring[num_char] = (*inFile1).get(); 
+        //     // if(filestring[num_char]=='\n'){
+        //     //     new_lines_index[num_lines] = num_char+1;
+        //     //     num_lines++;
+        //     // }
+        //     num_char++;
+        // }
+        auto after = chrono::system_clock::now();
+        auto filestring_time = std::chrono::duration<double>(after - before).count();
+        before = chrono::system_clock::now();
+        num_char = 0;
         while(num_char!=variants_size){
-            filestring[num_char] = (*inFile).get(); 
             if(filestring[num_char]=='\n'){
                 new_lines_index[num_lines] = num_char+1;
                 num_lines++;
             }
             num_char++;
         }
+        after = chrono::system_clock::now();
+        auto f_new_lines = std::chrono::duration<double>(after - before).count();
+        cout << "\nFilestring time: " << filestring_time << " s " << "New lines time: " << f_new_lines << " s\n\n";
     }
     void populate_var_struct(int num_threads){
         auto before = chrono::system_clock::now();
