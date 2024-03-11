@@ -51,6 +51,18 @@ int main(int argc, char *argv[]){
     omp_set_num_threads(num_threadss);
 
 // Open input file
+    // gzip -df compressed_file1.gz
+    if(!strcmp((vcf_filename + strlen(vcf_filename) - 3), ".gz")){
+        std::string command = "gzip -df ";
+        command += vcf_filename;
+        int res = system(command.c_str());
+        if(res){
+            cout << "ERROR: cannot unzipp file" << endl;
+        }else{
+            vcf_filename[strlen(vcf_filename) - 3] = '\0';
+        }
+    }
+
     string filename = vcf_filename;
     ifstream inFile(filename);
     if(!inFile){
