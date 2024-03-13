@@ -11,11 +11,11 @@ class var
 public:
     int var_number;
 	string chrom="\0"; // su quale cromosoma della reference
-    int pos; // posizione nel chromosoma
+    long pos; // posizione nel chromosoma
     string id="\0"; // id della variation, spesso .
     string ref="\0"; // nucleotide della reference
     string alt="\0"; // possibili alternative (possono essere più di una)
-    int qual; // quality score
+    float qual; // quality score
     string filter="\0"; // filtro penso usato durante il sequenziamento
     string info="\0"; // info varie deducibili dall'header, potrebbe essere utile averle in collegamento
     string format="\0"; // formato dei samples, info variabiliti, mi dice come sono ordinate
@@ -39,7 +39,7 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
-                pos = stoi(tmp); // da cambiare, in futuro
+                pos = stoul(tmp); // da cambiare, in futuro
             }else{
                 tmp += line[start+iter];
                 iter++;
@@ -81,7 +81,7 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
-                qual = stoi(tmp); // da cambiare, in futuro
+                qual = stof(tmp); // da cambiare, in futuro
             }else{
                 tmp += line[start+iter];
                 iter++;
@@ -197,19 +197,18 @@ public:
         new_lines_index[0] = 0; //il primo elemento lo metto a zero per indicare l'inizio della prima linea
         num_lines++;
         auto before = chrono::system_clock::now();
-        
-        int batch_infile = (variants_size - 1 + num_threads)/num_threads; //numero di char che verrà processato da ogni thread
+        long batch_infile = (variants_size - 1 + num_threads)/num_threads; //numero di char che verrà processato da ogni thread
         
 #pragma omp parallel
         {
             int thr_ID = omp_get_thread_num();
             ifstream infile(w_filename); //apro lo stesso file con un ifstream in ogni thread, da considerare se ha senso creare prima un array di ifstream
             infile.seekg((header_size + thr_ID*batch_infile), ios::cur); //ogni thread parte a copiare inFile in filestring a una distanza di batch_size
-            int start, end;
+            long start, end;
             start = thr_ID*batch_infile; // inizio del batch dello specifico thread
             end = start + batch_infile; // fine del batch
             cout << "in find start: "<<start<<" end: "<<end<<endl;
-            for(int i=start; i<end && i<variants_size; i++){
+            for(long i=start; i<end && i<variants_size; i++){
                 filestring[i] = infile.get();
             }
         }
@@ -233,7 +232,7 @@ public:
         
         var_df = (var*)calloc((num_lines-1), sizeof(var)); // allocating var_df
         cout << "\nBegin tmp: \n" <<"newlines: "<<num_lines<<" num threads: "<<num_threads<<endl;
-        int batch_size = (num_lines-2+num_threads)/num_threads; //numero di lines che verrà processato da ogni thread
+        long batch_size = (num_lines-2+num_threads)/num_threads; //numero di lines che verrà processato da ogni thread
         
         cout << "\nBatch size: "<<batch_size<<endl;
         auto after = chrono::system_clock::now();
@@ -242,7 +241,7 @@ public:
 
 #pragma omp parallel
         {
-            int start, end;
+            long start, end;
             int th_ID = omp_get_thread_num();
             cout << "\nThread id: "<<th_ID<<endl;
 
@@ -251,7 +250,7 @@ public:
 
             cout << "\nstart: " << start << " end: " << end << endl;
 
-            for(int i=start; i<end && i<num_lines-1; i++){ //start e end mi dicono l'intervallo di linee che eseguirà ogni thread, quindi la i rappresenta l'iesima linea (var) che inizia a new_lines_index[i] e finisce a new_lines_index[i+1] (escluso)
+            for(long i=start; i<end && i<num_lines-1; i++){ //start e end mi dicono l'intervallo di linee che eseguirà ogni thread, quindi la i rappresenta l'iesima linea (var) che inizia a new_lines_index[i] e finisce a new_lines_index[i+1] (escluso)
 
                 var_df[i].get_vcf_line(filestring, new_lines_index[i], new_lines_index[i+1]); //qui traduco da char* a var structure la specifica line
                 var_df[i].var_number = i; // dato aggiuntivo come se fosse un altro ID interno 

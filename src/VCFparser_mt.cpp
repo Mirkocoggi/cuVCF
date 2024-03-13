@@ -125,6 +125,15 @@ int main(int argc, char *argv[]){
     for(int i=0; i<vcf.num_lines-1; i++){
         vcf.var_df[i].print_var();
     }
+
+    // cout << "\nPrint from var_df: \n";
+    // for(int i=0; i<1000; i++){
+    //     vcf.var_df[i].print_var();
+    // }
+    // cout << "\n\n\nLAST 100: \n\n\n";
+    // for(int i=vcf.num_lines - 101; i<vcf.num_lines - 1; i++){
+    //     vcf.var_df[i].print_var();
+    // }
     
     cout << "Get file size: " << get_file_size << " s" << endl;
     cout << "get_header: " << get_header << " s" << endl;
