@@ -63,7 +63,7 @@ int main(int argc, char *argv[]){
         }
     }
 
-    string filename = vcf_filename;
+    string filename = vcf_filename; 
     ifstream inFile(filename);
     if(!inFile){
         cout << "ERROR: cannot open file " << filename << endl;
@@ -141,6 +141,8 @@ int main(int argc, char *argv[]){
     cout << "populate_var_struct: " << populate_var_struct << " s" << endl;
     
     free(vcf.var_df);
+    free(vcf.filestring);
+    free(vcf.new_lines_index);
     
     return 0;
 }

@@ -19,7 +19,7 @@ public:
     string filter="\0"; // filtro penso usato durante il sequenziamento
     string info="\0"; // info varie deducibili dall'header, potrebbe essere utile averle in collegamento
     string format="\0"; // formato dei samples, info variabiliti, mi dice come sono ordinate
-    string samples; // una colonna per ogni sample in cui ognuno descrive i valori indicati in format
+    string samples="\0"; // una colonna per ogni sample in cui ognuno descrive i valori indicati in format
     void get_vcf_line(char *line, int start, int end)
     {
         bool find1 = false;
@@ -198,7 +198,16 @@ public:
         num_lines++;
         auto before = chrono::system_clock::now();
         long batch_infile = (variants_size - 1 + num_threads)/num_threads; //numero di char che verrà processato da ogni thread
-        
+
+        /*-----------------------------------------------------
+        std::ifstream file_streams[num_threads]; //std::vector<std::ifstream> file_streams(num_threads); // std::ifstream file_streams[num_threads] ??
+        for (int i = 0; i < num_threads; i++) {
+            // Set the offset for this thread
+            int start = header_size + i*batch_infile;
+            file_streams[i].open(w_filename); // Open the file stream for this thread
+            file_streams[i].seekg(start, ios::cur); // Set the file stream's read position to the start offset
+        }
+        */        
 #pragma omp parallel
         {
             int thr_ID = omp_get_thread_num();
@@ -209,12 +218,13 @@ public:
             end = start + batch_infile; // fine del batch
             cout << "in find start: "<<start<<" end: "<<end<<endl;
             for(long i=start; i<end && i<variants_size; i++){
-                filestring[i] = infile.get();
+                filestring[i] = infile.get(); //file_streams[thr_ID].get(); //-----------------
             }
         }
         auto after = chrono::system_clock::now();
         auto filestring_time = std::chrono::duration<double>(after - before).count();
-        before = chrono::system_clock::now();
+        before = chrono::system_clock
+        ::now();
         num_char = 0;
         while(num_char!=variants_size){ //conto il numero di lines e ogni volta che trovo \n salvo il char successivo come inizio della riga successiva
             if(filestring[num_char]=='\n'){
@@ -224,12 +234,14 @@ public:
             num_char++;
         } // si potrebbe fare multithreading ma vediamo se si ha beneficio
         after = chrono::system_clock::now();
+
         auto f_new_lines = std::chrono::duration<double>(after - before).count();
         cout << "\nFilestring time: " << filestring_time << " s " << "New lines time: " << f_new_lines << " s\n\n";
     }
     void populate_var_struct(int num_threads){
         auto before = chrono::system_clock::now();
         
+        //var_df = (var*)malloc((num_lines-1) * sizeof(var)); // Usando la malloc migliora in alcuni punti peggiora in altri, il bug era il \0
         var_df = (var*)calloc((num_lines-1), sizeof(var)); // allocating var_df
         cout << "\nBegin tmp: \n" <<"newlines: "<<num_lines<<" num threads: "<<num_threads<<endl;
         long batch_size = (num_lines-2+num_threads)/num_threads; //numero di lines che verrà processato da ogni thread
