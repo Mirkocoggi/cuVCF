@@ -20,10 +20,10 @@ public:
     string info="\0"; // info varie deducibili dall'header, potrebbe essere utile averle in collegamento
     string format="\0"; // formato dei samples, info variabiliti, mi dice come sono ordinate
     string samples="\0"; // una colonna per ogni sample in cui ognuno descrive i valori indicati in format
-    void get_vcf_line(char *line, int start, int end)
+    void get_vcf_line(char *line, long start, long end)
     {
         bool find1 = false;
-        int iter=0;
+        long iter=0;
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
@@ -81,7 +81,11 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
-                qual = stof(tmp); // da cambiare, in futuro
+                if(strcmp(&tmp[0], ".")){
+                    qual = stof(tmp); // da cambiare, in futuro
+                }else{
+                    qual = 0.0;
+                }
             }else{
                 tmp += line[start+iter];
                 iter++;
@@ -109,7 +113,7 @@ public:
         }
         find1=false;
         while(!find1){
-            if(line[start+iter]=='\t'||line[start+iter]==' '){
+            if(line[start+iter]=='\t'||line[start+iter]==' '||line[start+iter]=='\n'){
                 find1 = true;
                 iter++;
             }else{
@@ -118,11 +122,10 @@ public:
             }
         }
         
-        while((start+iter)!=(end-1)){
+        while((start+iter)<(end-1)){ //segmentation fault -> perchè non (start+iter)<(end-1)?
             samples += line[start+iter]; // sicuramente da dividere i vari sample e eventualmente creare un dizionario per ogni sample cosi da associare con il format
             iter++;
         }
-        
         
     }
     void print_var()
@@ -159,15 +162,15 @@ public:
         vector<string> line_el;
         boost::split(line_el, path_to_filename, boost::is_any_of("/"));
         filename = line_el[line_el.size()-1];
-        cout << "\nOnly file name: " << filename << endl;
+        //cout << "\nOnly file name: " << filename << endl;
         line_el.clear();
         boost::split(line_el, filename, boost::is_any_of("."));
         if(line_el[line_el.size()-1] == "gz")
         {
-            cout << "\nFile must be uncompressed!\n" << endl;
+            //cout << "\nFile must be uncompressed!\n" << endl;
             exit(0);
         }else{
-            cout << "\nFile already uncompressed!\n" << endl;
+            //cout << "\nFile already uncompressed!\n" << endl;
         }
     }
     void get_file_size(string filename){
@@ -181,12 +184,12 @@ public:
             header_size += line.length() + 1;
         }
         header_size += line.length() + 1;
-        cout << "\nheader char: " << to_string(header_size) << endl;
+        //cout << "\nheader char: " << to_string(header_size) << endl;
         variants_size = filesize - header_size; //ora che ho tolto l'header ho un file piu piccolo quindi una nuova size
-        cout<<"filesize: "<<filesize<<" variants_size: "<<variants_size<<endl;
+        //cout<<"filesize: "<<filesize<<" variants_size: "<<variants_size<<endl;
     }
     void print_header(){
-        cout << "VCF header:\n" << header << endl;
+        //cout << "VCF header:\n" << header << endl;
     }
     void allocate_filestring(){
         filestring = (char*)malloc(variants_size);
@@ -216,18 +219,23 @@ public:
             long start, end;
             start = thr_ID*batch_infile; // inizio del batch dello specifico thread
             end = start + batch_infile; // fine del batch
-            cout << "in find start: "<<start<<" end: "<<end<<endl;
+            //cout << "in find start: "<<start<<" end: "<<end<<endl;
             for(long i=start; i<end && i<variants_size; i++){
                 filestring[i] = infile.get(); //file_streams[thr_ID].get(); //-----------------
             }
         }
+        while(filestring[variants_size-1]=='\n'){
+            variants_size--;
+        }
+        filestring[variants_size] = '\n';
+        variants_size++;
         auto after = chrono::system_clock::now();
         auto filestring_time = std::chrono::duration<double>(after - before).count();
         before = chrono::system_clock
         ::now();
         num_char = 0;
         while(num_char!=variants_size){ //conto il numero di lines e ogni volta che trovo \n salvo il char successivo come inizio della riga successiva
-            if(filestring[num_char]=='\n'){
+            if(filestring[num_char]=='\n'&& filestring[num_char+1]!='\n'){
                 new_lines_index[num_lines] = num_char+1; // PROBLEMA: funziona solo se l'ultimo char è uno /n, altrimenti si rompe
                 num_lines++;
             }
@@ -235,41 +243,37 @@ public:
         } // si potrebbe fare multithreading ma vediamo se si ha beneficio
         after = chrono::system_clock::now();
 
-        auto f_new_lines = std::chrono::duration<double>(after - before).count();
-        cout << "\nFilestring time: " << filestring_time << " s " << "New lines time: " << f_new_lines << " s\n\n";
+        auto f_new_lines = std::chrono::duration<double>(after - before).count(); 
+        //cout << /*"\nFilestring time: " <<*/ filestring_time /*<< " s " << "New lines time: " << f_new_lines << " s\n\n"*/ << endl; //da printare
     }
     void populate_var_struct(int num_threads){
         auto before = chrono::system_clock::now();
         
-        //var_df = (var*)malloc((num_lines-1) * sizeof(var)); // Usando la malloc migliora in alcuni punti peggiora in altri, il bug era il \0
-        var_df = (var*)calloc((num_lines-1), sizeof(var)); // allocating var_df
-        cout << "\nBegin tmp: \n" <<"newlines: "<<num_lines<<" num threads: "<<num_threads<<endl;
+        var_df = (var*)calloc((num_lines-1), sizeof(var)); // allocating var_df    
+        //cout << "\nBegin tmp: \n" <<"newlines: "<<num_lines<<" num threads: "<<num_threads<<endl;
         long batch_size = (num_lines-2+num_threads)/num_threads; //numero di lines che verrà processato da ogni thread
         
-        cout << "\nBatch size: "<<batch_size<<endl;
+        //cout << "\nBatch size: "<<batch_size<<endl;
         auto after = chrono::system_clock::now();
         auto pre_pragma = std::chrono::duration<double>(after - before).count();
-        cout << "Pre_pragma: " << pre_pragma << " s" << endl;
+        //cout << "Pre_pragma: " << pre_pragma << " s" << endl;
 
 #pragma omp parallel
         {
             long start, end;
             int th_ID = omp_get_thread_num();
-            cout << "\nThread id: "<<th_ID<<endl;
+            //cout << "\nThread id: "<<th_ID<<endl;
 
             start = th_ID*batch_size; // inizio del batch dello specifico thread
             end = start + batch_size; // fine del batch
 
-            cout << "\nstart: " << start << " end: " << end << endl;
+            //cout << "\nstart: " << start << " end: " << end << endl; //segfault
 
             for(long i=start; i<end && i<num_lines-1; i++){ //start e end mi dicono l'intervallo di linee che eseguirà ogni thread, quindi la i rappresenta l'iesima linea (var) che inizia a new_lines_index[i] e finisce a new_lines_index[i+1] (escluso)
-
                 var_df[i].get_vcf_line(filestring, new_lines_index[i], new_lines_index[i+1]); //qui traduco da char* a var structure la specifica line
                 var_df[i].var_number = i; // dato aggiuntivo come se fosse un altro ID interno 
-            
             }
-        
-        
+
         }
     }
 
