@@ -28,21 +28,21 @@ int main(int argc, char *argv[]){
         {
         case 'v':
             vcf_filename = optarg;
-            cout << "vcf_filename: " << vcf_filename << endl;
+            //cout << "vcf_filename: " << vcf_filename << endl;
             break;
         case 't':
             num_threadss = atoi(optarg);
             if (num_threadss == 1)
             {
-                cout << "Single thread execution, sequential process!!" << endl;
+                //cout << "Single thread execution, sequential process!!" << endl;
             }
             else
             {
-                cout << "Multithreading execution, parallelization on " << num_threadss << " threads!!" << endl;
+                //cout << "Multithreading execution, parallelization on " << num_threadss << " threads!!" << endl;
             }
             break;
         case '?':
-            cout << "Unknown option: " << optopt << endl;
+            //cout << "Unknown option: " << optopt << endl;
             break;
         }
     }
@@ -63,12 +63,20 @@ int main(int argc, char *argv[]){
         }
     }
 
-    string filename = vcf_filename;
+    string filename = vcf_filename; 
     ifstream inFile(filename);
     if(!inFile){
         cout << "ERROR: cannot open file " << filename << endl;
         return -1;
     }
+    //inFile.seekg(5033); //lunghezza header, stampa un po' di righe e basta, per vedere come sono fatte
+    //std::string test;
+    //getline(inFile, test);
+    //cout << test << endl;
+    //return -1;
+    //---------------------
+
+    
     int cont=0;
     string line;
     vcf_parsed vcf;
@@ -122,10 +130,10 @@ int main(int argc, char *argv[]){
     auto populate_var_struct = std::chrono::duration<double>(after - before).count();
 
 
-    // cout << "\nPrint from var_df: \n";
-    // for(int i=0; i<vcf.num_lines-1; i++){
-    //     vcf.var_df[i].print_var();
-    // }
+    //cout << "\nPrint from var_df: \n";
+    //for(int i=0; i<vcf.num_lines-1; i++){
+    //    vcf.var_df[i].print_var();
+    //}
 
     // cout << "\nPrint from var_df: \n";
     // for(int i=0; i<1000; i++){
@@ -136,12 +144,14 @@ int main(int argc, char *argv[]){
     //     vcf.var_df[i].print_var();
     // }
     
-    cout << "Get file size: " << get_file_size << " s" << endl;
-    cout << "get_header: " << get_header << " s" << endl;
-    cout << "find_new_lines: " << find_new_lines << " s" << endl;
-    cout << "populate_var_struct: " << populate_var_struct << " s" << endl;
+    //cout << "Get file size: " << get_file_size << " s" << endl;
+    //cout << "get_header: " << get_header << " s" << endl;
+    //cout << "find_new_lines: " << find_new_lines << " s" << endl;
+    cout << /*"populate_var_struct: " <<*/ populate_var_struct /*<< " s"*/ << endl; //Da printare
     
     free(vcf.var_df);
+    free(vcf.filestring);
+    free(vcf.new_lines_index);
     
     return 0;
 }
