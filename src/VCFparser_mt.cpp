@@ -85,7 +85,8 @@ int main(int argc, char *argv[]){
 
 // Getting the header (Saving the header into a string and storing the header size )
     before = chrono::system_clock::now();
-    vcf.get_header(&inFile); //serve per separare l'header dal resto del file
+    vcf.get_and_parse_header(&inFile); //serve per separare l'header dal resto del file
+    vcf.print_header();
     after = chrono::system_clock::now();
     auto get_header = std::chrono::duration<double>(after - before).count();
     inFile.close();
@@ -121,10 +122,10 @@ int main(int argc, char *argv[]){
     auto populate_var_struct = std::chrono::duration<double>(after - before).count();
 
 
-    cout << "\nPrint from var_df: \n";
-    for(int i=0; i<vcf.num_lines-1; i++){
-        vcf.var_df[i].print_var();
-    }
+    // cout << "\nPrint from var_df: \n";
+    // for(int i=0; i<vcf.num_lines-1; i++){
+    //     vcf.var_df[i].print_var();
+    // }
 
     // cout << "\nPrint from var_df: \n";
     // for(int i=0; i<1000; i++){

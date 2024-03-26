@@ -142,6 +142,14 @@ public:
     }
 };
 
+class header_element
+{
+public:
+    vector<string> ID;
+    vector<string> Number;
+    vector<string> Type;
+};
+
 class vcf_parsed
 {
 public:
@@ -149,6 +157,8 @@ public:
     string filename;
     var *var_df;
     string header;
+    header_element INFO;
+    header_element FORMAT; //aggiungere Filter e gli altri, magari con switch case
     char *filestring;
     int header_size=0;
     long filesize;
@@ -187,6 +197,45 @@ public:
     }
     void print_header(){
         cout << "VCF header:\n" << header << endl;
+    }
+    void get_and_parse_header(ifstream *file){
+        string line;
+        vector<string> line_el; //all the characteristics together
+        vector<string> line_el1; //each characteristic
+        vector<string> line_el2; //keys and values
+        //removing the header and storing it in vcf.header
+        
+        while (getline(*file, line) && line[0]=='#' && line[1]=='#'){
+            header.append(line + '\n');
+            header_size += line.length() + 1;
+            bool Info = (line[2]=='I');
+            bool Format = (line[2]=='F' && line[3]=='O');
+            
+            if(Info || Format){
+                boost::split(line_el, line, boost::is_any_of("><"));
+                boost::split(line_el1, line_el[1], boost::is_any_of(","));
+                for(int i=0; i<3; i++){
+                    boost::split(line_el2, line_el1[i], boost::is_any_of("="));
+                    if(Info){
+                        if(i==0) INFO.ID.push_back(line_el2[1]);
+                        if(i==1) INFO.Number.push_back(line_el2[1]);
+                        if(i==2) INFO.Type.push_back(line_el2[1]);
+                    }
+                    if(Format){
+                        if(i==0) FORMAT.ID.push_back(line_el2[1]);
+                        if(i==1) FORMAT.Number.push_back(line_el2[1]);
+                        if(i==2) FORMAT.Type.push_back(line_el2[1]);
+                    }
+                }
+            }
+        }
+        for(int i=0; i<INFO.ID.size(); i++){
+            cout<<"INFO.ID["<<i<<"]: "<<INFO.ID[i]<<" | INFO.Number["<<i<<"]: "<<INFO.Number[i]<<" | INFO.Type["<<i<<"]: "<<INFO.Type[i]<<endl;
+        }
+        header_size += line.length() + 1;
+        cout << "\nheader char: " << to_string(header_size) << endl;
+        variants_size = filesize - header_size; //ora che ho tolto l'header ho un file piu piccolo quindi una nuova size
+        cout<<"filesize: "<<filesize<<" variants_size: "<<variants_size<<endl;
     }
     void allocate_filestring(){
         filestring = (char*)malloc(variants_size);
