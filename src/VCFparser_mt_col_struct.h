@@ -6,6 +6,35 @@
 
 using namespace std;
 
+class info_flag
+{
+    public:
+    vector<bool> i_flag;
+    string name;
+};
+
+class info_string
+{
+    public:
+    vector<string> i_string;
+    string name;
+};
+
+class info_float
+{
+    public:
+    vector<float> i_float;
+    string name;
+};
+
+class info_int
+{
+    public:
+    vector<int> i_int;
+    string name;
+};
+
+
 class var_columns_df
 {
 public:
@@ -18,8 +47,14 @@ public:
     vector<float> qual;
     vector<string> filter;
     vector<string> info;
+    vector<info_float> in_float;
+    vector<info_flag> in_flag;
+    vector<info_string> in_string;
+    vector<info_int> in_int;
+    map<string,int> info_map1;
     void get_vcf_line_in_var_columns(char *line, long start, long end, long i)
     {
+        cout<<i<<"\t";
         bool find1 = false;
         long iter=0;
         string tmp="\0";
@@ -116,14 +151,84 @@ public:
                 find1 = true;
                 iter++;
                 info[i] = tmp;
+                vector<string> tmp_el;
+                boost::split(tmp_el, tmp, boost::is_any_of(";"));
+                vector<string> tmp_elems;
+                for(int ii=0; ii<tmp_el.size(); ii++){
+                    boost::split(tmp_elems, tmp_el[ii], boost::is_any_of("="));
+                    bool find_info_type = false;
+                    bool find_info_elem = false;
+                    if(tmp_elems.size()==2){
+                        
+                        while(!find_info_type){
+                            
+                            if(info_map1[tmp_elems[0]]==1){
+                                //Int
+                                
+                                int el=0;
+                                while(!find_info_elem){
+                                    if(in_int[el].name == tmp_elems[0]){
+                                        in_int[el].i_int[i] = stoi(tmp_elems[1]);
+                                        find_info_elem = true;
+                                    }
+                                    el++; 
+                                }
+                                find_info_type = true;
+                            }else if(info_map1[tmp_elems[0]]==2){
+                                //Float
+                                
+                                int el=0;
+                                while(!find_info_elem){
+                                    if(in_float[el].name == tmp_elems[0]){
+                                        in_float[el].i_float[i] = stof(tmp_elems[1]);
+                                        find_info_elem = true;
+                                    } 
+                                    el++;
+                                }
+                                find_info_type = true;
+                            }else if(info_map1[tmp_elems[0]]==3){
+                                //String
+                                
+                                int el=0;
+                                while(!find_info_elem){
+                                    if(in_string[el].name == tmp_elems[0]){
+                                        in_string[el].i_string[i] = tmp_elems[1];
+                                        find_info_elem = true;
+                                    } 
+                                    el++;
+                                }
+                                find_info_type = true;
+                            }else{
+                               
+                                find_info_type = true;
+                            }
+                        }
+                    }else{
+                        if(info_map1[tmp_elems[0]]==0){
+                                //Flag
+                                
+                                int el=0;
+                                while(!find_info_elem){
+                                    if(in_flag[el].name == tmp_elems[0]){
+                                        in_flag[el].i_flag[i] = 1;
+                                        find_info_elem = true;
+                                    } 
+                                    el++;
+                                }
+                                find_info_type = true;
+                    }
+                    tmp_elems.clear();
+                    }
+                }
             }else{
                 tmp += line[start+iter]; // anche qui andrebbero separate le info e creati dizionari con keys e values
                 iter++;
                 
             }
         }
-        
-    }
+        }
+
+    
     void print_var_columns(long num_lines){
         for(long i=0; i<num_lines; i++){
             cout << "Var" << var_number[i] << ":\t";
@@ -134,7 +239,21 @@ public:
             cout << alt[i] << "\t";
             cout << to_string(qual[i]) << "\t";
             cout << filter[i] << "\t";
-            cout << info[i] << endl;
+            cout << info[i] << "\t";
+            for(int j=0; j<in_flag.size(); j++){
+                cout<<in_flag[j].name<<": "<<in_flag[j].i_flag[i]<<", ";
+            }
+            for(int j=0; j<in_int.size(); j++){
+                cout<<in_int[j].name<<": "<<in_int[j].i_int[i]<<", ";
+            }
+            for(int j=0; j<in_float.size(); j++){
+                cout<<in_float[j].name<<": "<<in_float[j].i_float[i]<<", ";
+            }
+            for(int j=0; j<in_string.size(); j++){
+                cout<<in_string[j].name<<": "<<in_string[j].i_string[i]<<", ";
+            }
+            cout<<endl;
+
         }
     }    
 };
@@ -287,6 +406,15 @@ public:
     int total_values=0;
     int alt_values=0;
     int no_alt_values=0;
+    int ints_alt=0;
+    int floats_alt=0;
+    int strings_alt=0;
+    int flags_alt=0;
+    int ints=0;
+    int floats=0;
+    int strings=0;
+    int flags=0;
+
 };
 
 class vcf_parsed
@@ -297,6 +425,7 @@ public:
     var *var_df;
     string header;
     header_element INFO;
+    map<string,int> info_map; //Flag=0, Int=1, Float=2, String=3;
     header_element FORMAT; //aggiungere Filter e gli altri, magari con switch case
     char *filestring;
     int header_size=0;
@@ -381,6 +510,7 @@ public:
         variants_size = filesize - header_size; //ora che ho tolto l'header ho un file piu piccolo quindi una nuova size
         cout<<"filesize: "<<filesize<<" variants_size: "<<variants_size<<endl;
     }
+    
     void allocate_filestring(){
         filestring = (char*)malloc(variants_size);
     }
@@ -436,6 +566,147 @@ public:
         auto f_new_lines = std::chrono::duration<double>(after - before).count(); 
         //cout << /*"\nFilestring time: " <<*/ filestring_time /*<< " s " << "New lines time: " << f_new_lines << " s\n\n"*/ << endl; //da printare
     }
+    void create_info_vectors(){
+        info_flag info_flag_tmp;
+        info_float info_float_tmp;
+        info_int info_int_tmp;
+        info_string info_string_tmp;
+        for(int i=0; i<INFO.total_values; i++){
+            if(strcmp(&INFO.Number[i][0], "A") == 0){
+                if(strcmp(&INFO.Type[i][0], "Integer")==0){
+                    INFO.ints_alt++;
+                    info_map[INFO.ID[i]] = 1;
+                }
+                if(strcmp(&INFO.Type[i][0], "Float")==0){
+                    INFO.floats_alt++;
+                    info_map[INFO.ID[i]] = 2;
+                }
+                if(strcmp(&INFO.Type[i][0], "String")==0){
+                    INFO.strings_alt++;
+                    info_map[INFO.ID[i]] = 3;
+                }
+                if(strcmp(&INFO.Type[i][0], "Flag")==0){
+                    INFO.flags_alt++;
+                    info_map[INFO.ID[i]] = 0;
+                }
+            }else if((strcmp(&INFO.Number[i][0], "1") == 0)||(strcmp(&INFO.Number[i][0], "0") == 0)){
+                if(strcmp(&INFO.Type[i][0], "Integer")==0){
+                    INFO.ints++;
+                    info_int_tmp.name = INFO.ID[i];
+                    info_int_tmp.i_int.resize(num_lines-1, 0);
+                    var_columns.in_int.push_back(info_int_tmp);
+                    info_map[INFO.ID[i]] = 1;
+                    var_columns.info_map1[INFO.ID[i]] = 1;
+                }
+                if(strcmp(&INFO.Type[i][0], "Float")==0){
+                    INFO.floats++;
+                    info_float_tmp.name = INFO.ID[i];
+                    info_float_tmp.i_float.resize(num_lines-1, 0);
+                    var_columns.in_float.push_back(info_float_tmp);
+                    info_map[INFO.ID[i]] = 2;
+                    var_columns.info_map1[INFO.ID[i]] = 2;
+                }
+                if(strcmp(&INFO.Type[i][0], "String")==0){
+                    INFO.strings++;
+                    info_string_tmp.name = INFO.ID[i];
+                    info_string_tmp.i_string.resize(num_lines-1, "\0");
+                    var_columns.in_string.push_back(info_string_tmp);
+                    info_map[INFO.ID[i]] = 3;
+                    var_columns.info_map1[INFO.ID[i]] = 3;
+                }
+                if(strcmp(&INFO.Type[i][0], "Flag")==0){
+                    INFO.flags++;
+                    info_flag_tmp.name = INFO.ID[i];
+                    info_flag_tmp.i_flag.resize(num_lines-1, 0);
+                    var_columns.in_flag.push_back(info_flag_tmp);
+                    info_map[INFO.ID[i]] = 0;
+                    var_columns.info_map1[INFO.ID[i]] = 0;
+                }
+            }
+        }
+        
+
+        
+    }
+    void print_info_map(){
+        for(const auto& element : info_map){
+            cout<<element.first<<": "<<element.second<<endl;
+        }
+    }
+    void print_info(){
+        cout<<"Flags: "<<endl;
+        for(int i=0; i<var_columns.in_flag.size(); i++){
+            cout<<var_columns.in_flag[i].name<<": ";
+            for(int j=0; j<10; j++){
+                cout<<var_columns.in_flag[i].i_flag[j]<<" ";
+            }
+            cout<<endl;
+        }
+        cout<<endl;
+        cout<<"Floats: "<<endl;
+        for(int i=0; i<var_columns.in_float.size(); i++){
+            cout<<var_columns.in_float[i].name<<": ";
+            for(int j=0; j<10; j++){
+                cout<<var_columns.in_float[i].i_float[j]<<" ";
+            }
+            cout<<endl;
+        }
+        cout<<endl;
+        cout<<"Strings: "<<endl;
+        for(int i=0; i<var_columns.in_string.size(); i++){
+            cout<<var_columns.in_string[i].name<<": ";
+            for(int j=0; j<10; j++){
+                cout<<var_columns.in_string[i].i_string[j]<<" ";
+            }
+            cout<<endl;
+        }
+        cout<<endl;
+        cout<<"Ints: "<<endl;
+        for(int i=0; i<var_columns.in_int.size(); i++){
+            cout<<var_columns.in_int[i].name<<": ";
+            for(int j=0; j<10; j++){
+                cout<<var_columns.in_int[i].i_int[j]<<" ";
+            }
+            cout<<endl;
+        }
+        cout<<endl;
+        // cout<<"Flags: "<<endl;
+        // for(int i=0; i<var_columns.in_flag.size(); i++){
+        //     cout<<var_columns.in_flag[i].name<<": ";
+        //     for(int j=0; j<var_columns.in_flag[i].i_flag.size(); j++){
+        //         cout<<var_columns.in_flag[i].i_flag[j]<<" ";
+        //     }
+        //     cout<<endl;
+        // }
+        // cout<<endl;
+        // cout<<"Floats: "<<endl;
+        // for(int i=0; i<var_columns.in_float.size(); i++){
+        //     cout<<var_columns.in_float[i].name<<": ";
+        //     for(int j=0; j<var_columns.in_float[i].i_float.size(); j++){
+        //         cout<<var_columns.in_float[i].i_float[j]<<" ";
+        //     }
+        //     cout<<endl;
+        // }
+        // cout<<endl;
+        // cout<<"Strings: "<<endl;
+        // for(int i=0; i<var_columns.in_string.size(); i++){
+        //     cout<<var_columns.in_string[i].name<<": ";
+        //     for(int j=0; j<var_columns.in_string[i].i_string.size(); j++){
+        //         cout<<var_columns.in_string[i].i_string[j]<<" ";
+        //     }
+        //     cout<<endl;
+        // }
+        // cout<<endl;
+        // cout<<"Ints: "<<endl;
+        // for(int i=0; i<var_columns.in_int.size(); i++){
+        //     cout<<var_columns.in_int[i].name<<": ";
+        //     for(int j=0; j<var_columns.in_int[i].i_int.size(); j++){
+        //         cout<<var_columns.in_int[i].i_int[j]<<" ";
+        //     }
+        //     cout<<endl;
+        // }
+        // cout<<endl;
+    }
     void reserve_var_columns(){
         var_columns.var_number.resize(num_lines-1);
         var_columns.chrom.resize(num_lines-1);
@@ -459,7 +730,7 @@ public:
 
             start = th_ID*batch_size; // inizio del batch dello specifico thread
             end = start + batch_size; // fine del batch
-
+            cout<<"\nNum Lines: "<<num_lines-2<<endl;
             for(long i=start; i<end && i<num_lines-1; i++){ //start e end mi dicono l'intervallo di linee che eseguirà ogni thread, quindi la i rappresenta l'iesima linea (var) che inizia a new_lines_index[i] e finisce a new_lines_index[i+1] (escluso)
                 var_columns.var_number[i] = i;
                 //cout<<"Var_number[i]: "<<var_columns.var_number[i]<<endl;

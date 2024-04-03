@@ -13,7 +13,7 @@
 #include <boost/algorithm/string/predicate.hpp>
 #include <filesystem>
 #include <omp.h>
-#include "VCFparser_mt_col_struct.h"
+#include "VCFparser_mt_struct.h"
 
 using namespace std;
 
@@ -130,6 +130,9 @@ int main(int argc, char *argv[]){
     auto populate_var_struct = std::chrono::duration<double>(after - before).count();
 
     before = chrono::system_clock::now();
+    vcf.create_info_vectors();
+    vcf.print_info_map();
+    vcf.print_info();
     vcf.reserve_var_columns();
     after = chrono::system_clock::now();
     auto reserve_var_columns = std::chrono::duration<double>(after - before).count();
