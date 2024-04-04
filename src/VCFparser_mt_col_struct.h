@@ -54,7 +54,7 @@ public:
     map<string,int> info_map1;
     void get_vcf_line_in_var_columns(char *line, long start, long end, long i)
     {
-        cout<<i<<"\t";
+        //cout<<i<<"\t";
         bool find1 = false;
         long iter=0;
         string tmp="\0";
@@ -199,12 +199,12 @@ public:
                                 }
                                 find_info_type = true;
                             }else{
-                               
+                                cout<<"\n\nhere\n\n";
                                 find_info_type = true;
                             }
                         }
                     }else{
-                        if(info_map1[tmp_elems[0]]==0){
+                        if((info_map1[tmp_elems[0]]==0) && strcmp(&tmp_elems[0][0],"")){
                                 //Flag
                                 
                                 int el=0;
@@ -215,7 +215,7 @@ public:
                                     } 
                                     el++;
                                 }
-                                find_info_type = true;
+                                
                     }
                     tmp_elems.clear();
                     }
@@ -226,7 +226,7 @@ public:
                 
             }
         }
-        }
+    }
 
     
     void print_var_columns(long num_lines){
@@ -504,7 +504,7 @@ public:
         }
         INFO.total_values = INFO.ID.size();
         INFO.no_alt_values = INFO.total_values - INFO.alt_values;
-        cout<<"INFO.total_values: "<< INFO.total_values << " INFO.alt_values: "<<INFO.alt_values<<" INFO.no_alt_values: "<<INFO.alt_values<<endl;
+        cout<<"INFO.total_values: "<< INFO.total_values << " INFO.alt_values: "<<INFO.alt_values<<" INFO.no_alt_values: "<<INFO.no_alt_values<<endl;
         header_size += line.length() + 1;
         cout << "\nheader char: " << to_string(header_size) << endl;
         variants_size = filesize - header_size; //ora che ho tolto l'header ho un file piu piccolo quindi una nuova size
@@ -625,6 +625,12 @@ public:
             }
         }
         
+        var_columns.in_flag.resize(INFO.flags);
+        var_columns.in_int.resize(INFO.ints);
+        var_columns.in_float.resize(INFO.floats);
+        var_columns.in_string.resize(INFO.strings);
+
+        
 
         
     }
@@ -634,39 +640,43 @@ public:
         }
     }
     void print_info(){
-        cout<<"Flags: "<<endl;
+        cout<<"Flags size: "<<var_columns.in_flag.size()<<endl;
         for(int i=0; i<var_columns.in_flag.size(); i++){
             cout<<var_columns.in_flag[i].name<<": ";
             for(int j=0; j<10; j++){
                 cout<<var_columns.in_flag[i].i_flag[j]<<" ";
             }
+            cout<<" size: "<<var_columns.in_flag[i].i_flag.size();
             cout<<endl;
         }
         cout<<endl;
-        cout<<"Floats: "<<endl;
+        cout<<"Floats size: "<<var_columns.in_float.size()<<endl;
         for(int i=0; i<var_columns.in_float.size(); i++){
             cout<<var_columns.in_float[i].name<<": ";
             for(int j=0; j<10; j++){
                 cout<<var_columns.in_float[i].i_float[j]<<" ";
             }
+            cout<<" size: "<<var_columns.in_float[i].i_float.size();
             cout<<endl;
         }
         cout<<endl;
-        cout<<"Strings: "<<endl;
+        cout<<"Strings size: "<<var_columns.in_string.size()<<endl;
         for(int i=0; i<var_columns.in_string.size(); i++){
             cout<<var_columns.in_string[i].name<<": ";
             for(int j=0; j<10; j++){
                 cout<<var_columns.in_string[i].i_string[j]<<" ";
             }
+            cout<<" size: "<<var_columns.in_string[i].i_string.size();
             cout<<endl;
         }
         cout<<endl;
-        cout<<"Ints: "<<endl;
+        cout<<"Ints size: "<<var_columns.in_int.size()<<endl;
         for(int i=0; i<var_columns.in_int.size(); i++){
             cout<<var_columns.in_int[i].name<<": ";
             for(int j=0; j<10; j++){
                 cout<<var_columns.in_int[i].i_int[j]<<" ";
             }
+            cout<<" size: "<<var_columns.in_int[i].i_int.size();
             cout<<endl;
         }
         cout<<endl;

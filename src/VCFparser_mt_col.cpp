@@ -13,7 +13,7 @@
 #include <boost/algorithm/string/predicate.hpp>
 #include <filesystem>
 #include <omp.h>
-#include "VCFparser_mt_struct.h"
+#include "VCFparser_mt_col_struct.h"
 
 using namespace std;
 
@@ -151,10 +151,10 @@ int main(int argc, char *argv[]){
     cout << "\nPrint from var_columns: \n";
     vcf.var_columns.print_var_columns(5);
 
-    cout << "\nPrint from var_df: \n";
-    for(int i=0; i<5; i++){
-        vcf.var_df[i].print_var();
-    }
+    // cout << "\nPrint from var_df: \n";
+    // for(int i=0; i<5; i++){
+    //     vcf.var_df[i].print_var();
+    // }
     // cout << "\n\n\nLAST 100: \n\n\n";
     // for(int i=vcf.num_lines - 101; i<vcf.num_lines - 1; i++){
     //     vcf.var_df[i].print_var();
@@ -168,7 +168,7 @@ int main(int argc, char *argv[]){
     cout << "populate_var_columns: " << populate_var_columns << " s" << endl;
 
     
-    free(vcf.var_df);
+    //free(vcf.var_df);
     free(vcf.filestring);
     free(vcf.new_lines_index);
     
