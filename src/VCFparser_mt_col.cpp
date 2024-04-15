@@ -94,7 +94,7 @@ int main(int argc, char *argv[]){
 // Getting the header (Saving the header into a string and storing the header size )
     before = chrono::system_clock::now();
     vcf.get_and_parse_header(&inFile); //serve per separare l'header dal resto del file
-    vcf.print_header();
+    //vcf.print_header();
     after = chrono::system_clock::now();
     auto get_header = std::chrono::duration<double>(after - before).count();
     inFile.close();
@@ -131,8 +131,8 @@ int main(int argc, char *argv[]){
 
     before = chrono::system_clock::now();
     vcf.create_info_vectors();
-    vcf.print_info_map();
-    vcf.print_info();
+    //vcf.print_info_map();
+    //vcf.print_info();
     vcf.reserve_var_columns();
     after = chrono::system_clock::now();
     auto reserve_var_columns = std::chrono::duration<double>(after - before).count();
@@ -142,14 +142,13 @@ int main(int argc, char *argv[]){
     after = chrono::system_clock::now();
     auto populate_var_columns = std::chrono::duration<double>(after - before).count();
 
-
     // cout << "\nPrint from var_df: \n";
     // for(int i=0; i<vcf.num_lines-1; i++){
     //    vcf.var_df[i].print_var();
     // }
 
-    cout << "\nPrint from var_columns: \n";
-    vcf.var_columns.print_var_columns(5);
+    //cout << "\nPrint from var_columns: \n";
+    //vcf.var_columns.print_var_columns(5);
 
     // cout << "\nPrint from var_df: \n";
     // for(int i=0; i<5; i++){

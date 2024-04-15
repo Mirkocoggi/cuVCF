@@ -93,8 +93,8 @@ int main(int argc, char *argv[]){
 
 // Getting the header (Saving the header into a string and storing the header size )
     before = chrono::system_clock::now();
-    vcf.get_and_parse_header(&inFile); //serve per separare l'header dal resto del file
-    vcf.print_header();
+    vcf.get_header(&inFile); //serve per separare l'header dal resto del file
+    //vcf.print_header();
     after = chrono::system_clock::now();
     auto get_header = std::chrono::duration<double>(after - before).count();
     inFile.close();
@@ -110,7 +110,7 @@ int main(int argc, char *argv[]){
 
 // PRINT FROM FILESTRING
     
-    // cout<<"\nnum_char: "<<vcf.variants_size<<endl;
+    //cout<<"\nnum_char: "<<vcf.variants_size<<endl;
     // for(long i=0; i<vcf.variants_size; i++){
     //     cout << vcf.filestring[i];
     // }
@@ -144,10 +144,10 @@ int main(int argc, char *argv[]){
     //     vcf.var_df[i].print_var();
     // }
     
-    //cout << "Get file size: " << get_file_size << " s" << endl;
-    //cout << "get_header: " << get_header << " s" << endl;
-    //cout << "find_new_lines: " << find_new_lines << " s" << endl;
-    cout << /*"populate_var_struct: " <<*/ populate_var_struct /*<< " s"*/ << endl; //Da printare
+    cout << "Get file size: " << get_file_size << " s" << endl;
+    cout << "get_header: " << get_header << " s" << endl;
+    cout << "find_new_lines: " << find_new_lines << " s" << endl;
+    cout << "populate_var_struct: " << populate_var_struct << " s" << endl; //Da printare
     
     free(vcf.var_df);
     free(vcf.filestring);

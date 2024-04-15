@@ -3,7 +3,6 @@
 #include <chrono>
 #include <boost/algorithm/string.hpp>
 
-
 using namespace std;
 
 class info_flag
@@ -163,7 +162,7 @@ public:
                         while(!find_info_type){
                             
                             if(info_map1[tmp_elems[0]]==1){
-                                //Int
+                                //Int - divisione 
                                 
                                 int el=0;
                                 while(!find_info_elem){
@@ -199,7 +198,7 @@ public:
                                 }
                                 find_info_type = true;
                             }else{
-                                cout<<"\n\nhere\n\n";
+                                //cout<<"\n\nhere\n\n";
                                 find_info_type = true;
                             }
                         }
@@ -499,38 +498,29 @@ public:
                 }
             }
         }
-        for(int i=0; i<INFO.ID.size(); i++){
-            cout<<"INFO.ID["<<i<<"]: "<<INFO.ID[i]<<" | INFO.Number["<<i<<"]: "<<INFO.Number[i]<<" | INFO.Type["<<i<<"]: "<<INFO.Type[i]<<endl;
-        }
+        //for(int i=0; i<INFO.ID.size(); i++){
+        //    cout<<"INFO.ID["<<i<<"]: "<<INFO.ID[i]<<" | INFO.Number["<<i<<"]: "<<INFO.Number[i]<<" | INFO.Type["<<i<<"]: "<<INFO.Type[i]<<endl;
+        //}
         INFO.total_values = INFO.ID.size();
         INFO.no_alt_values = INFO.total_values - INFO.alt_values;
-        cout<<"INFO.total_values: "<< INFO.total_values << " INFO.alt_values: "<<INFO.alt_values<<" INFO.no_alt_values: "<<INFO.no_alt_values<<endl;
+        //cout<<"INFO.total_values: "<< INFO.total_values << " INFO.alt_values: "<<INFO.alt_values<<" INFO.no_alt_values: "<<INFO.no_alt_values<<endl;
         header_size += line.length() + 1;
-        cout << "\nheader char: " << to_string(header_size) << endl;
+        //cout << "\nheader char: " << to_string(header_size) << endl;
         variants_size = filesize - header_size; //ora che ho tolto l'header ho un file piu piccolo quindi una nuova size
-        cout<<"filesize: "<<filesize<<" variants_size: "<<variants_size<<endl;
+        //cout<<"filesize: "<<filesize<<" variants_size: "<<variants_size<<endl;
     }
     
     void allocate_filestring(){
         filestring = (char*)malloc(variants_size);
     }
     void find_new_lines_index(string w_filename, int num_threads){ //popola anche il filestring
-        long num_char=0;
         new_lines_index = (long*)malloc(variants_size); //per ora ho esagerato con la dimensione (è come se permettessi tutti \n. Si puo ridurre (euristicamente), pero ipotizzarlo è meglio perche senno devo passare il file due volte solo per vedere dove iniziano le linee)
         new_lines_index[0] = 0; //il primo elemento lo metto a zero per indicare l'inizio della prima linea
         num_lines++;
+        long tmp_num_lines[num_threads];
+        
         auto before = chrono::system_clock::now();
-        long batch_infile = (variants_size - 1 + num_threads)/num_threads; //numero di char che verrà processato da ogni thread
-
-        /*-----------------------------------------------------
-        std::ifstream file_streams[num_threads]; //std::vector<std::ifstream> file_streams(num_threads); // std::ifstream file_streams[num_threads] ??
-        for (int i = 0; i < num_threads; i++) {
-            // Set the offset for this thread
-            int start = header_size + i*batch_infile;
-            file_streams[i].open(w_filename); // Open the file stream for this thread
-            file_streams[i].seekg(start, ios::cur); // Set the file stream's read position to the start offset
-        }
-        */        
+        long batch_infile = (variants_size - 1 + num_threads)/num_threads; //numero di char che verrà processato da ogni thread        
 #pragma omp parallel
         {
             int thr_ID = omp_get_thread_num();
@@ -539,9 +529,17 @@ public:
             long start, end;
             start = thr_ID*batch_infile; // inizio del batch dello specifico thread
             end = start + batch_infile; // fine del batch
-            //cout << "in find start: "<<start<<" end: "<<end<<endl;
+            
+            tmp_num_lines[thr_ID] = 0;
+            if(thr_ID==0){
+                tmp_num_lines[0] = 1;
+            } 
+
             for(long i=start; i<end && i<variants_size; i++){
-                filestring[i] = infile.get(); //file_streams[thr_ID].get(); //-----------------
+                filestring[i] = infile.get();
+                if(filestring[i]=='\n'){
+                    tmp_num_lines[thr_ID] = tmp_num_lines[thr_ID] + 1;
+                }
             }
         }
         while(filestring[variants_size-1]=='\n'){
@@ -551,20 +549,36 @@ public:
         variants_size++;
         auto after = chrono::system_clock::now();
         auto filestring_time = std::chrono::duration<double>(after - before).count();
-        before = chrono::system_clock
-        ::now();
-        num_char = 0;
-        while(num_char!=variants_size){ //conto il numero di lines e ogni volta che trovo \n salvo il char successivo come inizio della riga successiva
-            if(filestring[num_char]=='\n'&& filestring[num_char+1]!='\n'){
-                new_lines_index[num_lines] = num_char+1; // PROBLEMA: funziona solo se l'ultimo char è uno /n, altrimenti si rompe
-                num_lines++;
+        
+        before = chrono::system_clock::now();
+#pragma omp parallel
+        {
+            int thr_ID = omp_get_thread_num();
+            long start, end;
+            start = thr_ID*batch_infile; // inizio del batch dello specifico thread
+            end = start + batch_infile; // fine del batch
+            long startNLI = 1;
+            if(thr_ID!=0){
+                for(int i=0; i<thr_ID; i++){
+                    startNLI = startNLI + tmp_num_lines[i];
+                }
             }
-            num_char++;
-        } // si potrebbe fare multithreading ma vediamo se si ha beneficio
+            long lineCount = 0;
+            for(long i=start; i<end && i<variants_size; i++){
+                if(filestring[i]=='\n'&& filestring[i+1]!='\n'){
+                    new_lines_index[startNLI+lineCount] = i+1; // PROBLEMA: funziona solo se l'ultimo char è uno /n, altrimenti si rompe
+                    lineCount++;
+                }
+            }
+        }
+        num_lines = tmp_num_lines[0];
+        for(int i=1; i<num_threads; i++){
+            num_lines= num_lines + tmp_num_lines[i];
+        }
         after = chrono::system_clock::now();
-
         auto f_new_lines = std::chrono::duration<double>(after - before).count(); 
-        //cout << /*"\nFilestring time: " <<*/ filestring_time /*<< " s " << "New lines time: " << f_new_lines << " s\n\n"*/ << endl; //da printare
+        //cout << "\nFilestring time: " << filestring_time << " s " << "New lines time: " << f_new_lines << " s\n\n" << endl;
+
     }
     void create_info_vectors(){
         info_flag info_flag_tmp;
@@ -679,7 +693,7 @@ public:
             cout<<" size: "<<var_columns.in_int[i].i_int.size();
             cout<<endl;
         }
-        cout<<endl;
+        //cout<<endl;
         // cout<<"Flags: "<<endl;
         // for(int i=0; i<var_columns.in_flag.size(); i++){
         //     cout<<var_columns.in_flag[i].name<<": ";
@@ -727,7 +741,7 @@ public:
         var_columns.qual.resize(num_lines-1);
         var_columns.filter.resize(num_lines-1);
         var_columns.info.resize(num_lines-1);
-        cout<<"Finish resize!"<<endl;
+        //cout<<"Finish resize!"<<endl;
     }
     void populate_var_columns(int num_threads){
         long batch_size = (num_lines-2+num_threads)/num_threads;
@@ -740,7 +754,7 @@ public:
 
             start = th_ID*batch_size; // inizio del batch dello specifico thread
             end = start + batch_size; // fine del batch
-            cout<<"\nNum Lines: "<<num_lines-2<<endl;
+            //cout<<"\nNum Lines: "<<num_lines-2<<endl;
             for(long i=start; i<end && i<num_lines-1; i++){ //start e end mi dicono l'intervallo di linee che eseguirà ogni thread, quindi la i rappresenta l'iesima linea (var) che inizia a new_lines_index[i] e finisce a new_lines_index[i+1] (escluso)
                 var_columns.var_number[i] = i;
                 //cout<<"Var_number[i]: "<<var_columns.var_number[i]<<endl;

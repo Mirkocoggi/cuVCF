@@ -39,7 +39,13 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
-                pos = stoul(tmp); // da cambiare, in futuro
+                try{
+                    pos = stoul(tmp); // da cambiare, in futuro
+                }catch(const std::exception& e) {
+                    // Handle any exception
+                    std::cerr << "Error occurred: " << e.what() << std::endl;
+                    std::cerr << "Value of tmp: " << tmp << " at iter " << iter << std::endl;
+                }
             }else{
                 tmp += line[start+iter];
                 iter++;
@@ -82,7 +88,13 @@ public:
                 find1 = true;
                 iter++;
                 if(strcmp(&tmp[0], ".")){
-                    qual = stof(tmp); // da cambiare, in futuro
+                    try{
+                        qual = stof(tmp); // da cambiare, in futuro
+                    }catch(const std::exception& e) {
+                        // Handle any exception
+                        std::cerr << "Error occurred: " << e.what() << std::endl;
+                        std::cerr << "Value of tmp: " << tmp << " at iter " << iter << std::endl;
+                    }
                 }else{
                     qual = 0.0;
                 }
@@ -145,14 +157,6 @@ public:
     }
 };
 
-class header_element
-{
-public:
-    vector<string> ID;
-    vector<string> Number;
-    vector<string> Type;
-};
-
 class vcf_parsed
 {
 public:
@@ -160,8 +164,6 @@ public:
     string filename;
     var *var_df;
     string header;
-    header_element INFO;
-    header_element FORMAT; //aggiungere Filter e gli altri, magari con switch case
     char *filestring;
     int header_size=0;
     long filesize;
@@ -201,65 +203,18 @@ public:
     void print_header(){
         //cout << "VCF header:\n" << header << endl;
     }
-    void get_and_parse_header(ifstream *file){
-        string line;
-        vector<string> line_el; //all the characteristics together
-        vector<string> line_el1; //each characteristic
-        vector<string> line_el2; //keys and values
-        //removing the header and storing it in vcf.header
-        
-        while (getline(*file, line) && line[0]=='#' && line[1]=='#'){
-            header.append(line + '\n');
-            header_size += line.length() + 1;
-            bool Info = (line[2]=='I');
-            bool Format = (line[2]=='F' && line[3]=='O');
-            
-            if(Info || Format){
-                boost::split(line_el, line, boost::is_any_of("><"));
-                boost::split(line_el1, line_el[1], boost::is_any_of(","));
-                for(int i=0; i<3; i++){
-                    boost::split(line_el2, line_el1[i], boost::is_any_of("="));
-                    if(Info){
-                        if(i==0) INFO.ID.push_back(line_el2[1]);
-                        if(i==1) INFO.Number.push_back(line_el2[1]);
-                        if(i==2) INFO.Type.push_back(line_el2[1]);
-                    }
-                    if(Format){
-                        if(i==0) FORMAT.ID.push_back(line_el2[1]);
-                        if(i==1) FORMAT.Number.push_back(line_el2[1]);
-                        if(i==2) FORMAT.Type.push_back(line_el2[1]);
-                    }
-                }
-            }
-        }
-        for(int i=0; i<INFO.ID.size(); i++){
-            cout<<"INFO.ID["<<i<<"]: "<<INFO.ID[i]<<" | INFO.Number["<<i<<"]: "<<INFO.Number[i]<<" | INFO.Type["<<i<<"]: "<<INFO.Type[i]<<endl;
-        }
-        header_size += line.length() + 1;
-        cout << "\nheader char: " << to_string(header_size) << endl;
-        variants_size = filesize - header_size; //ora che ho tolto l'header ho un file piu piccolo quindi una nuova size
-        cout<<"filesize: "<<filesize<<" variants_size: "<<variants_size<<endl;
-    }
     void allocate_filestring(){
         filestring = (char*)malloc(variants_size);
     }
     void find_new_lines_index(string w_filename, int num_threads){ //popola anche il filestring
-        long num_char=0;
         new_lines_index = (long*)malloc(variants_size); //per ora ho esagerato con la dimensione (è come se permettessi tutti \n. Si puo ridurre (euristicamente), pero ipotizzarlo è meglio perche senno devo passare il file due volte solo per vedere dove iniziano le linee)
         new_lines_index[0] = 0; //il primo elemento lo metto a zero per indicare l'inizio della prima linea
         num_lines++;
+        long tmp_num_lines[num_threads];
+        
         auto before = chrono::system_clock::now();
         long batch_infile = (variants_size - 1 + num_threads)/num_threads; //numero di char che verrà processato da ogni thread
-
-        /*-----------------------------------------------------
-        std::ifstream file_streams[num_threads]; //std::vector<std::ifstream> file_streams(num_threads); // std::ifstream file_streams[num_threads] ??
-        for (int i = 0; i < num_threads; i++) {
-            // Set the offset for this thread
-            int start = header_size + i*batch_infile;
-            file_streams[i].open(w_filename); // Open the file stream for this thread
-            file_streams[i].seekg(start, ios::cur); // Set the file stream's read position to the start offset
-        }
-        */        
+ 
 #pragma omp parallel
         {
             int thr_ID = omp_get_thread_num();
@@ -268,33 +223,60 @@ public:
             long start, end;
             start = thr_ID*batch_infile; // inizio del batch dello specifico thread
             end = start + batch_infile; // fine del batch
-            //cout << "in find start: "<<start<<" end: "<<end<<endl;
+            
+            tmp_num_lines[thr_ID] = 0;
+            if(thr_ID==0){
+                tmp_num_lines[0] = 1;
+            } 
+
             for(long i=start; i<end && i<variants_size; i++){
-                filestring[i] = infile.get(); //file_streams[thr_ID].get(); //-----------------
+                filestring[i] = infile.get();
+                if(filestring[i]=='\n'){
+                    tmp_num_lines[thr_ID] = tmp_num_lines[thr_ID] + 1;
+                }
             }
+            
         }
+
         while(filestring[variants_size-1]=='\n'){
             variants_size--;
+            tmp_num_lines[num_threads]--;
         }
         filestring[variants_size] = '\n';
         variants_size++;
+
+#pragma omp parallel
+        {
+            int thr_ID = omp_get_thread_num();
+            long start, end;
+            start = thr_ID*batch_infile; // inizio del batch dello specifico thread
+            end = start + batch_infile; // fine del batch
+            long startNLI = 1;
+            if(thr_ID!=0){
+                for(int i=0; i<thr_ID; i++){
+                    startNLI = startNLI + tmp_num_lines[i];
+                }
+            }
+            long lineCount = 0;
+            for(long i=start; i<end && i<variants_size; i++){
+                if(filestring[i]=='\n'&& filestring[i+1]!='\n'){
+                    new_lines_index[startNLI+lineCount] = i+1; // PROBLEMA: funziona solo se l'ultimo char è uno /n, altrimenti si rompe
+                    lineCount++;
+                }
+            }
+        }
+
+        num_lines = tmp_num_lines[0];
+        for(int i=1; i<num_threads; i++){
+            num_lines= num_lines + tmp_num_lines[i];
+        }
+
         auto after = chrono::system_clock::now();
         auto filestring_time = std::chrono::duration<double>(after - before).count();
-        before = chrono::system_clock
-        ::now();
-        num_char = 0;
-        while(num_char!=variants_size){ //conto il numero di lines e ogni volta che trovo \n salvo il char successivo come inizio della riga successiva
-            if(filestring[num_char]=='\n'&& filestring[num_char+1]!='\n'){
-                new_lines_index[num_lines] = num_char+1; // PROBLEMA: funziona solo se l'ultimo char è uno /n, altrimenti si rompe
-                num_lines++;
-            }
-            num_char++;
-        } // si potrebbe fare multithreading ma vediamo se si ha beneficio
-        after = chrono::system_clock::now();
 
-        auto f_new_lines = std::chrono::duration<double>(after - before).count(); 
-        //cout << /*"\nFilestring time: " <<*/ filestring_time /*<< " s " << "New lines time: " << f_new_lines << " s\n\n"*/ << endl; //da printare
+        //cout << "\nFilestring time: " << filestring_time << " s " << "New lines time: " << f_new_lines << " s\n\n" << endl;
     }
+
     void populate_var_struct(int num_threads){
         auto before = chrono::system_clock::now();
         
