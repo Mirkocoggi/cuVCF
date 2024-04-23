@@ -1,0 +1,924 @@
+Th 1:
+Get file size: 9.647e-06 s
+get_header: 0.000101743 s
+find_new_lines: 192.336 s
+populate_var_struct: 3.54584 s
+reserve: 0.324642 s
+populate_var_columns: 20.4916 s
+-----
+Get file size: 1.0741e-05 s
+get_header: 0.00010539 s
+find_new_lines: 192.31 s
+populate_var_struct: 3.53684 s
+reserve: 0.325416 s
+populate_var_columns: 20.6278 s
+-----
+Get file size: 1.0249e-05 s
+get_header: 0.000106402 s
+find_new_lines: 192.437 s
+populate_var_struct: 3.55332 s
+reserve: 0.326092 s
+populate_var_columns: 20.3754 s
+-----
+Get file size: 9.328e-06 s
+get_header: 0.000103075 s
+find_new_lines: 192.419 s
+populate_var_struct: 3.55939 s
+reserve: 0.326636 s
+populate_var_columns: 20.4975 s
+-----
+Get file size: 9.779e-06 s
+get_header: 0.00013219 s
+find_new_lines: 199.785 s
+populate_var_struct: 3.55127 s
+reserve: 0.326978 s
+populate_var_columns: 20.4701 s
+-----
+Get file size: 9.788e-06 s
+get_header: 0.000104358 s
+find_new_lines: 192.425 s
+populate_var_struct: 3.5685 s
+reserve: 0.326483 s
+populate_var_columns: 20.4814 s
+-----
+Get file size: 8.085e-06 s
+get_header: 0.00011616 s
+find_new_lines: 184.114 s
+populate_var_struct: 3.52896 s
+reserve: 0.324826 s
+populate_var_columns: 20.4346 s
+-----
+Get file size: 1.1161e-05 s
+get_header: 0.000101092 s
+find_new_lines: 183.985 s
+populate_var_struct: 3.56217 s
+reserve: 0.325217 s
+populate_var_columns: 20.3468 s
+-----
+Get file size: 8.477e-06 s
+get_header: 0.000102905 s
+find_new_lines: 192.347 s
+populate_var_struct: 3.53986 s
+reserve: 0.325435 s
+populate_var_columns: 20.1789 s
+-----
+Get file size: 8.546e-06 s
+get_header: 0.000105409 s
+find_new_lines: 192.335 s
+populate_var_struct: 3.55169 s
+reserve: 0.32739 s
+populate_var_columns: 20.8471 s
+-----
+Get file size: 8.185e-06 s
+get_header: 0.000104558 s
+find_new_lines: 183.904 s
+populate_var_struct: 3.56725 s
+reserve: 0.324837 s
+populate_var_columns: 20.5116 s
+-----
+Get file size: 1.0439e-05 s
+get_header: 0.00010057 s
+find_new_lines: 183.947 s
+populate_var_struct: 3.57674 s
+reserve: 0.325323 s
+populate_var_columns: 20.3797 s
+-----
+Get file size: 9.207e-06 s
+get_header: 0.000106411 s
+find_new_lines: 192.378 s
+populate_var_struct: 3.55034 s
+reserve: 0.324669 s
+populate_var_columns: 20.5859 s
+-----
+Get file size: 8.206e-06 s
+get_header: 0.000102794 s
+find_new_lines: 192.386 s
+populate_var_struct: 3.55101 s
+reserve: 0.324925 s
+populate_var_columns: 20.3359 s
+-----
+Get file size: 1.074e-05 s
+get_header: 0.000101822 s
+find_new_lines: 192.352 s
+populate_var_struct: 3.55184 s
+reserve: 0.324003 s
+populate_var_columns: 20.456 s
+-----
+Get file size: 8.074e-06 s
+get_header: 0.000110409 s
+find_new_lines: 195.513 s
+populate_var_struct: 3.5627 s
+reserve: 0.323297 s
+populate_var_columns: 20.2965 s
+-----
+Get file size: 1.039e-05 s
+get_header: 0.000106081 s
+find_new_lines: 184.138 s
+populate_var_struct: 3.58813 s
+reserve: 0.326463 s
+populate_var_columns: 20.3242 s
+-----
+Get file size: 8.706e-06 s
+get_header: 0.000101062 s
+find_new_lines: 192.371 s
+populate_var_struct: 3.54762 s
+reserve: 0.325267 s
+populate_var_columns: 20.481 s
+-----
+Get file size: 1.006e-05 s
+get_header: 0.000115038 s
+find_new_lines: 192.391 s
+populate_var_struct: 3.56076 s
+reserve: 0.324837 s
+populate_var_columns: 20.5523 s
+-----
+Get file size: 1.104e-05 s
+get_header: 0.000101373 s
+find_new_lines: 192.278 s
+populate_var_struct: 3.55025 s
+reserve: 0.32539 s
+populate_var_columns: 20.4984 s
+-----
+===================
+Th 2:
+Get file size: 1.0059e-05 s
+get_header: 0.000101562 s
+find_new_lines: 100.414 s
+populate_var_struct: 2.43524 s
+reserve: 0.324744 s
+populate_var_columns: 10.2419 s
+-----
+Get file size: 1.094e-05 s
+get_header: 0.000102323 s
+find_new_lines: 99.4457 s
+populate_var_struct: 2.43706 s
+reserve: 0.326781 s
+populate_var_columns: 10.4088 s
+-----
+Get file size: 8.616e-06 s
+get_header: 0.000103727 s
+find_new_lines: 96.4016 s
+populate_var_struct: 2.44315 s
+reserve: 0.325754 s
+populate_var_columns: 10.2758 s
+-----
+Get file size: 1.083e-05 s
+get_header: 0.000107153 s
+find_new_lines: 97.048 s
+populate_var_struct: 2.79255 s
+reserve: 0.326829 s
+populate_var_columns: 10.3018 s
+-----
+Get file size: 1.083e-05 s
+get_header: 0.000104548 s
+find_new_lines: 99.1876 s
+populate_var_struct: 2.44138 s
+reserve: 0.323993 s
+populate_var_columns: 10.2006 s
+-----
+Get file size: 8.666e-06 s
+get_header: 0.000102413 s
+find_new_lines: 97.0704 s
+populate_var_struct: 2.79529 s
+reserve: 0.326563 s
+populate_var_columns: 10.2776 s
+-----
+Get file size: 8.718e-06 s
+get_header: 0.000102394 s
+find_new_lines: 96.4007 s
+populate_var_struct: 2.43946 s
+reserve: 0.325973 s
+populate_var_columns: 10.2837 s
+-----
+Get file size: 1.069e-05 s
+get_header: 0.000117303 s
+find_new_lines: 100.551 s
+populate_var_struct: 2.44219 s
+reserve: 0.325275 s
+populate_var_columns: 10.2829 s
+-----
+Get file size: 1.028e-05 s
+get_header: 0.000103125 s
+find_new_lines: 101.227 s
+populate_var_struct: 2.79346 s
+reserve: 0.32694 s
+populate_var_columns: 10.3367 s
+-----
+Get file size: 1.0369e-05 s
+get_header: 0.000102674 s
+find_new_lines: 98.0716 s
+populate_var_struct: 2.80555 s
+reserve: 0.32756 s
+populate_var_columns: 10.2422 s
+-----
+Get file size: 8.166e-06 s
+get_header: 0.000103757 s
+find_new_lines: 96.3616 s
+populate_var_struct: 2.4403 s
+reserve: 0.326137 s
+populate_var_columns: 10.3467 s
+-----
+Get file size: 1.0951e-05 s
+get_header: 0.000102304 s
+find_new_lines: 100.552 s
+populate_var_struct: 2.44109 s
+reserve: 0.3255 s
+populate_var_columns: 10.2254 s
+-----
+Get file size: 9.098e-06 s
+get_header: 0.000102686 s
+find_new_lines: 96.4127 s
+populate_var_struct: 2.44652 s
+reserve: 0.326276 s
+populate_var_columns: 10.3686 s
+-----
+Get file size: 9.527e-06 s
+get_header: 0.000104277 s
+find_new_lines: 97.2157 s
+populate_var_struct: 2.77304 s
+reserve: 0.32536 s
+populate_var_columns: 10.3213 s
+-----
+Get file size: 9.828e-06 s
+get_header: 0.00010057 s
+find_new_lines: 97.1031 s
+populate_var_struct: 2.76619 s
+reserve: 0.32484 s
+populate_var_columns: 10.3056 s
+-----
+Get file size: 9.698e-06 s
+get_header: 0.000104207 s
+find_new_lines: 101.251 s
+populate_var_struct: 2.80078 s
+reserve: 0.326227 s
+populate_var_columns: 10.2847 s
+-----
+Get file size: 8.496e-06 s
+get_header: 0.000101633 s
+find_new_lines: 100.451 s
+populate_var_struct: 2.4412 s
+reserve: 0.32541 s
+populate_var_columns: 10.142 s
+-----
+Get file size: 1.1913e-05 s
+get_header: 0.000104969 s
+find_new_lines: 100.566 s
+populate_var_struct: 2.43632 s
+reserve: 0.324569 s
+populate_var_columns: 10.3616 s
+-----
+Get file size: 1.052e-05 s
+get_header: 0.000124044 s
+find_new_lines: 97.0498 s
+populate_var_struct: 2.77519 s
+reserve: 0.328049 s
+populate_var_columns: 10.3012 s
+-----
+Get file size: 1.0549e-05 s
+get_header: 0.000101052 s
+find_new_lines: 97.0554 s
+populate_var_struct: 2.7871 s
+reserve: 0.327375 s
+populate_var_columns: 10.2149 s
+-----
+===================
+Th 4:
+Get file size: 9.939e-06 s
+get_header: 0.000102634 s
+find_new_lines: 54.9596 s
+populate_var_struct: 2.18858 s
+reserve: 0.327238 s
+populate_var_columns: 5.17206 s
+-----
+Get file size: 8.666e-06 s
+get_header: 0.000103216 s
+find_new_lines: 54.9437 s
+populate_var_struct: 2.05342 s
+reserve: 0.326626 s
+populate_var_columns: 5.18569 s
+-----
+Get file size: 1.0451e-05 s
+get_header: 0.000107905 s
+find_new_lines: 52.8565 s
+populate_var_struct: 2.0409 s
+reserve: 0.326772 s
+populate_var_columns: 5.13521 s
+-----
+Get file size: 1.2244e-05 s
+get_header: 0.000104628 s
+find_new_lines: 52.8425 s
+populate_var_struct: 2.08436 s
+reserve: 0.327138 s
+populate_var_columns: 5.25632 s
+-----
+Get file size: 1.077e-05 s
+get_header: 0.00010073 s
+find_new_lines: 52.6844 s
+populate_var_struct: 1.95775 s
+reserve: 0.325223 s
+populate_var_columns: 5.20329 s
+-----
+Get file size: 1.074e-05 s
+get_header: 0.000107995 s
+find_new_lines: 54.8536 s
+populate_var_struct: 2.071 s
+reserve: 0.328009 s
+populate_var_columns: 5.23178 s
+-----
+Get file size: 9.669e-06 s
+get_header: 0.000102444 s
+find_new_lines: 52.8173 s
+populate_var_struct: 2.04195 s
+reserve: 0.328404 s
+populate_var_columns: 5.17495 s
+-----
+Get file size: 1.035e-05 s
+get_header: 0.000103656 s
+find_new_lines: 52.905 s
+populate_var_struct: 2.04769 s
+reserve: 0.326678 s
+populate_var_columns: 5.12345 s
+-----
+Get file size: 1.0038e-05 s
+get_header: 0.000102695 s
+find_new_lines: 54.7304 s
+populate_var_struct: 1.97432 s
+reserve: 0.325342 s
+populate_var_columns: 5.17369 s
+-----
+Get file size: 8.265e-06 s
+get_header: 0.000111361 s
+find_new_lines: 52.8805 s
+populate_var_struct: 2.04972 s
+reserve: 0.327014 s
+populate_var_columns: 5.23247 s
+-----
+Get file size: 1.1533e-05 s
+get_header: 0.000102234 s
+find_new_lines: 52.8646 s
+populate_var_struct: 2.02282 s
+reserve: 0.328078 s
+populate_var_columns: 5.14663 s
+-----
+Get file size: 1.059e-05 s
+get_header: 0.000109467 s
+find_new_lines: 52.9129 s
+populate_var_struct: 2.03958 s
+reserve: 0.327872 s
+populate_var_columns: 5.19188 s
+-----
+Get file size: 8.095e-06 s
+get_header: 0.000102113 s
+find_new_lines: 52.808 s
+populate_var_struct: 2.11315 s
+reserve: 0.32582 s
+populate_var_columns: 5.16106 s
+-----
+Get file size: 1.1453e-05 s
+get_header: 0.000109838 s
+find_new_lines: 52.8487 s
+populate_var_struct: 2.18013 s
+reserve: 0.3273 s
+populate_var_columns: 5.139 s
+-----
+Get file size: 9.93e-06 s
+get_header: 0.000103677 s
+find_new_lines: 52.8937 s
+populate_var_struct: 2.16668 s
+reserve: 0.329103 s
+populate_var_columns: 5.19806 s
+-----
+Get file size: 1.0049e-05 s
+get_header: 0.00013715 s
+find_new_lines: 54.9385 s
+populate_var_struct: 2.08121 s
+reserve: 0.324739 s
+populate_var_columns: 5.21045 s
+-----
+Get file size: 8.185e-06 s
+get_header: 0.000117883 s
+find_new_lines: 54.8698 s
+populate_var_struct: 2.05702 s
+reserve: 0.326356 s
+populate_var_columns: 5.26386 s
+-----
+Get file size: 1.075e-05 s
+get_header: 0.000104347 s
+find_new_lines: 54.8175 s
+populate_var_struct: 2.08184 s
+reserve: 0.325273 s
+populate_var_columns: 5.1615 s
+-----
+Get file size: 9.958e-06 s
+get_header: 0.000103465 s
+find_new_lines: 54.8557 s
+populate_var_struct: 2.07972 s
+reserve: 0.326576 s
+populate_var_columns: 5.20536 s
+-----
+Get file size: 8.315e-06 s
+get_header: 0.00010041 s
+find_new_lines: 54.8738 s
+populate_var_struct: 2.13023 s
+reserve: 0.329635 s
+populate_var_columns: 5.11274 s
+-----
+===================
+Th 8:
+Get file size: 1.056e-05 s
+get_header: 0.000113947 s
+find_new_lines: 30.6643 s
+populate_var_struct: 2.41658 s
+reserve: 0.327536 s
+populate_var_columns: 2.59141 s
+-----
+Get file size: 8.706e-06 s
+get_header: 9.9648e-05 s
+find_new_lines: 30.6439 s
+populate_var_struct: 2.38477 s
+reserve: 0.325449 s
+populate_var_columns: 2.61451 s
+-----
+Get file size: 1.053e-05 s
+get_header: 0.000109037 s
+find_new_lines: 30.7294 s
+populate_var_struct: 2.38751 s
+reserve: 0.327939 s
+populate_var_columns: 2.64411 s
+-----
+Get file size: 1.086e-05 s
+get_header: 0.000112785 s
+find_new_lines: 31.6812 s
+populate_var_struct: 2.37018 s
+reserve: 0.32615 s
+populate_var_columns: 2.56725 s
+-----
+Get file size: 9.909e-06 s
+get_header: 0.000102865 s
+find_new_lines: 30.6941 s
+populate_var_struct: 2.44553 s
+reserve: 0.32608 s
+populate_var_columns: 2.58085 s
+-----
+Get file size: 7.996e-06 s
+get_header: 0.000115179 s
+find_new_lines: 31.6522 s
+populate_var_struct: 2.42118 s
+reserve: 0.328747 s
+populate_var_columns: 2.71792 s
+-----
+Get file size: 8.797e-06 s
+get_header: 0.000102314 s
+find_new_lines: 30.6654 s
+populate_var_struct: 2.37021 s
+reserve: 0.327808 s
+populate_var_columns: 2.62058 s
+-----
+Get file size: 1.1221e-05 s
+get_header: 0.000103576 s
+find_new_lines: 31.7329 s
+populate_var_struct: 2.35323 s
+reserve: 0.327249 s
+populate_var_columns: 2.60849 s
+-----
+-----
+Get file size: 1.1452e-05 s
+get_header: 0.000101712 s
+find_new_lines: 30.9062 s
+populate_var_struct: 2.37518 s
+reserve: 0.325507 s
+populate_var_columns: 2.61063 s
+-----
+Get file size: 1.07e-05 s
+get_header: 0.000103406 s
+find_new_lines: 30.6643 s
+populate_var_struct: 2.40398 s
+reserve: 0.327351 s
+populate_var_columns: 2.61928 s
+-----
+Get file size: 8.486e-06 s
+get_header: 0.00010032 s
+find_new_lines: 30.6459 s
+populate_var_struct: 2.35583 s
+reserve: 0.326878 s
+populate_var_columns: 2.58827 s
+-----
+Get file size: 8.366e-06 s
+get_header: 0.000102434 s
+find_new_lines: 30.6736 s
+populate_var_struct: 2.40445 s
+reserve: 0.327693 s
+populate_var_columns: 2.74876 s
+-----
+Get file size: 1.1092e-05 s
+get_header: 0.000102565 s
+find_new_lines: 31.6893 s
+populate_var_struct: 2.37423 s
+reserve: 0.328641 s
+populate_var_columns: 2.56556 s
+-----
+Get file size: 8.496e-06 s
+get_header: 0.000100049 s
+find_new_lines: 30.6435 s
+populate_var_struct: 2.38078 s
+reserve: 0.326998 s
+populate_var_columns: 2.59461 s
+-----
+Get file size: 1.2082e-05 s
+get_header: 0.000102925 s
+find_new_lines: 30.6781 s
+populate_var_struct: 2.41246 s
+reserve: 0.325362 s
+populate_var_columns: 2.71318 s
+-----
+Get file size: 1.0209e-05 s
+get_header: 0.000107343 s
+find_new_lines: 30.6858 s
+populate_var_struct: 2.34428 s
+reserve: 0.328034 s
+populate_var_columns: 2.67132 s
+-----
+Get file size: 8.256e-06 s
+get_header: 0.000101011 s
+find_new_lines: 30.6395 s
+populate_var_struct: 2.35857 s
+reserve: 0.32701 s
+populate_var_columns: 2.58586 s
+-----
+Get file size: 1.084e-05 s
+get_header: 0.000101413 s
+find_new_lines: 31.6596 s
+populate_var_struct: 2.36436 s
+reserve: 0.327735 s
+populate_var_columns: 2.72709 s
+-----
+Get file size: 8.055e-06 s
+get_header: 0.000107624 s
+find_new_lines: 30.603 s
+populate_var_struct: 2.326 s
+reserve: 0.326746 s
+populate_var_columns: 2.66146 s
+-----
+===================
+Th 16:
+Get file size: 1.1e-05 s
+get_header: 0.000101743 s
+find_new_lines: 26.4165 s
+populate_var_struct: 2.74515 s
+reserve: 0.327696 s
+populate_var_columns: 1.43186 s
+-----
+Get file size: 1.0539e-05 s
+get_header: 0.000112413 s
+find_new_lines: 19.5785 s
+populate_var_struct: 2.75908 s
+reserve: 0.325981 s
+populate_var_columns: 1.36861 s
+-----
+Get file size: 9.698e-06 s
+get_header: 0.000108146 s
+find_new_lines: 19.6062 s
+populate_var_struct: 2.7816 s
+reserve: 0.327156 s
+populate_var_columns: 1.33803 s
+-----
+Get file size: 9.949e-06 s
+get_header: 0.00010004 s
+find_new_lines: 19.565 s
+populate_var_struct: 2.77106 s
+reserve: 0.326104 s
+populate_var_columns: 1.39478 s
+-----
+Get file size: 8.516e-06 s
+get_header: 0.000105881 s
+find_new_lines: 19.6048 s
+populate_var_struct: 2.75457 s
+reserve: 0.323908 s
+populate_var_columns: 1.324 s
+-----
+Get file size: 1.118e-05 s
+get_header: 0.000101842 s
+find_new_lines: 19.5494 s
+populate_var_struct: 2.73182 s
+reserve: 0.323792 s
+populate_var_columns: 1.71517 s
+-----
+Get file size: 8.366e-06 s
+get_header: 0.000109267 s
+find_new_lines: 19.578 s
+populate_var_struct: 2.7329 s
+reserve: 0.327959 s
+populate_var_columns: 1.3271 s
+-----
+Get file size: 1.0751e-05 s
+get_header: 0.000109607 s
+find_new_lines: 19.566 s
+populate_var_struct: 2.74552 s
+reserve: 0.325962 s
+populate_var_columns: 1.34431 s
+-----
+Get file size: 1.018e-05 s
+get_header: 0.000104949 s
+find_new_lines: 19.599 s
+populate_var_struct: 2.75054 s
+reserve: 0.327555 s
+populate_var_columns: 1.4045 s
+-----
+Get file size: 8.166e-06 s
+get_header: 0.000101902 s
+find_new_lines: 20.0557 s
+populate_var_struct: 2.74584 s
+reserve: 0.326429 s
+populate_var_columns: 1.34007 s
+-----
+Get file size: 7.855e-06 s
+get_header: 0.000102875 s
+find_new_lines: 19.5594 s
+populate_var_struct: 2.77962 s
+reserve: 0.326615 s
+populate_var_columns: 1.36445 s
+-----
+Get file size: 1.039e-05 s
+get_header: 0.000104458 s
+find_new_lines: 19.5666 s
+populate_var_struct: 2.77175 s
+reserve: 0.327121 s
+populate_var_columns: 1.3319 s
+-----
+Get file size: 9.437e-06 s
+get_header: 0.000121489 s
+find_new_lines: 20.0788 s
+populate_var_struct: 2.74529 s
+reserve: 0.324892 s
+populate_var_columns: 1.35935 s
+-----
+Get file size: 8.036e-06 s
+get_header: 0.000100531 s
+find_new_lines: 19.58 s
+populate_var_struct: 2.74612 s
+reserve: 0.327622 s
+populate_var_columns: 1.35191 s
+-----
+Get file size: 1.0429e-05 s
+get_header: 0.000103577 s
+find_new_lines: 19.5638 s
+populate_var_struct: 2.74469 s
+reserve: 0.326627 s
+populate_var_columns: 1.41795 s
+-----
+Get file size: 9.869e-06 s
+get_header: 0.000100781 s
+find_new_lines: 19.5619 s
+populate_var_struct: 2.74264 s
+reserve: 0.326613 s
+populate_var_columns: 1.41952 s
+-----
+Get file size: 1.0359e-05 s
+get_header: 0.000104037 s
+find_new_lines: 19.553 s
+populate_var_struct: 2.74582 s
+reserve: 0.32355 s
+populate_var_columns: 1.33638 s
+-----
+Get file size: 9.398e-06 s
+get_header: 0.000104408 s
+find_new_lines: 19.5657 s
+populate_var_struct: 2.75176 s
+reserve: 0.327593 s
+populate_var_columns: 1.41328 s
+-----
+Get file size: 9.398e-06 s
+get_header: 0.000105351 s
+find_new_lines: 19.5725 s
+populate_var_struct: 2.75727 s
+reserve: 0.328812 s
+populate_var_columns: 1.92607 s
+-----
+Get file size: 1.104e-05 s
+get_header: 0.000102764 s
+find_new_lines: 19.5563 s
+populate_var_struct: 2.74502 s
+reserve: 0.325848 s
+populate_var_columns: 1.33327 s
+-----
+===================
+Th 32:
+Get file size: 8.215e-06 s
+get_header: 0.000109457 s
+find_new_lines: 14.0146 s
+populate_var_struct: 3.55612 s
+reserve: 0.327347 s
+populate_var_columns: 0.761091 s
+-----
+Get file size: 1.044e-05 s
+get_header: 0.000103686 s
+find_new_lines: 14.2826 s
+populate_var_struct: 3.5276 s
+reserve: 0.326596 s
+populate_var_columns: 0.862751 s
+-----
+Get file size: 1.0099e-05 s
+get_header: 0.000103446 s
+find_new_lines: 14.0589 s
+populate_var_struct: 3.5532 s
+reserve: 0.325726 s
+populate_var_columns: 0.798513 s
+-----
+Get file size: 8.425e-06 s
+get_header: 0.000103426 s
+find_new_lines: 14.0781 s
+populate_var_struct: 3.5478 s
+reserve: 0.328309 s
+populate_var_columns: 0.783088 s
+-----
+Get file size: 8.807e-06 s
+get_header: 0.00010017 s
+find_new_lines: 17.4377 s
+populate_var_struct: 3.54371 s
+reserve: 0.324975 s
+populate_var_columns: 0.763114 s
+-----
+Get file size: 1.1162e-05 s
+get_header: 0.000111371 s
+find_new_lines: 14.2815 s
+populate_var_struct: 3.52766 s
+reserve: 0.325595 s
+populate_var_columns: 0.87777 s
+-----
+Get file size: 1.05e-05 s
+get_header: 0.000102244 s
+find_new_lines: 17.5781 s
+populate_var_struct: 3.52265 s
+reserve: 0.326588 s
+populate_var_columns: 0.917426 s
+-----
+Get file size: 1.102e-05 s
+get_header: 0.00011065 s
+find_new_lines: 14.0604 s
+populate_var_struct: 3.5296 s
+reserve: 0.327169 s
+populate_var_columns: 0.865434 s
+-----
+Get file size: 1.011e-05 s
+get_header: 0.000117062 s
+find_new_lines: 14.0694 s
+populate_var_struct: 3.55911 s
+reserve: 0.327679 s
+populate_var_columns: 0.754911 s
+-----
+Get file size: 8.506e-06 s
+get_header: 0.000103927 s
+find_new_lines: 14.0918 s
+populate_var_struct: 3.56982 s
+reserve: 0.328526 s
+populate_var_columns: 0.876789 s
+-----
+Get file size: 1.054e-05 s
+get_header: 0.00011063 s
+find_new_lines: 14.0765 s
+populate_var_struct: 3.56919 s
+reserve: 0.325793 s
+populate_var_columns: 0.679548 s
+-----
+Th 64:
+Get file size: 1.103e-05 s
+get_header: 0.000125838 s
+find_new_lines: 11.6491 s
+populate_var_struct: 3.7492 s
+reserve: 0.327985 s
+populate_var_columns: 0.509055 s
+-----
+Get file size: 8.616e-06 s
+get_header: 0.000100761 s
+find_new_lines: 11.6023 s
+populate_var_struct: 3.73739 s
+reserve: 0.32864 s
+populate_var_columns: 0.559582 s
+-----
+Get file size: 1.042e-05 s
+get_header: 0.00011077 s
+find_new_lines: 11.5557 s
+populate_var_struct: 3.74192 s
+reserve: 0.327541 s
+populate_var_columns: 0.491657 s
+-----
+Get file size: 8.065e-06 s
+get_header: 0.00010038 s
+find_new_lines: 11.5568 s
+populate_var_struct: 3.75584 s
+reserve: 0.326744 s
+populate_var_columns: 0.551488 s
+-----
+Get file size: 8.856e-06 s
+get_header: 0.000101633 s
+find_new_lines: 11.5784 s
+populate_var_struct: 3.70594 s
+reserve: 0.327226 s
+populate_var_columns: 0.521944 s
+-----
+Get file size: 1.075e-05 s
+get_header: 0.000111192 s
+find_new_lines: 13.2188 s
+populate_var_struct: 3.74329 s
+reserve: 0.327418 s
+populate_var_columns: 0.549298 s
+-----
+Get file size: 9.578e-06 s
+get_header: 0.000111992 s
+find_new_lines: 11.5581 s
+populate_var_struct: 3.74962 s
+reserve: 0.327732 s
+populate_var_columns: 0.544016 s
+-----
+Get file size: 1.054e-05 s
+get_header: 0.000104267 s
+find_new_lines: 14.2503 s
+populate_var_struct: 3.7745 s
+reserve: 0.327473 s
+populate_var_columns: 0.54578 s
+-----
+Get file size: 1.0099e-05 s
+get_header: 0.000103176 s
+find_new_lines: 11.656 s
+populate_var_struct: 3.71959 s
+reserve: 0.325614 s
+populate_var_columns: 0.532537 s
+-----
+Get file size: 8.777e-06 s
+get_header: 0.000119045 s
+find_new_lines: 11.5504 s
+populate_var_struct: 3.75499 s
+reserve: 0.328766 s
+populate_var_columns: 0.543992 s
+-----
+Get file size: 8.095e-06 s
+get_header: 0.000106121 s
+find_new_lines: 11.6237 s
+populate_var_struct: 3.74024 s
+reserve: 0.326695 s
+populate_var_columns: 0.541286 s
+-----
+Get file size: 9.889e-06 s
+get_header: 0.000104839 s
+find_new_lines: 16.4473 s
+populate_var_struct: 3.74375 s
+reserve: 0.328157 s
+populate_var_columns: 0.475242 s
+-----
+Get file size: 7.954e-06 s
+get_header: 0.000104008 s
+find_new_lines: 11.5828 s
+populate_var_struct: 3.7724 s
+reserve: 0.327618 s
+populate_var_columns: 0.509586 s
+-----
+Get file size: 8.396e-06 s
+get_header: 0.000102364 s
+find_new_lines: 11.5335 s
+populate_var_struct: 3.76694 s
+reserve: 0.326487 s
+populate_var_columns: 0.545562 s
+-----
+Get file size: 8.646e-06 s
+get_header: 0.000112784 s
+find_new_lines: 11.5716 s
+populate_var_struct: 3.75054 s
+reserve: 0.32667 s
+populate_var_columns: 0.534667 s
+-----
+Get file size: 1.0029e-05 s
+get_header: 0.000110629 s
+find_new_lines: 13.2288 s
+populate_var_struct: 3.75586 s
+reserve: 0.329195 s
+populate_var_columns: 0.51731 s
+-----
+Get file size: 1.061e-05 s
+get_header: 0.000115309 s
+find_new_lines: 11.5512 s
+populate_var_struct: 3.77095 s
+reserve: 0.32556 s
+populate_var_columns: 0.481961 s
+-----
+Get file size: 8.115e-06 s
+get_header: 0.000102073 s
+find_new_lines: 11.5793 s
+populate_var_struct: 3.6914 s
+reserve: 0.326845 s
+populate_var_columns: 0.533281 s
+-----
+Get file size: 1.068e-05 s
+get_header: 0.000102385 s
+find_new_lines: 11.554 s
+populate_var_struct: 3.71702 s
+reserve: 0.326772 s
+populate_var_columns: 0.537391 s
+-----
+Get file size: 9.488e-06 s
+get_header: 0.000103556 s
+find_new_lines: 11.6548 s
+populate_var_struct: 3.69602 s
+reserve: 0.324342 s
+populate_var_columns: 0.526514 s
+-----
+===================

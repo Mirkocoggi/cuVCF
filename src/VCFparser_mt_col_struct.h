@@ -33,6 +33,17 @@ class info_int
     string name;
 };
 
+class alt_columns_df //In progress
+{
+public:
+    vector<string> var_id;
+    vector<int> alt_id;
+    vector<string> alt;
+    vector<info_float> alt_float;
+    vector<info_flag> alt_flag;
+    vector<info_string> alt_string;
+    vector<info_int> alt_int;
+}
 
 class var_columns_df
 {
@@ -51,12 +62,14 @@ public:
     vector<info_string> in_string;
     vector<info_int> in_int;
     map<string,int> info_map1;
-    void get_vcf_line_in_var_columns(char *line, long start, long end, long i)
+    void get_vcf_line_in_var_columns(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt, header_element* info)
     {
         //cout<<i<<"\t";
         bool find1 = false;
         long iter=0;
+        int local_alt = 1;
         string tmp="\0";
+        vector<string> tmp_split;
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
@@ -109,7 +122,13 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
-                alt[i] = tmp;
+                boost::split(tmp_split, tmp, boost::is_any_of(","));
+                local_alt = tmp_split.size();
+                for(int y = 0; y<local_alt; y++){
+                    (*tmp_alt).alt[tmp_num_alt+y] = tmp_split[y];
+                    (*tmp_alt).alt_id[tmp_num_alt+y] = y;
+                    (*tmp_alt).var_id[tmp_num_alt+y] = id[i];
+                }
             }else{
                 tmp += line[start+iter]; // per ora le salvo tutte come un unico array of char, andrebbe cambiato per salvarle separatamente
                 iter++;
@@ -151,19 +170,17 @@ public:
                 iter++;
                 info[i] = tmp;
                 vector<string> tmp_el;
-                boost::split(tmp_el, tmp, boost::is_any_of(";"));
+                boost::split(tmp_el, tmp, boost::is_any_of(";")); //separo gli argomenti di info
                 vector<string> tmp_elems;
                 for(int ii=0; ii<tmp_el.size(); ii++){
-                    boost::split(tmp_elems, tmp_el[ii], boost::is_any_of("="));
+                    boost::split(tmp_elems, tmp_el[ii], boost::is_any_of("=")); //separo id dell'info dal contenuto
                     bool find_info_type = false;
                     bool find_info_elem = false;
                     if(tmp_elems.size()==2){
-                        
                         while(!find_info_type){
-                            
                             if(info_map1[tmp_elems[0]]==1){
-                                //Int - divisione 
-                                
+                                //Int - divisione
+                                bool isAlt = false;
                                 int el=0;
                                 while(!find_info_elem){
                                     if(in_int[el].name == tmp_elems[0]){
@@ -197,6 +214,48 @@ public:
                                     el++;
                                 }
                                 find_info_type = true;
+                            }else if(info_map1[tmp_elems[0]]==4){
+                                //Int Alt
+                                boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                for(int y = 0; y<local_alt; y++){
+                                    int el=0;
+                                    while(!find_info_elem){
+                                        if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
+                                            (*tmp_alt).alt_int[el].i_int[tmp_num_alt+y] = stoi(tmp_split[y]);
+                                            find_info_elem = true;
+                                        }
+                                        el++;
+                                    }
+                                }
+                                find_info_type = true;
+                            }else if(info_map1[tmp_elems[0]]==5){
+                                //Float Alt
+                                boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                for(int y = 0; y<local_alt; y++){
+                                    int el=0;
+                                    while(!find_info_elem){
+                                        if((*tmp_alt).alt_float[el].name == tmp_elems[0]){
+                                            (*tmp_alt).alt_float[el].i_float[tmp_num_alt+y] = stof(tmp_split[y]);
+                                            find_info_elem = true;
+                                        }
+                                        el++;
+                                    }
+                                }
+                                find_info_type = true;
+                            }else if(info_map1[tmp_elems[0]]==6){
+                                //String Alt
+                                boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                for(int y = 0; y<local_alt; y++){
+                                    int el=0;
+                                    while(!find_info_elem){
+                                        if((*tmp_alt).alt_string[el].name == tmp_elems[0]){
+                                            (*tmp_alt).alt_string[el].i_string[tmp_num_alt+y] = tmp_split[y];
+                                            find_info_elem = true;
+                                        }
+                                        el++;
+                                    }
+                                }
+                                find_info_type = true;                            
                             }else{
                                 //cout<<"\n\nhere\n\n";
                                 find_info_type = true;
@@ -205,7 +264,6 @@ public:
                     }else{
                         if((info_map1[tmp_elems[0]]==0) && strcmp(&tmp_elems[0][0],"")){
                                 //Flag
-                                
                                 int el=0;
                                 while(!find_info_elem){
                                     if(in_flag[el].name == tmp_elems[0]){
@@ -225,9 +283,9 @@ public:
                 
             }
         }
+        *tmp_num_alt = (*tmp_num_alt)+local_alt; 
     }
 
-    
     void print_var_columns(long num_lines){
         for(long i=0; i<num_lines; i++){
             cout << "Var" << var_number[i] << ":\t";
@@ -433,6 +491,7 @@ public:
     long num_lines=0;
     long *new_lines_index;
     var_columns_df var_columns;
+    alt_columns_df alt_columns;
     void get_filename(string path_to_filename){
         vector<string> line_el;
         boost::split(line_el, path_to_filename, boost::is_any_of("/"));
@@ -508,8 +567,7 @@ public:
         //cout << "\nheader char: " << to_string(header_size) << endl;
         variants_size = filesize - header_size; //ora che ho tolto l'header ho un file piu piccolo quindi una nuova size
         //cout<<"filesize: "<<filesize<<" variants_size: "<<variants_size<<endl;
-    }
-    
+    }   
     void allocate_filestring(){
         filestring = (char*)malloc(variants_size);
     }
@@ -518,6 +576,7 @@ public:
         new_lines_index[0] = 0; //il primo elemento lo metto a zero per indicare l'inizio della prima linea
         num_lines++;
         long tmp_num_lines[num_threads];
+        
         
         auto before = chrono::system_clock::now();
         long batch_infile = (variants_size - 1 + num_threads)/num_threads; //numero di char che verrà processato da ogni thread        
@@ -580,26 +639,43 @@ public:
         //cout << "\nFilestring time: " << filestring_time << " s " << "New lines time: " << f_new_lines << " s\n\n" << endl;
 
     }
-    void create_info_vectors(){
+    void create_info_vectors(int num_threads){
+        long batch_size = (num_lines-2+num_threads)/num_threads;
         info_flag info_flag_tmp;
         info_float info_float_tmp;
         info_int info_int_tmp;
         info_string info_string_tmp;
+
+        info_float alt_float_tmp;
+        info_int alt_int_tmp;
+        info_string alt_string_tmp;
         for(int i=0; i<INFO.total_values; i++){
-            if(strcmp(&INFO.Number[i][0], "A") == 0){
-                if(strcmp(&INFO.Type[i][0], "Integer")==0){
+            if(strcmp(&INFO.Number[i][0], "A") == 0){ 
+                if(strcmp(&INFO.Type[i][0], "Integer")==0){ //in progress - da capire come gestire l'allocazione
                     INFO.ints_alt++;
-                    info_map[INFO.ID[i]] = 1;
+                    alt_int_tmp.name = INFO.ID[i];
+                    alt_int_tmp.i_int.resize(2*batch_size, 0);
+                    alt_columns.alt_int.push_back(alt_int_tmp);
+                    info_map[INFO.ID[i]] = 4;
+                    var_columns.info_map1[INFO.ID[i]] = 4;
                 }
                 if(strcmp(&INFO.Type[i][0], "Float")==0){
                     INFO.floats_alt++;
-                    info_map[INFO.ID[i]] = 2;
+                    alt_float_tmp.name = INFO.ID[i];
+                    alt_float_tmp.i_int.resize(2*batch_size, 0);
+                    alt_columns.alt_float.push_back(alt_float_tmp);
+                    info_map[INFO.ID[i]] = 5;
+                    var_columns.info_map1[INFO.ID[i]] = 5;
                 }
                 if(strcmp(&INFO.Type[i][0], "String")==0){
                     INFO.strings_alt++;
-                    info_map[INFO.ID[i]] = 3;
+                    alt_string_tmp.name = INFO.ID[i];
+                    alt_string_tmp.i_int.resize(2*batch_size, "\0");
+                    alt_columns.alt_string.push_back(alt_string_tmp);
+                    info_map[INFO.ID[i]] = 6;
+                    var_columns.info_map1[INFO.ID[i]] = 6;
                 }
-                if(strcmp(&INFO.Type[i][0], "Flag")==0){
+                if(strcmp(&INFO.Type[i][0], "Flag")==0){ //Per ora non gestito
                     INFO.flags_alt++;
                     info_map[INFO.ID[i]] = 0;
                 }
@@ -643,10 +719,9 @@ public:
         var_columns.in_int.resize(INFO.ints);
         var_columns.in_float.resize(INFO.floats);
         var_columns.in_string.resize(INFO.strings);
-
-        
-
-        
+        alt_columns.alt_int.resize(INFO.ints_alt);
+        alt_columns.alt_float.resize(INFO.floats_alt);
+        alt_columns.alt_string.resize(INFO.strings_alt);
     }
     void print_info_map(){
         for(const auto& element : info_map){
@@ -742,14 +817,24 @@ public:
         var_columns.filter.resize(num_lines-1);
         var_columns.info.resize(num_lines-1);
         //cout<<"Finish resize!"<<endl;
+        //in progress
     }
     void populate_var_columns(int num_threads){
         long batch_size = (num_lines-2+num_threads)/num_threads;
-
+        alt_columns_df tmp_alt[num_threads];
+        int tmp_num_alt[num_threads];
+        // in progres
 #pragma omp parallel
         {
             long start, end;
             int th_ID = omp_get_thread_num();
+            
+            //struttura temporanea del thread con alternatives.
+            tmp_alt[th_ID] = alt_columns;
+            tmp_num_alt[th_ID] = 0;
+            tmp_alt[th_ID].var_id.resize(batch_size*2, 0);
+            tmp_alt[th_ID].alt_id.resize(batch_size*2, 0);
+            tmp_alt[th_ID].alt.resize(batch_size*2, "\0");
             //cout << "\nThread id: "<<th_ID<<endl;
 
             start = th_ID*batch_size; // inizio del batch dello specifico thread
@@ -758,19 +843,57 @@ public:
             for(long i=start; i<end && i<num_lines-1; i++){ //start e end mi dicono l'intervallo di linee che eseguirà ogni thread, quindi la i rappresenta l'iesima linea (var) che inizia a new_lines_index[i] e finisce a new_lines_index[i+1] (escluso)
                 var_columns.var_number[i] = i;
                 //cout<<"Var_number[i]: "<<var_columns.var_number[i]<<endl;
-                var_columns.get_vcf_line_in_var_columns(filestring, new_lines_index[i], new_lines_index[i+1], i);
+                var_columns.get_vcf_line_in_var_columns(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]), INFO);
                 //cout<<"enf"<<endl;
             }
-
+            tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
+            tmp_alt[th_ID].alt_id.resize(tmp_num_alt[th_ID]);
+            for(int i=0; i<INFO.ints_alt; i++){
+                tmp_alt[th_ID].alt_int[i].i_int.resize(tmp_num_alt[th_ID]);
+            }
+            for(int i=0; i<INFO.floats_alt; i++){
+                tmp_alt[th_ID].alt_float[i].i_float.resize(tmp_num_alt[th_ID]);
+            }
+            for(int i=0; i<INFO.strings_alt; i++){
+                tmp_alt[th_ID].alt_string[i].i_string.resize(tmp_num_alt[th_ID]);
+            }
+            tmp_alt[th_ID].alt.resize(tmp_num_alt[th_ID]);
         }
+        int totAlt = 0;
+        for(int i=0; i<num_threads; i++){
+            alt_columns.var_id.push_back(tmp_alt[i].var_id);
+            alt_columns.alt_id.push_back(tmp_alt[i].alt_id);
+            alt_columns.alt.push_back(tmp_alt[i].alt);
+
+            for(int j=0; j<INFO.ints_alt; j++){
+                alt_columns.alt_int[j].i_int.push_back(tmp_alt[i].alt_int[j].i_int);
+            }
+            for(int j=0; j<INFO.floats_alt; j++){
+                alt_columns.alt_float[j].i_float.push_back(tmp_alt[i].alt_float[j].i_int);
+            }
+            for(int j=0; j<INFO.strings_alt; j++){
+                alt_columns.alt_string[j].i_string.push_back(tmp_alt[i].alt_string[j].i_string);
+            }
+            totAlt+=tmp_num_alt[i];
+        }
+        alt_columns.var_id.resize(totAlt);
+        alt_columns.alt_id.resize(totAlt);
+        alt_columns.alt.resize(totAlt);
+        for(int j=0; j<INFO.ints_alt; j++){
+            alt_columns.alt_int[j].i_int.resize(totAlt);
+        }
+        for(int j=0; j<INFO.floats_alt; j++){
+            alt_columns.alt_float[j].i_float.resize(totAlt);
+        }
+        for(int j=0; j<INFO.strings_alt; j++){
+            alt_columns.alt_string[j].i_string.resize(totAlt);
+        }
+        //in progress
+        
     }
 
-
-
-
-
-
     void populate_var_struct(int num_threads){
+        
         auto before = chrono::system_clock::now();
         
         var_df = (var*)calloc((num_lines-1), sizeof(var)); // allocating var_df    

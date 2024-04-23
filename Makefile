@@ -11,7 +11,7 @@ VARSTRUCT:
 VARCOL:
 	mkdir -p bin/
 	$(CXX) src/VCFparser_mt_col.cpp -o bin/VCFparser -fopenmp $(CPPFLAGS) $(LIBS)
-#	$(CXX) src/VCFparser_mt.cpp -o bin/VCFparser -fopenmp $(CPPFLAGS) $(LIBS) -g
+#	$(CXX) src/VCFparser_mt_col.cpp -o bin/VCFparser -fopenmp $(CPPFLAGS) $(LIBS) -g
 #poi lancialo con gcc --args
 all:
 	$(VARSTRUCT)
