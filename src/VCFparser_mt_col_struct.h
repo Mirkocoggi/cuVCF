@@ -35,7 +35,7 @@ class info_int
 
 class alt_columns_df //In progress
 {
-public:
+    public:
     vector<string> var_id;
     vector<int> alt_id;
     vector<string> alt;
@@ -43,7 +43,27 @@ public:
     vector<info_flag> alt_flag;
     vector<info_string> alt_string;
     vector<info_int> alt_int;
-}
+};
+
+class header_element
+{
+public:
+    vector<string> ID;
+    vector<string> Number;
+    vector<string> Type;
+    int total_values=0;
+    int alt_values=0;
+    int no_alt_values=0;
+    int ints_alt=0;
+    int floats_alt=0;
+    int strings_alt=0;
+    int flags_alt=0;
+    int ints=0;
+    int floats=0;
+    int strings=0;
+    int flags=0;
+
+};
 
 class var_columns_df
 {
@@ -62,7 +82,7 @@ public:
     vector<info_string> in_string;
     vector<info_int> in_int;
     map<string,int> info_map1;
-    void get_vcf_line_in_var_columns(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt, header_element* info)
+    void get_vcf_line_in_var_columns(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt)
     {
         //cout<<i<<"\t";
         bool find1 = false;
@@ -125,9 +145,9 @@ public:
                 boost::split(tmp_split, tmp, boost::is_any_of(","));
                 local_alt = tmp_split.size();
                 for(int y = 0; y<local_alt; y++){
-                    (*tmp_alt).alt[tmp_num_alt+y] = tmp_split[y];
-                    (*tmp_alt).alt_id[tmp_num_alt+y] = y;
-                    (*tmp_alt).var_id[tmp_num_alt+y] = id[i];
+                    (*tmp_alt).alt[(*tmp_num_alt)+y] = tmp_split[y];
+                    (*tmp_alt).alt_id[(*tmp_num_alt)+y] = y;
+                    (*tmp_alt).var_id[(*tmp_num_alt)+y] = id[i];
                 }
             }else{
                 tmp += line[start+iter]; // per ora le salvo tutte come un unico array of char, andrebbe cambiato per salvarle separatamente
@@ -221,7 +241,7 @@ public:
                                     int el=0;
                                     while(!find_info_elem){
                                         if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
-                                            (*tmp_alt).alt_int[el].i_int[tmp_num_alt+y] = stoi(tmp_split[y]);
+                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = stoi(tmp_split[y]);
                                             find_info_elem = true;
                                         }
                                         el++;
@@ -235,7 +255,7 @@ public:
                                     int el=0;
                                     while(!find_info_elem){
                                         if((*tmp_alt).alt_float[el].name == tmp_elems[0]){
-                                            (*tmp_alt).alt_float[el].i_float[tmp_num_alt+y] = stof(tmp_split[y]);
+                                            (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = stof(tmp_split[y]);
                                             find_info_elem = true;
                                         }
                                         el++;
@@ -249,7 +269,7 @@ public:
                                     int el=0;
                                     while(!find_info_elem){
                                         if((*tmp_alt).alt_string[el].name == tmp_elems[0]){
-                                            (*tmp_alt).alt_string[el].i_string[tmp_num_alt+y] = tmp_split[y];
+                                            (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = tmp_split[y];
                                             find_info_elem = true;
                                         }
                                         el++;
@@ -454,25 +474,7 @@ public:
     }
 };
 
-class header_element
-{
-public:
-    vector<string> ID;
-    vector<string> Number;
-    vector<string> Type;
-    int total_values=0;
-    int alt_values=0;
-    int no_alt_values=0;
-    int ints_alt=0;
-    int floats_alt=0;
-    int strings_alt=0;
-    int flags_alt=0;
-    int ints=0;
-    int floats=0;
-    int strings=0;
-    int flags=0;
 
-};
 
 class vcf_parsed
 {
@@ -662,7 +664,7 @@ public:
                 if(strcmp(&INFO.Type[i][0], "Float")==0){
                     INFO.floats_alt++;
                     alt_float_tmp.name = INFO.ID[i];
-                    alt_float_tmp.i_int.resize(2*batch_size, 0);
+                    alt_float_tmp.i_float.resize(2*batch_size, 0);
                     alt_columns.alt_float.push_back(alt_float_tmp);
                     info_map[INFO.ID[i]] = 5;
                     var_columns.info_map1[INFO.ID[i]] = 5;
@@ -670,7 +672,7 @@ public:
                 if(strcmp(&INFO.Type[i][0], "String")==0){
                     INFO.strings_alt++;
                     alt_string_tmp.name = INFO.ID[i];
-                    alt_string_tmp.i_int.resize(2*batch_size, "\0");
+                    alt_string_tmp.i_string.resize(2*batch_size, "\0");
                     alt_columns.alt_string.push_back(alt_string_tmp);
                     info_map[INFO.ID[i]] = 6;
                     var_columns.info_map1[INFO.ID[i]] = 6;
@@ -843,7 +845,7 @@ public:
             for(long i=start; i<end && i<num_lines-1; i++){ //start e end mi dicono l'intervallo di linee che eseguirà ogni thread, quindi la i rappresenta l'iesima linea (var) che inizia a new_lines_index[i] e finisce a new_lines_index[i+1] (escluso)
                 var_columns.var_number[i] = i;
                 //cout<<"Var_number[i]: "<<var_columns.var_number[i]<<endl;
-                var_columns.get_vcf_line_in_var_columns(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]), INFO);
+                var_columns.get_vcf_line_in_var_columns(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]));
                 //cout<<"enf"<<endl;
             }
             tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
@@ -861,18 +863,38 @@ public:
         }
         int totAlt = 0;
         for(int i=0; i<num_threads; i++){
-            alt_columns.var_id.push_back(tmp_alt[i].var_id);
-            alt_columns.alt_id.push_back(tmp_alt[i].alt_id);
-            alt_columns.alt.push_back(tmp_alt[i].alt);
-
+            alt_columns.var_id.insert(
+                alt_columns.var_id.end(),
+                tmp_alt[i].var_id.begin(),
+                tmp_alt[i].var_id.end()
+            );
+            alt_columns.alt_id.insert(
+                alt_columns.alt_id.end(),
+                tmp_alt[i].alt_id.begin(),
+                tmp_alt[i].alt_id.end()
+            );
+            alt_columns.alt.insert(
+                alt_columns.alt.end(),
+                tmp_alt[i].alt.begin(),
+                tmp_alt[i].alt.end()
+            );
             for(int j=0; j<INFO.ints_alt; j++){
-                alt_columns.alt_int[j].i_int.push_back(tmp_alt[i].alt_int[j].i_int);
+                alt_columns.alt_int[j].i_int.insert(
+                    alt_columns.alt_int[j].i_int.end(), 
+                    tmp_alt[i].alt_int[j].i_int.begin(), 
+                    tmp_alt[i].alt_int[j].i_int.end());
             }
             for(int j=0; j<INFO.floats_alt; j++){
-                alt_columns.alt_float[j].i_float.push_back(tmp_alt[i].alt_float[j].i_int);
+                alt_columns.alt_float[j].i_float.insert(
+                    alt_columns.alt_float[j].i_float.end(), 
+                    tmp_alt[i].alt_float[j].i_float.begin(), 
+                    tmp_alt[i].alt_float[j].i_float.end());
             }
             for(int j=0; j<INFO.strings_alt; j++){
-                alt_columns.alt_string[j].i_string.push_back(tmp_alt[i].alt_string[j].i_string);
+                alt_columns.alt_string[j].i_string.insert(
+                    alt_columns.alt_string[j].i_string.end(), 
+                    tmp_alt[i].alt_string[j].i_string.begin(), 
+                    tmp_alt[i].alt_string[j].i_string.end());
             }
             totAlt+=tmp_num_alt[i];
         }
