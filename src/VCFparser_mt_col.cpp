@@ -130,7 +130,7 @@ int main(int argc, char *argv[]){
     auto populate_var_struct = std::chrono::duration<double>(after - before).count();
 
     before = chrono::system_clock::now();
-    vcf.create_info_vectors();
+    vcf.create_info_vectors(num_threadss);
     //vcf.print_info_map();
     //vcf.print_info();
     vcf.reserve_var_columns();
@@ -141,14 +141,13 @@ int main(int argc, char *argv[]){
     vcf.populate_var_columns(num_threadss);
     after = chrono::system_clock::now();
     auto populate_var_columns = std::chrono::duration<double>(after - before).count();
-
     // cout << "\nPrint from var_df: \n";
     // for(int i=0; i<vcf.num_lines-1; i++){
     //    vcf.var_df[i].print_var();
     // }
 
     //cout << "\nPrint from var_columns: \n";
-    //vcf.var_columns.print_var_columns(5);
+    vcf.var_columns.print_var_columns(10);
 
     // cout << "\nPrint from var_df: \n";
     // for(int i=0; i<5; i++){
@@ -158,6 +157,9 @@ int main(int argc, char *argv[]){
     // for(int i=vcf.num_lines - 101; i<vcf.num_lines - 1; i++){
     //     vcf.var_df[i].print_var();
     // }
+    cout << endl;
+
+    vcf.alt_columns.print();
     
     cout << "Get file size: " << get_file_size << " s" << endl;
     cout << "get_header: " << get_header << " s" << endl;
