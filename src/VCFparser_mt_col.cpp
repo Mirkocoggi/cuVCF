@@ -137,6 +137,9 @@ int main(int argc, char *argv[]){
     after = chrono::system_clock::now();
     auto reserve_var_columns = std::chrono::duration<double>(after - before).count();
 
+    //in progress
+    vcf.create_sample_vectors(num_threadss);
+
     before = chrono::system_clock::now();
     vcf.populate_var_columns(num_threadss);
     after = chrono::system_clock::now();
@@ -147,7 +150,7 @@ int main(int argc, char *argv[]){
     // }
 
     //cout << "\nPrint from var_columns: \n";
-    vcf.var_columns.print_var_columns(10);
+    //vcf.var_columns.print_var_columns(10);
 
     // cout << "\nPrint from var_df: \n";
     // for(int i=0; i<5; i++){
@@ -159,7 +162,9 @@ int main(int argc, char *argv[]){
     // }
     cout << endl;
 
-    vcf.alt_columns.print();
+    vcf.samp_columns.print();
+
+    //vcf.alt_columns.print();
     
     cout << "Get file size: " << get_file_size << " s" << endl;
     cout << "get_header: " << get_header << " s" << endl;

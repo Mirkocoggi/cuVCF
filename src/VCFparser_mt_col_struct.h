@@ -33,6 +33,39 @@ class info_int
     string name;
 };
 
+class samp_Flag
+{
+    public:
+    vector<bool> i_flag;
+    string name;
+    int numb;
+};
+
+class samp_String
+{
+    public:
+    vector<string> i_string;
+    string name;
+    int numb;
+};
+
+class samp_Float
+{
+    public:
+    vector<float> i_float;
+    string name;
+    int numb;
+};
+
+class samp_Int
+{
+    public:
+    vector<int> i_int;
+    string name;
+    int numb;
+};
+
+
 class header_element
 {
 public:
@@ -53,7 +86,7 @@ public:
 
 };
 
-class alt_columns_df //In progress
+class alt_columns_df
 {
     public:
     vector<string> var_id;
@@ -126,6 +159,39 @@ class alt_columns_df //In progress
     }
 };
 
+class sample_columns_df //aka df3
+{
+    public:
+    vector<string> var_id;
+    vector<string> samp_id;
+    vector<samp_Float> samp_float;
+    vector<samp_Flag> samp_flag;
+    vector<samp_String> samp_string;
+    vector<samp_Int> samp_int;
+    vector<string> sampNames;
+    int numSample; //numero di sample per riga
+
+   void print(){
+        cout << "VarID\tSampID\tFloat\t\tInt\t\tStr" << endl;
+        int iter = samp_id.size();
+        for(int i=0; i<iter; i++){
+            cout << var_id[i] << "\t" << samp_id[i] << "\t";
+            for(int j=0; j < samp_float.size(); j++){
+                cout << samp_float[j].name << "=" << samp_float[j].i_float[i] << ";";
+            }
+            cout << "\t";
+            for(int j=0; j < samp_int.size(); j++){
+                cout << samp_int[j].name << "=" << samp_int[j].i_int[i] << ";";
+            }
+            cout << "\t";
+            for(int j=0; j < samp_string.size(); j++){
+                cout << samp_string[j].name << "=" << samp_string[j].i_string[i] << ";";
+            }
+            cout << endl;
+        }
+    }
+};
+
 class var_columns_df
 {
 public:
@@ -151,6 +217,8 @@ public:
         int local_alt = 1;
         string tmp="\0";
         vector<string> tmp_split;
+        vector<string> tmp_format_split;
+        
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
@@ -208,7 +276,7 @@ public:
                 for(int y = 0; y<local_alt; y++){
                     (*tmp_alt).alt[(*tmp_num_alt)+y] = tmp_split[y];
                     (*tmp_alt).alt_id[(*tmp_num_alt)+y] = y;
-                    (*tmp_alt).var_id[(*tmp_num_alt)+y] = std::to_string(i);  //In progras id[i]; versione giusta ho cambiato per testare
+                    (*tmp_alt).var_id[(*tmp_num_alt)+y] = id[i]; 
                 }
             }else{
                 tmp += line[start+iter]; // per ora le salvo tutte come un unico array of char, andrebbe cambiato per salvarle separatamente
@@ -365,7 +433,339 @@ public:
                 
             }
         }
-        (*tmp_num_alt) = (*tmp_num_alt)+local_alt; 
+        (*tmp_num_alt) = (*tmp_num_alt)+local_alt;
+    }
+
+    void get_vcf_line_in_var_columns_format(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt, sample_columns_df* sample, header_element* FORMAT )
+    {
+        //cout<<i<<"\t";
+        bool find1 = false;
+        long iter=0;
+        int local_alt = 1;
+        string tmp="\0";
+        vector<string> tmp_split;
+        vector<string> tmp_format_split;
+        vector<string> tmp_subSplit;
+        
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                chrom[i] = tmp;
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+        tmp="\0";
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                pos[i] = stoul(tmp);
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+        tmp="\0";
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                id[i] = tmp;
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+        tmp="\0";
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                ref[i] = tmp;
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+        tmp="\0";
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                boost::split(tmp_split, tmp, boost::is_any_of(","));
+                local_alt = tmp_split.size();
+                for(int y = 0; y<local_alt; y++){
+                    (*tmp_alt).alt[(*tmp_num_alt)+y] = tmp_split[y];
+                    (*tmp_alt).alt_id[(*tmp_num_alt)+y] = y;
+                    (*tmp_alt).var_id[(*tmp_num_alt)+y] = id[i];
+                }
+            }else{
+                tmp += line[start+iter]; // per ora le salvo tutte come un unico array of char, andrebbe cambiato per salvarle separatamente
+                iter++;
+            }
+        }
+        tmp="\0";
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                if(strcmp(&tmp[0], ".")==0){
+                    qual[i] = 0.0f;
+                }else{
+                    qual[i] = stof(tmp); // da cambiare, in futuro
+                }
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+        tmp="\0";
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                filter[i] = tmp;
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+        tmp="\0";
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '||line[start+iter]=='\n'){
+                find1 = true;
+                iter++;
+                info[i] = tmp;
+                vector<string> tmp_el;
+                boost::split(tmp_el, tmp, boost::is_any_of(";")); //separo gli argomenti di info
+                vector<string> tmp_elems;
+                for(int ii=0; ii<tmp_el.size(); ii++){
+                    boost::split(tmp_elems, tmp_el[ii], boost::is_any_of("=")); //separo id dell'info dal contenuto
+                    bool find_info_type = false;
+                    bool find_info_elem = false;
+                    if(tmp_elems.size()==2){
+                        while(!find_info_type){
+                            if(info_map1[tmp_elems[0]]==1){
+                                //Int - divisione
+                                bool isAlt = false;
+                                int el=0;
+                                while(!find_info_elem){
+                                    if(in_int[el].name == tmp_elems[0]){
+                                        in_int[el].i_int[i] = stoi(tmp_elems[1]);
+                                        find_info_elem = true;
+                                    }
+                                    el++; 
+                                }
+                                find_info_type = true;
+                            }else if(info_map1[tmp_elems[0]]==2){
+                                //Float
+                                
+                                int el=0;
+                                while(!find_info_elem){
+                                    if(in_float[el].name == tmp_elems[0]){
+                                        in_float[el].i_float[i] = stof(tmp_elems[1]);
+                                        find_info_elem = true;
+                                    } 
+                                    el++;
+                                }
+                                find_info_type = true;
+                            }else if(info_map1[tmp_elems[0]]==3){
+                                //String
+                                
+                                int el=0;
+                                while(!find_info_elem){
+                                    if(in_string[el].name == tmp_elems[0]){
+                                        in_string[el].i_string[i] = tmp_elems[1];
+                                        find_info_elem = true;
+                                    } 
+                                    el++;
+                                }
+                                find_info_type = true;
+                            }else if(info_map1[tmp_elems[0]]==4){
+                                //Int Alt
+                                
+                                int el=0;
+                                while(!find_info_elem){
+                                    if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
+                                        boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                        for(int y = 0; y<local_alt; y++){
+                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = stoi(tmp_split[y]);
+                                        }
+                                        find_info_elem = true;
+                                    }
+                                    el++;
+                                }
+                                find_info_type = true;
+                            }else if(info_map1[tmp_elems[0]]==5){
+                                //Float Alt
+                                int el=0;
+                                while(!find_info_elem){
+                                    if((*tmp_alt).alt_float[el].name == tmp_elems[0]){
+                                        boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                        for(int y = 0; y<local_alt; y++){
+                                            (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = stof(tmp_split[y]);
+                                        }
+                                        find_info_elem = true;
+                                    }
+                                    el++;
+                                }
+                                find_info_type = true;
+                            }else if(info_map1[tmp_elems[0]]==6){
+                                //String Alt
+                                int el=0;
+                                while(!find_info_elem){
+                                    if((*tmp_alt).alt_string[el].name == tmp_elems[0]){
+                                        boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                        for(int y = 0; y<local_alt; y++){
+                                            (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = tmp_split[y];
+                                        }
+                                        find_info_elem = true;
+                                    }
+                                    el++;
+                                }
+                                find_info_type = true;                            
+                            }else{
+                                //cout<<"\n\nhere\n\n";
+                                find_info_type = true;
+                            }
+                        }
+                    }else{
+                        if((info_map1[tmp_elems[0]]==0) && strcmp(&tmp_elems[0][0],"")){
+                                //Flag
+                                int el=0;
+                                while(!find_info_elem){
+                                    if(in_flag[el].name == tmp_elems[0]){
+                                        in_flag[el].i_flag[i] = 1;
+                                        find_info_elem = true;
+                                    } 
+                                    el++;
+                                }
+                                
+                    }
+                    tmp_elems.clear();
+                    }
+                }
+            }else{
+                tmp += line[start+iter]; // anche qui andrebbero separate le info e creati dizionari con keys e values
+                iter++;
+                
+            }
+        }
+        (*tmp_num_alt) = (*tmp_num_alt)+local_alt;
+        tmp="\0";
+        find1=false; 
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                boost::split(tmp_format_split, tmp, boost::is_any_of(":"));
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+
+        int samp;
+        for(samp = 0; samp < (*sample).numSample; samp++){
+            tmp="\0";
+            find1=false;
+            (*sample).var_id[i*(*sample).numSample + samp] = id[i];
+            (*sample).samp_id[i*(*sample).numSample + samp] = (*sample).sampNames[samp];
+            while(!find1){
+                if(line[start+iter]=='\t'||line[start+iter]==' '||line[start+iter]=='\n'){
+                    find1 = true;
+                    iter++;
+                    boost::split(tmp_split, tmp, boost::is_any_of(":"));
+                    for(int j = 0; j < tmp_split.size(); j++){
+                        bool find_type = false;
+                        bool find_elem = false;
+                        while(!find_type){
+                            if(info_map1[tmp_format_split[j]] == 8 || info_map1[tmp_format_split[j] + std::to_string(1)] == 8){
+                                //String
+                                int el = 0;
+                                while(!find_elem){
+                                    if(!(*sample).samp_string[el].name.compare(0, tmp_format_split[j].length(), tmp_format_split[j], 0, tmp_format_split[j].length())){
+                                        if((*sample).samp_string[el].numb==1){
+                                            //aggiorna solo la cella corrispondente
+                                            (*sample).samp_string[el].i_string[i*(*sample).numSample + samp] = tmp_split[j];
+                                        }else{
+                                            //itera anche sulle liste che hanno il nome con in aggiunta il numero che saranno ad el + numero
+                                            vector<string> tmp_sub;
+                                            boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
+                                            for(int k = 0; k<(*sample).samp_string[el].numb; k++){
+                                                (*sample).samp_string[el+k].i_string[i*(*sample).numSample + samp] = tmp_sub[k];
+                                            }
+                                        }
+                                        find_elem = true;
+                                    }
+                                    el++;
+                                }
+                                find_type = true;
+                            }else if(info_map1[tmp_format_split[i]] == 9 || info_map1[tmp_format_split[j] + std::to_string(1)] == 9){
+                                //Integer
+                                int el = 0;
+                                while(!find_elem){
+                                    if(!(*sample).samp_int[el].name.compare(0, tmp_format_split[j].length(), tmp_format_split[j], 0, tmp_format_split[j].length())){
+                                        if((*sample).samp_int[el].numb==1){
+                                            //aggiorna solo la cella corrispondente
+                                            (*sample).samp_int[el].i_int[i*(*sample).numSample + samp] = std::stoi(tmp_split[j]);
+                                        }else{
+                                            //itera anche sulle liste che hanno il nome con in aggiunta il numero che saranno ad el + numero
+                                            vector<string> tmp_sub;
+                                            boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
+                                            for(int i = 0; i<(*sample).samp_int[el].numb; i++){
+                                                (*sample).samp_int[el+i].i_int[i*(*sample).numSample + samp] = std::stoi(tmp_sub[i]);
+                                            }
+                                        }
+                                        find_elem = true;
+                                    }
+                                    el++;
+                                }
+                                find_type = true;
+                            }else if(info_map1[tmp_format_split[i]] == 10 || info_map1[tmp_format_split[j] + std::to_string(1)] == 10){
+                                //Float
+
+                                int el = 0;
+                                while(!find_elem){
+                                    if(!(*sample).samp_float[el].name.compare(0, tmp_format_split[j].length(), tmp_format_split[j], 0, tmp_format_split[j].length())){
+                                        if((*sample).samp_float[el].numb==1){
+                                            //aggiorna solo la cella corrispondente
+                                            (*sample).samp_float[el].i_float[i*(*sample).numSample + samp] = std::stof(tmp_split[j]);
+                                        }else{
+                                            //itera anche sulle liste che hanno il nome con in aggiunta il numero che saranno ad el + numero
+                                            vector<string> tmp_sub;
+                                            boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
+                                            for(int i = 0; i<(*sample).samp_float[el].numb; i++){
+                                                (*sample).samp_float[el+i].i_float[i*(*sample).numSample + samp] = std::stof(tmp_sub[i]);
+                                            }
+                                        }
+                                        find_elem = true;
+                                    }
+                                    el++;
+                                }
+                                find_type = true;
+                            }else if(info_map1[tmp_format_split[i]] == 11 || info_map1[tmp_format_split[j] + std::to_string(1)] == 11){
+                                // da capire come gestire
+                            }
+                        }
+
+                    }
+                }else{
+                    tmp += line[start+iter];
+                    iter++;
+                }
+            }
+        }
     }
 
     void print_var_columns(long num_lines){
@@ -536,8 +936,6 @@ public:
     }
 };
 
-
-
 class vcf_parsed
 {
 public:
@@ -556,6 +954,8 @@ public:
     long *new_lines_index;
     var_columns_df var_columns;
     alt_columns_df alt_columns;
+    sample_columns_df samp_columns;
+
     void get_filename(string path_to_filename){
         vector<string> line_el;
         boost::split(line_el, path_to_filename, boost::is_any_of("/"));
@@ -621,6 +1021,20 @@ public:
                 }
             }
         }
+
+        vector<string> tmp_split;
+        boost::split(tmp_split, line, boost::is_any_of("\t"));
+        if(tmp_split.size() > 9){
+            samp_columns.numSample = tmp_split.size() - 9;
+            samp_columns.sampNames.resize(samp_columns.numSample, "\0");
+            for(int i = 0; i < samp_columns.numSample; i++){
+                samp_columns.sampNames[i] = tmp_split[9+i];
+            }
+        }else{
+            samp_columns.numSample = 0;
+        }
+        
+ 
         //for(int i=0; i<INFO.ID.size(); i++){
         //    cout<<"INFO.ID["<<i<<"]: "<<INFO.ID[i]<<" | INFO.Number["<<i<<"]: "<<INFO.Number[i]<<" | INFO.Type["<<i<<"]: "<<INFO.Type[i]<<endl;
         //}
@@ -635,7 +1049,7 @@ public:
     void allocate_filestring(){
         filestring = (char*)malloc(variants_size);
     }
-    void find_new_lines_index(string w_filename, int num_threads){ //popola anche il filestring
+    void find_new_lines_index(string w_filename, int num_threads){ //popola anche il filestring 
         new_lines_index = (long*)malloc(variants_size); //per ora ho esagerato con la dimensione (è come se permettessi tutti \n. Si puo ridurre (euristicamente), pero ipotizzarlo è meglio perche senno devo passare il file due volte solo per vedere dove iniziano le linee)
         new_lines_index[0] = 0; //il primo elemento lo metto a zero per indicare l'inizio della prima linea
         num_lines++;
@@ -704,19 +1118,113 @@ public:
         //cout << "\nFilestring time: " << filestring_time << " s " << "New lines time: " << f_new_lines << " s\n\n" << endl;
 
     }
+    void create_sample_vectors(int num_threads){
+        long batch_size = (num_lines-2+num_threads)/num_threads;
+        samp_Flag samp_flag_tmp;
+        samp_Float samp_float_tmp;
+        samp_Int samp_int_tmp;
+        samp_String samp_string_tmp;
+
+        //for each sampID
+            //se num != 'A'
+                //for i<num -> crea un type con nome="ID + i" e alloca la lista con #elem = #sample
+                //pushback dell'oggetto
+            // altrimenti -> gestire più avanti
+        //resize degli oggetti
+
+        int numIter = FORMAT.ID.size();
+        for(int i = 0; i < numIter; i++){
+            if(strcmp(&FORMAT.Number[i][0], "A") != 0){
+                if(strcmp(&FORMAT.Number[i][0], "1")==0){
+                    if(FORMAT.Type[i] == "String"){ 
+                        samp_string_tmp.name = FORMAT.ID[i];
+                        samp_columns.samp_string.push_back(samp_string_tmp);
+                        samp_columns.samp_string.back().i_string.resize((num_lines-1)*samp_columns.numSample, "\0");
+                        samp_columns.samp_string.back().numb = std::stoi(FORMAT.Number[i]);
+                        info_map[FORMAT.ID[i]] = 8;
+                        var_columns.info_map1[FORMAT.ID[i]] = 8;
+                        FORMAT.strings++;
+                    }else if(FORMAT.Type[i] == "Integer"){
+                        samp_int_tmp.name = FORMAT.ID[i];
+                        samp_columns.samp_int.push_back(samp_int_tmp);
+                        samp_columns.samp_int.back().i_int.resize((num_lines-1)*samp_columns.numSample, 0);
+                        samp_columns.samp_int.back().numb = std::stoi(FORMAT.Number[i]);
+                        info_map[FORMAT.ID[i]] = 9;
+                        var_columns.info_map1[FORMAT.ID[i]] = 9;
+                        FORMAT.ints++;
+                    }else if(FORMAT.Type[i] == "Float"){
+                        samp_float_tmp.name = FORMAT.ID[i];
+                        samp_columns.samp_float.push_back(samp_float_tmp);
+                        samp_columns.samp_float.back().i_float.resize((num_lines-1)*samp_columns.numSample, 0);
+                        samp_columns.samp_float.back().numb = std::stoi(FORMAT.Number[i]);
+                        info_map[FORMAT.ID[i]] = 10;
+                        var_columns.info_map1[FORMAT.ID[i]] = 10;
+                        FORMAT.floats++;
+                    }
+                }else if(strcmp(&FORMAT.Number[i][0], "0")==0){
+                    samp_flag_tmp.name = FORMAT.ID[i];
+                    samp_columns.samp_flag.push_back(samp_flag_tmp);
+                    samp_columns.samp_flag.back().i_flag.resize((num_lines-1)*samp_columns.numSample, 0);
+                    samp_columns.samp_flag.back().numb = std::stoi(FORMAT.Number[i]);
+                    info_map[FORMAT.ID[i]] = 11;
+                    var_columns.info_map1[FORMAT.ID[i]] = 11;
+                    FORMAT.flags++;
+                }else{
+                    if(FORMAT.Type[i] == "String"){
+                        for(int j = 0; j < std::stoi(FORMAT.Number[i]); j++){
+                            samp_string_tmp.name = FORMAT.ID[i] + std::to_string(j);
+                            samp_columns.samp_string.push_back(samp_string_tmp);
+                            samp_columns.samp_string.back().i_string.resize((num_lines-1)*samp_columns.numSample, "\0");
+                            samp_columns.samp_string.back().numb = std::stoi(FORMAT.Number[i]);
+                            info_map[FORMAT.ID[i]+std::to_string(j)] = 8;
+                            var_columns.info_map1[FORMAT.ID[i]+std::to_string(j)] = 8;
+                            FORMAT.strings++;
+                        }
+                    }else if(FORMAT.Type[i] == "Integer"){
+                        for(int j = 0; j < std::stoi(FORMAT.Number[i]); j++){
+                            samp_int_tmp.name = FORMAT.ID[i] + std::to_string(j);
+                            samp_columns.samp_int.push_back(samp_int_tmp);
+                            samp_columns.samp_int.back().i_int.resize((num_lines-1)*samp_columns.numSample, 0);
+                            samp_columns.samp_int.back().numb = std::stoi(FORMAT.Number[i]);
+                            info_map[FORMAT.ID[i]+std::to_string(j)] = 9;
+                            var_columns.info_map1[FORMAT.ID[i]+std::to_string(j)] = 9;
+                            FORMAT.ints++;
+                        }
+                    }else if(FORMAT.Type[i] == "Float"){
+                        for(int j = 0; j < std::stoi(FORMAT.Number[i]); j++){
+                            samp_float_tmp.name = FORMAT.ID[i] + std::to_string(j);
+                            samp_columns.samp_float.push_back(samp_float_tmp);
+                            samp_columns.samp_float.back().i_float.resize((num_lines-1)*samp_columns.numSample, 0);
+                            samp_columns.samp_float.back().numb = std::stoi(FORMAT.Number[i]);
+                            info_map[FORMAT.ID[i]+std::to_string(j)] = 10;
+                            var_columns.info_map1[FORMAT.ID[i]+std::to_string(j)] = 10;
+                            FORMAT.floats++;
+                        }
+                    }
+                }
+            }else{
+                //In progress -> parte con alternatives
+            }
+        }
+        samp_columns.samp_flag.resize(FORMAT.flags);
+        samp_columns.samp_int.resize(FORMAT.ints);
+        samp_columns.samp_float.resize(FORMAT.floats);
+        samp_columns.samp_string.resize(FORMAT.strings);
+        samp_columns.var_id.resize((num_lines-1)*samp_columns.numSample, "\0");
+        samp_columns.samp_id.resize((num_lines-1)*samp_columns.numSample, "\0");
+    }
     void create_info_vectors(int num_threads){
         long batch_size = (num_lines-2+num_threads)/num_threads;
         info_flag info_flag_tmp;
         info_float info_float_tmp;
         info_int info_int_tmp;
         info_string info_string_tmp;
-
         info_float alt_float_tmp;
         info_int alt_int_tmp;
         info_string alt_string_tmp;
         for(int i=0; i<INFO.total_values; i++){
             if(strcmp(&INFO.Number[i][0], "A") == 0){ 
-                if(strcmp(&INFO.Type[i][0], "Integer")==0){ //in progress - da capire come gestire l'allocazione
+                if(strcmp(&INFO.Type[i][0], "Integer")==0){
                     INFO.ints_alt++;
                     alt_int_tmp.name = INFO.ID[i];
                     alt_int_tmp.i_int.resize(2*batch_size, 0);
@@ -742,7 +1250,7 @@ public:
                 }
                 if(strcmp(&INFO.Type[i][0], "Flag")==0){ //Per ora non gestito
                     INFO.flags_alt++;
-                    info_map[INFO.ID[i]] = 0;
+                    info_map[INFO.ID[i]] = 7;
                 }
             }else if((strcmp(&INFO.Number[i][0], "1") == 0)||(strcmp(&INFO.Number[i][0], "0") == 0)){
                 if(strcmp(&INFO.Type[i][0], "Integer")==0){
@@ -776,6 +1284,8 @@ public:
                     var_columns.in_flag.push_back(info_flag_tmp);
                     info_map[INFO.ID[i]] = 0;
                     var_columns.info_map1[INFO.ID[i]] = 0;
+                }else{
+                    //in progress, se num > 1
                 }
             }
         }
@@ -882,7 +1392,6 @@ public:
         var_columns.filter.resize(num_lines-1);
         var_columns.info.resize(num_lines-1);
         //cout<<"Finish resize!"<<endl;
-        //in progress
     }
     void populate_var_columns(int num_threads){
         long batch_size = (num_lines-2+num_threads)/num_threads;
@@ -902,12 +1411,17 @@ public:
             start = th_ID*batch_size; // inizio del batch dello specifico thread
             end = start + batch_size; // fine del batch
             //cout<<"\nNum Lines: "<<num_lines-2<<endl;
-            for(long i=start; i<end && i<num_lines-1; i++){ //start e end mi dicono l'intervallo di linee che eseguirà ogni thread, quindi la i rappresenta l'iesima linea (var) che inizia a new_lines_index[i] e finisce a new_lines_index[i+1] (escluso)
-                var_columns.var_number[i] = i;
-                //cout<<"Var_number[i]: "<<var_columns.var_number[i]<<endl;
-                var_columns.get_vcf_line_in_var_columns(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]));
-                //cout<<"enf"<<endl;
-            }
+            if(samp_columns.numSample>0){
+                for(long i=start; i<end && i<num_lines-1; i++){ 
+                    var_columns.var_number[i] = i;
+                    var_columns.get_vcf_line_in_var_columns_format(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]), &samp_columns, &FORMAT);
+                }
+            }else{
+                for(long i=start; i<end && i<num_lines-1; i++){
+                    var_columns.var_number[i] = i;
+                    var_columns.get_vcf_line_in_var_columns(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]));
+                }
+            }            
             tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
             tmp_alt[th_ID].alt_id.resize(tmp_num_alt[th_ID]);
             for(int i=0; i<INFO.ints_alt; i++){
@@ -983,7 +1497,6 @@ public:
         for(int j=0; j<INFO.strings_alt; j++){
             alt_columns.alt_string[j].i_string.resize(totAlt);
         }
-        //in progress
         
     }
 
