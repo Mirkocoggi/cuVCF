@@ -65,7 +65,6 @@ class samp_Int
     int numb;
 };
 
-
 class header_element
 {
 public:
@@ -172,6 +171,81 @@ class sample_columns_df //aka df3
     int numSample; //numero di sample per riga
 
    void print(){
+        cout << "VarID\tSampID\tFloat\t\tInt\t\tStr" << endl;
+        int iter = samp_id.size();
+        for(int i=0; i<iter; i++){
+            cout << var_id[i] << "\t" << samp_id[i] << "\t";
+            for(int j=0; j < samp_float.size(); j++){
+                cout << samp_float[j].name << "=" << samp_float[j].i_float[i] << ";";
+            }
+            cout << "\t";
+            for(int j=0; j < samp_int.size(); j++){
+                cout << samp_int[j].name << "=" << samp_int[j].i_int[i] << ";";
+            }
+            cout << "\t";
+            for(int j=0; j < samp_string.size(); j++){
+                cout << samp_string[j].name << "=" << samp_string[j].i_string[i] << ";";
+            }
+            cout << endl;
+        }
+    }
+};
+
+class alt_format_df //aka df4 in progress
+{
+    public:
+    vector<string> var_id;
+    vector<string> samp_id;
+    vector<int> alt_id;
+    vector<samp_Float> samp_float;
+    vector<samp_Flag> samp_flag;
+    vector<samp_String> samp_string;
+    vector<samp_Int> samp_int;
+    vector<string> sampNames;
+    int numSample;
+
+    void clone(alt_format_df ref, header_element FORMAT){
+        int numAlt = FORMAT.alt_values;
+        var_id.resize(numAlt, "\0");
+        samp_id.resize(numAlt, "\0");
+        alt_id.resize(numAlt, 0);
+
+        int tmp = FORMAT.floats_alt;
+        if(tmp>0){
+            samp_Float tmpFloat;
+            for(int i = 0; i<tmp; i++){
+                tmpFloat.name = ref.samp_float[i].name;
+                tmpFloat.i_float.resize(ref.samp_float[i].i_float.size(), 0);
+                alt_float.push_back(tmpFloat);
+            }
+            alt_float.resize(tmp);
+        }
+    
+        tmp = FORMAT.ints_alt;
+
+        if(tmp>0){
+            samp_Int tmpInt;
+            for(int i = 0; i<tmp; i++){
+                tmpInt.name = ref.samp_int[i].name;
+                tmpInt.i_int.resize(ref.samp_int[i].i_int.size(), 0);
+                alt_int.push_back(tmpInt);
+            }
+            alt_int.resize(tmp);
+        }
+        tmp = FORMAT.strings_alt;
+        if(tmp>0){
+            samp_String tmpString;
+            for(int i = 0; i<tmp; i++){
+                tmpString.name = ref.samp_string[i].name;
+                tmpString.i_string.resize(ref.samp_string[i].i_string.size(), "\0");
+                alt_string.push_back(tmpString);
+            }
+            alt_string.resize(tmp);
+        }       
+    }   
+
+    
+    void print(){ //in progress
         cout << "VarID\tSampID\tFloat\t\tInt\t\tStr" << endl;
         int iter = samp_id.size();
         for(int i=0; i<iter; i++){
@@ -436,7 +510,7 @@ public:
         (*tmp_num_alt) = (*tmp_num_alt)+local_alt;
     }
 
-    void get_vcf_line_in_var_columns_format(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt, sample_columns_df* sample, header_element* FORMAT )
+    void get_vcf_line_in_var_columns_format(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt, sample_columns_df* sample, header_element* FORMAT, int *tmp_num_alt_format, alt_format_df* tmp_alt_format)
     {
         //cout<<i<<"\t";
         bool find1 = false;
@@ -755,7 +829,31 @@ public:
                                 }
                                 find_type = true;
                             }else if(info_map1[tmp_format_split[i]] == 11 || info_map1[tmp_format_split[j] + std::to_string(1)] == 11){
-                                // da capire come gestire
+                                //String alt
+                                int el = 0;
+                                while(!find_elem){
+                                    if(!(*sample).samp_string[el].name.compare(0, tmp_format_split[j].length(), tmp_format_split[j], 0, tmp_format_split[j].length())){
+                                        if((*sample).samp_string[el].numb==1){
+                                            //aggiorna solo la cella corrispondente
+                                            (*sample).samp_string[el].i_string[i*(*sample).numSample + samp] = tmp_split[j];
+                                        }else{
+                                            //itera anche sulle liste che hanno il nome con in aggiunta il numero che saranno ad el + numero
+                                            vector<string> tmp_sub;
+                                            boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
+                                            for(int k = 0; k<(*sample).samp_string[el].numb; k++){
+                                                (*sample).samp_string[el+k].i_string[i*(*sample).numSample + samp] = tmp_sub[k];
+                                            }
+                                        }
+                                        find_elem = true;
+                                    }
+                                    el++;
+                                }
+                                find_type = true;
+                                
+                            }else if(info_map1[tmp_format_split[i]] == 12 || info_map1[tmp_format_split[j] + std::to_string(1)] == 12){
+                                //in progress per alternatives
+                            }else if(info_map1[tmp_format_split[i]] == 11 || info_map1[tmp_format_split[j] + std::to_string(1)] == 13){
+
                             }
                         }
 
@@ -955,6 +1053,7 @@ public:
     var_columns_df var_columns;
     alt_columns_df alt_columns;
     sample_columns_df samp_columns;
+    alt_format_df alt_sample;
 
     void get_filename(string path_to_filename){
         vector<string> line_el;
@@ -1016,6 +1115,7 @@ public:
                     if(Format){
                         if(i==0) FORMAT.ID.push_back(line_el2[1]);
                         if(i==1) FORMAT.Number.push_back(line_el2[1]);
+                        if(i==1 && line_el2[1] == "A") FORMAT.alt_values++;
                         if(i==2) FORMAT.Type.push_back(line_el2[1]);
                     }
                 }
@@ -1116,7 +1216,6 @@ public:
         after = chrono::system_clock::now();
         auto f_new_lines = std::chrono::duration<double>(after - before).count(); 
         //cout << "\nFilestring time: " << filestring_time << " s " << "New lines time: " << f_new_lines << " s\n\n" << endl;
-
     }
     void create_sample_vectors(int num_threads){
         long batch_size = (num_lines-2+num_threads)/num_threads;
@@ -1125,12 +1224,11 @@ public:
         samp_Int samp_int_tmp;
         samp_String samp_string_tmp;
 
-        //for each sampID
-            //se num != 'A'
-                //for i<num -> crea un type con nome="ID + i" e alloca la lista con #elem = #sample
-                //pushback dell'oggetto
-            // altrimenti -> gestire più avanti
-        //resize degli oggetti
+        samp_Float samp_alt_float_tmp;
+        samp_Int samp_alt_int_tmp;
+        samp_String samp_alt_string_tmp;
+
+        long batch_size = (num_lines-2+num_threads)/num_threads;
 
         int numIter = FORMAT.ID.size();
         for(int i = 0; i < numIter; i++){
@@ -1204,8 +1302,32 @@ public:
                 }
             }else{
                 //In progress -> parte con alternatives
+                if(FORMAT.Type[i] == "String"){ 
+                    samp_alt_string_tmp.name = FORMAT.ID[i];
+                    alt_sample.samp_string.push_back(samp_alt_string_tmp);
+                    alt_sample.samp_string.back().i_string.resize(batch_size*samp_columns.numSample*2, "\0");
+                    alt_sample.samp_string.back().numb = -1;
+                    info_map[FORMAT.ID[i]] = 11;
+                    var_columns.info_map1[FORMAT.ID[i]] = 11;
+                    FORMAT.strings_alt++;
+                }else if(FORMAT.Type[i] == "Integer"){
+                    samp_alt_int_tmp.name = FORMAT.ID[i];
+                    samp_alt_int_tmp.samp_int.push_back(samp_alt_int_tmp);
+                    samp_alt_int_tmp.samp_int.back().i_int.resize(batch_size*samp_columns.numSample*2, 0);
+                    samp_alt_int_tmp.samp_int.back().numb = -1;
+                    info_map[FORMAT.ID[i]] = 12;
+                    var_columns.info_map1[FORMAT.ID[i]] = 12;
+                    FORMAT.ints_alt++;
+                }else if(FORMAT.Type[i] == "Float"){
+                    samp_alt_float_tmp.name = FORMAT.ID[i];
+                    samp_alt_float_tmp.samp_float.push_back(samp_alt_float_tmp);
+                    samp_alt_float_tmp.samp_float.back().i_float.resize(batch_size*samp_columns.numSample*2, 0);
+                    samp_alt_float_tmp.samp_float.back().numb = -1;
+                    info_map[FORMAT.ID[i]] = 13;
+                    var_columns.info_map1[FORMAT.ID[i]] = 13;
+                    FORMAT.floats_alt++;
+                }
             }
-        }
         samp_columns.samp_flag.resize(FORMAT.flags);
         samp_columns.samp_int.resize(FORMAT.ints);
         samp_columns.samp_float.resize(FORMAT.floats);
@@ -1219,6 +1341,7 @@ public:
         info_float info_float_tmp;
         info_int info_int_tmp;
         info_string info_string_tmp;
+        
         info_float alt_float_tmp;
         info_int alt_int_tmp;
         info_string alt_string_tmp;
@@ -1397,16 +1520,27 @@ public:
         long batch_size = (num_lines-2+num_threads)/num_threads;
         alt_columns_df tmp_alt[num_threads];
         int tmp_num_alt[num_threads];
+        //in progress
+        alt_format_df tmp_alt_format[num_threads];
+        int tmp_num_alt_format[num_threads];
+
 #pragma omp parallel
         {
             long start, end;
             int th_ID = omp_get_thread_num();
             //struttura temporanea del thread con alternatives.
             tmp_alt[th_ID].clone(alt_columns, INFO);
+            tmp_alt_format[th_ID].clone(alt_sample, FORMAT);
+
             tmp_num_alt[th_ID] = 0;
+            tmp_num_alt_format[th_ID] = 0;
             tmp_alt[th_ID].var_id.resize(batch_size*2, "\0");
             tmp_alt[th_ID].alt_id.resize(batch_size*2, 0);
             tmp_alt[th_ID].alt.resize(batch_size*2, "\0");
+
+            tmp_alt[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, "\0");
+            tmp_alt[th_ID].alt_id.resize(batch_size*2*samp_columns.numSample, 0);
+            tmp_alt[th_ID].alt.resize(batch_size*2*samp_columns.numSample, "\0");
             //cout << "\nThread id: "<<th_ID<<endl;
             start = th_ID*batch_size; // inizio del batch dello specifico thread
             end = start + batch_size; // fine del batch
@@ -1414,7 +1548,7 @@ public:
             if(samp_columns.numSample>0){
                 for(long i=start; i<end && i<num_lines-1; i++){ 
                     var_columns.var_number[i] = i;
-                    var_columns.get_vcf_line_in_var_columns_format(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]), &samp_columns, &FORMAT);
+                    var_columns.get_vcf_line_in_var_columns_format(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]), &samp_columns, &FORMAT, &(tmp_num_alt_format[th_ID]), &(tmp_alt_format[th_ID]));
                 }
             }else{
                 for(long i=start; i<end && i<num_lines-1; i++){
