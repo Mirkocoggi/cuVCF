@@ -243,13 +243,12 @@ class alt_format_df //aka df4 in progress
             samp_string.resize(tmp);
         }       
     }   
-
-    
+ 
     void print(){ //in progress
-        cout << "VarID\tSampID\tFloat\t\tInt\t\tStr" << endl;
+        cout << "VarID\tSampID\talt_id\tFloat\t\tInt\t\tStr" << endl;
         int iter = samp_id.size();
         for(int i=0; i<iter; i++){
-            cout << var_id[i] << "\t" << samp_id[i] << "\t";
+            cout << var_id[i] << "\t" << samp_id[i] << "\t" << alt_id[i] << "\t";
             for(int j=0; j < samp_float.size(); j++){
                 cout << samp_float[j].name << "=" << samp_float[j].i_float[i] << ";";
             }
@@ -1570,14 +1569,14 @@ public:
             tmp_alt_format[th_ID].clone(alt_sample, FORMAT);
 
             tmp_num_alt[th_ID] = 0;
-            tmp_num_alt_format[th_ID] = 0;
             tmp_alt[th_ID].var_id.resize(batch_size*2, "\0");
             tmp_alt[th_ID].alt_id.resize(batch_size*2, 0);
             tmp_alt[th_ID].alt.resize(batch_size*2, "\0");
 
-            tmp_alt[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, "\0");
-            tmp_alt[th_ID].alt_id.resize(batch_size*2*samp_columns.numSample, 0);
-            tmp_alt[th_ID].alt.resize(batch_size*2*samp_columns.numSample, "\0");
+            tmp_num_alt_format[th_ID] = 0;
+            tmp_alt_format[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, "\0");
+            tmp_alt_format[th_ID].alt_id.resize(batch_size*2*samp_columns.numSample, 0);
+            tmp_alt_format[th_ID].samp_id.resize(batch_size*2*samp_columns.numSample, "\0");
             //cout << "\nThread id: "<<th_ID<<endl;
             start = th_ID*batch_size; // inizio del batch dello specifico thread
             end = start + batch_size; // fine del batch
@@ -1595,6 +1594,7 @@ public:
             }            
             tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
             tmp_alt[th_ID].alt_id.resize(tmp_num_alt[th_ID]);
+            tmp_alt[th_ID].alt.resize(tmp_num_alt[th_ID]);
             for(int i=0; i<INFO.ints_alt; i++){
                 tmp_alt[th_ID].alt_int[i].i_int.resize(tmp_num_alt[th_ID]);
             }
@@ -1604,12 +1604,25 @@ public:
             for(int i=0; i<INFO.strings_alt; i++){
                 tmp_alt[th_ID].alt_string[i].i_string.resize(tmp_num_alt[th_ID]);
             }
-            tmp_alt[th_ID].alt.resize(tmp_num_alt[th_ID]);
             tmp_alt[th_ID].numAlt = tmp_num_alt[th_ID];
-            
+
+            tmp_alt_format[th_ID].var_id.resize(tmp_num_alt_format[th_ID]);
+            tmp_alt_format[th_ID].alt_id.resize(tmp_num_alt_format[th_ID]);
+            tmp_alt_format[th_ID].samp_id.resize(tmp_num_alt_format[th_ID]);
+            for(int i=0; i<FORMAT.ints_alt; i++){
+                tmp_alt_format[th_ID].samp_int[i].i_int.resize(tmp_num_alt_format[th_ID]);
+            }
+            for(int i=0; i<FORMAT.floats_alt; i++){
+                tmp_alt_format[th_ID].samp_float[i].i_float.resize(tmp_num_alt_format[th_ID]);
+            }
+            for(int i=0; i<FORMAT.strings_alt; i++){
+                tmp_alt_format[th_ID].samp_string[i].i_string.resize(tmp_num_alt_format[th_ID]);
+            }
+            tmp_alt_format[th_ID].numSample = tmp_num_alt_format[th_ID];            
         }
         int totAlt = 0;
-        //Non troppo efficiente ma valido per ora
+        int totSampAlt = 0;
+        // in progress Non troppo efficiente ma valido per ora
         for(int i=0; i<INFO.ints_alt; i++){
             alt_columns.alt_int[i].i_int.resize(0);
         }
@@ -1655,6 +1668,54 @@ public:
             }
             totAlt+=tmp_num_alt[i];
         }
+
+        // in progress Non troppo efficiente ma valido per ora
+        for(int i=0; i<FORMAT.ints_alt; i++){
+            alt_sample.samp_int[i].i_int.resize(0);
+        }
+        for(int i=0; i<FORMAT.floats_alt; i++){
+            alt_sample.samp_float[i].i_float.resize(0);
+        }
+        for(int i=0; i<FORMAT.strings_alt; i++){
+            alt_sample.samp_string[i].i_string.resize(0);
+        }
+        for(int i=0; i<num_threads; i++){
+            alt_sample.var_id.insert(
+                alt_sample.var_id.end(),
+                tmp_alt_format[i].var_id.begin(),
+                tmp_alt_format[i].var_id.end()
+            );
+            alt_sample.alt_id.insert(
+                alt_sample.alt_id.end(),
+                tmp_alt_format[i].alt_id.begin(),
+                tmp_alt_format[i].alt_id.end()
+            );
+            alt_sample.samp_id.insert(
+                alt_sample.samp_id.end(),
+                tmp_alt_format[i].samp_id.begin(),
+                tmp_alt_format[i].samp_id.end()
+            );
+            for(int j=0; j<FORMAT.ints_alt; j++){
+                alt_sample.samp_int[j].i_int.insert(
+                    alt_sample.samp_int[j].i_int.end(), 
+                    tmp_alt_format[i].samp_int[j].i_int.begin(), 
+                    tmp_alt_format[i].samp_int[j].i_int.end());
+            }
+            for(int j=0; j<FORMAT.floats_alt; j++){
+                alt_sample.samp_float[j].i_float.insert(
+                    alt_sample.samp_float[j].i_float.end(), 
+                    tmp_alt_format[i].samp_float[j].i_float.begin(), 
+                    tmp_alt_format[i].samp_float[j].i_float.end());
+            }
+            for(int j=0; j<FORMAT.strings_alt; j++){
+                alt_sample.samp_string[j].i_string.insert(
+                    alt_sample.samp_string[j].i_string.end(), 
+                    tmp_alt_format[i].samp_string[j].i_string.begin(), 
+                    tmp_alt_format[i].samp_string[j].i_string.end());
+            }
+            totSampAlt+=tmp_num_alt_format[i];
+        }
+
         alt_columns.numAlt = totAlt;
         alt_columns.var_id.resize(totAlt);
         alt_columns.alt_id.resize(totAlt);
@@ -1667,6 +1728,20 @@ public:
         }
         for(int j=0; j<INFO.strings_alt; j++){
             alt_columns.alt_string[j].i_string.resize(totAlt);
+        }
+
+        alt_sample.numSample = totSampAlt;
+        alt_sample.var_id.resize(totSampAlt);
+        alt_sample.samp_id.resize(totSampAlt);
+        alt_sample.alt_id.resize(totSampAlt);
+        for(int j=0; j<INFO.ints_alt; j++){
+            alt_sample.samp_int[j].i_int.resize(totSampAlt);
+        }
+        for(int j=0; j<INFO.floats_alt; j++){
+            alt_sample.samp_float[j].i_float.resize(totSampAlt);
+        }
+        for(int j=0; j<INFO.strings_alt; j++){
+            alt_sample.samp_string[j].i_string.resize(totSampAlt);
         }
         
     }
