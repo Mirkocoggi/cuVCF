@@ -134,11 +134,12 @@ int main(int argc, char *argv[]){
     //vcf.print_info_map();
     //vcf.print_info();
     vcf.reserve_var_columns();
+    //in progress
+    vcf.create_sample_vectors(num_threadss);
     after = chrono::system_clock::now();
     auto reserve_var_columns = std::chrono::duration<double>(after - before).count();
 
-    //in progress
-    vcf.create_sample_vectors(num_threadss);
+    
 
     before = chrono::system_clock::now();
     vcf.populate_var_columns(num_threadss);

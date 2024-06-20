@@ -209,12 +209,19 @@ class alt_format_df //aka df4 in progress
         var_id.resize(numAlt, "\0");
         samp_id.resize(numAlt, "\0");
         alt_id.resize(numAlt, 0);
+        numSample = ref.numSample;
+        sampNames.resize(numSample, "\0");
+
+        for(int i=0; i<numSample; i++){
+            sampNames[i] = ref.sampNames[i];
+        }
 
         int tmp = FORMAT.floats_alt;
         if(tmp>0){
             samp_Float tmpFloat;
             for(int i = 0; i<tmp; i++){
                 tmpFloat.name = ref.samp_float[i].name;
+                tmpFloat.numb = ref.samp_float[i].numb;
                 tmpFloat.i_float.resize(ref.samp_float[i].i_float.size(), 0);
                 samp_float.push_back(tmpFloat);
             }
@@ -227,6 +234,7 @@ class alt_format_df //aka df4 in progress
             samp_Int tmpInt;
             for(int i = 0; i<tmp; i++){
                 tmpInt.name = ref.samp_int[i].name;
+                tmpInt.numb = ref.samp_int[i].numb;
                 tmpInt.i_int.resize(ref.samp_int[i].i_int.size(), 0);
                 samp_int.push_back(tmpInt);
             }
@@ -237,6 +245,7 @@ class alt_format_df //aka df4 in progress
             samp_String tmpString;
             for(int i = 0; i<tmp; i++){
                 tmpString.name = ref.samp_string[i].name;
+                tmpString.numb = ref.samp_string[i].numb;
                 tmpString.i_string.resize(ref.samp_string[i].i_string.size(), "\0");
                 samp_string.push_back(tmpString);
             }
@@ -629,7 +638,7 @@ public:
                     if(tmp_elems.size()==2){
                         while(!find_info_type){
                             if(info_map1[tmp_elems[0]]==1){
-                                //Int - divisione
+                                //Int
                                 bool isAlt = false;
                                 int el=0;
                                 while(!find_info_elem){
@@ -641,8 +650,7 @@ public:
                                 }
                                 find_info_type = true;
                             }else if(info_map1[tmp_elems[0]]==2){
-                                //Float
-                                
+                                //Float                                
                                 int el=0;
                                 while(!find_info_elem){
                                     if(in_float[el].name == tmp_elems[0]){
@@ -653,8 +661,7 @@ public:
                                 }
                                 find_info_type = true;
                             }else if(info_map1[tmp_elems[0]]==3){
-                                //String
-                                
+                                //String                                
                                 int el=0;
                                 while(!find_info_elem){
                                     if(in_string[el].name == tmp_elems[0]){
@@ -666,7 +673,6 @@ public:
                                 find_info_type = true;
                             }else if(info_map1[tmp_elems[0]]==4){
                                 //Int Alt
-                                
                                 int el=0;
                                 while(!find_info_elem){
                                     if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
@@ -785,7 +791,7 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_map1[tmp_format_split[i]] == 9 || info_map1[tmp_format_split[j] + std::to_string(1)] == 9){
+                            }else if(info_map1[tmp_format_split[j]] == 9 || info_map1[tmp_format_split[j] + std::to_string(1)] == 9){
                                 //Integer
                                 (*sample).var_id[i*(*sample).numSample + samp] = id[i];
                                 (*sample).samp_id[i*(*sample).numSample + samp] = (*sample).sampNames[samp];
@@ -808,7 +814,7 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_map1[tmp_format_split[i]] == 10 || info_map1[tmp_format_split[j] + std::to_string(1)] == 10){
+                            }else if(info_map1[tmp_format_split[j]] == 10 || info_map1[tmp_format_split[j] + std::to_string(1)] == 10){
                                 //Float
                                 (*sample).var_id[i*(*sample).numSample + samp] = id[i];
                                 (*sample).samp_id[i*(*sample).numSample + samp] = (*sample).sampNames[samp];
@@ -831,17 +837,17 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_map1[tmp_format_split[i]] == 11){
+                            }else if(info_map1[tmp_format_split[j]] == 11){
                                 //String alt
                                 boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
-                                local_alt = tmp_split.size();
+                                local_alt = tmp_sub.size();
                                 int el = 0;
                                 while(!find_elem){ //in progress da cambiare
-                                    if(!(*sample).samp_string[el].name.compare(tmp_format_split[j])){
-                                        //da fare su misura per alternatives
+                                    if(!(*tmp_alt_format).samp_string[el].name.compare(tmp_format_split[j])){
+                                        //da fare su misura per alternativesp
                                         for(int y = 0; y<local_alt; y++){ //in progress da inizializzare local_alt
                                             (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = id[i];
-                                            (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = (*sample).sampNames[samp];
+                                            (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = (*tmp_alt_format).sampNames[samp];
                                             (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = y;
                                             (*tmp_alt_format).samp_string[el].i_string[(*tmp_num_alt_format) + y] = tmp_sub[y];
                                         }
@@ -851,17 +857,17 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_map1[tmp_format_split[i]] == 12){
+                            }else if(info_map1[tmp_format_split[j]] == 12){
                                 //int alt
                                 boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
-                                local_alt = tmp_split.size();
+                                local_alt = tmp_sub.size();
                                 int el = 0;
                                 while(!find_elem){ //in progress da cambiare
-                                    if(!(*sample).samp_string[el].name.compare(tmp_format_split[j])){
+                                    if(!(*tmp_alt_format).samp_int[el].name.compare(tmp_format_split[j])){
                                         //da fare su misura per alternatives
                                         for(int y = 0; y<local_alt; y++){ //in progress da inizializzare local_alt
                                             (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = id[i];
-                                            (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = (*sample).sampNames[samp];
+                                            (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = (*tmp_alt_format).sampNames[samp];
                                             (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = y;
                                             (*tmp_alt_format).samp_int[el].i_int[(*tmp_num_alt_format) + y] = std::stoi(tmp_sub[y]);
                                         }
@@ -871,17 +877,17 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_map1[tmp_format_split[i]] == 13){
+                            }else if(info_map1[tmp_format_split[j]] == 13){
                                 //float alt
                                 boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
-                                local_alt = tmp_split.size();
+                                local_alt = tmp_sub.size();
                                 int el = 0;
                                 while(!find_elem){ //in progress da cambiare
-                                    if(!(*sample).samp_string[el].name.compare(tmp_format_split[j])){
+                                    if(!(*tmp_alt_format).samp_float[el].name.compare(tmp_format_split[j])){
                                         //da fare su misura per alternatives
                                         for(int y = 0; y<local_alt; y++){ //in progress da inizializzare local_alt
                                             (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = id[i];
-                                            (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = (*sample).sampNames[samp];
+                                            (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = (*tmp_alt_format).sampNames[samp];
                                             (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = y;
                                             (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = std::stof(tmp_sub[y]);
                                         }
@@ -1163,9 +1169,12 @@ public:
         boost::split(tmp_split, line, boost::is_any_of("\t"));
         if(tmp_split.size() > 9){
             samp_columns.numSample = tmp_split.size() - 9;
+            alt_sample.numSample = samp_columns.numSample;
             samp_columns.sampNames.resize(samp_columns.numSample, "\0");
+            alt_sample.sampNames.resize(samp_columns.numSample, "\0");
             for(int i = 0; i < samp_columns.numSample; i++){
                 samp_columns.sampNames[i] = tmp_split[9+i];
+                alt_sample.sampNames[i] = tmp_split[9+i];
             }
         }else{
             samp_columns.numSample = 0;
@@ -1269,7 +1278,7 @@ public:
         for(int i = 0; i < numIter; i++){
             if(strcmp(&FORMAT.Number[i][0], "A") != 0){
                 if(strcmp(&FORMAT.Number[i][0], "1")==0){
-                    if(FORMAT.Type[i] == "String"){ 
+                    if(!strcmp(&FORMAT.Type[i][0], "String")){ 
                         samp_string_tmp.name = FORMAT.ID[i];
                         samp_columns.samp_string.push_back(samp_string_tmp);
                         samp_columns.samp_string.back().i_string.resize((num_lines-1)*samp_columns.numSample, "\0");
@@ -1277,7 +1286,7 @@ public:
                         info_map[FORMAT.ID[i]] = 8;
                         var_columns.info_map1[FORMAT.ID[i]] = 8;
                         FORMAT.strings++;
-                    }else if(FORMAT.Type[i] == "Integer"){
+                    }else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
                         samp_int_tmp.name = FORMAT.ID[i];
                         samp_columns.samp_int.push_back(samp_int_tmp);
                         samp_columns.samp_int.back().i_int.resize((num_lines-1)*samp_columns.numSample, 0);
@@ -1285,7 +1294,7 @@ public:
                         info_map[FORMAT.ID[i]] = 9;
                         var_columns.info_map1[FORMAT.ID[i]] = 9;
                         FORMAT.ints++;
-                    }else if(FORMAT.Type[i] == "Float"){
+                    }else if(!strcmp(&FORMAT.Type[i][0], "Float")){
                         samp_float_tmp.name = FORMAT.ID[i];
                         samp_columns.samp_float.push_back(samp_float_tmp);
                         samp_columns.samp_float.back().i_float.resize((num_lines-1)*samp_columns.numSample, 0);
@@ -1303,7 +1312,7 @@ public:
                     var_columns.info_map1[FORMAT.ID[i]] = 11;
                     FORMAT.flags++;
                 }else{
-                    if(FORMAT.Type[i] == "String"){
+                    if(!strcmp(&FORMAT.Type[i][0], "String")){
                         for(int j = 0; j < std::stoi(FORMAT.Number[i]); j++){
                             samp_string_tmp.name = FORMAT.ID[i] + std::to_string(j);
                             samp_columns.samp_string.push_back(samp_string_tmp);
@@ -1313,7 +1322,7 @@ public:
                             var_columns.info_map1[FORMAT.ID[i]+std::to_string(j)] = 8;
                             FORMAT.strings++;
                         }
-                    }else if(FORMAT.Type[i] == "Integer"){
+                    }else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
                         for(int j = 0; j < std::stoi(FORMAT.Number[i]); j++){
                             samp_int_tmp.name = FORMAT.ID[i] + std::to_string(j);
                             samp_columns.samp_int.push_back(samp_int_tmp);
@@ -1323,7 +1332,7 @@ public:
                             var_columns.info_map1[FORMAT.ID[i]+std::to_string(j)] = 9;
                             FORMAT.ints++;
                         }
-                    }else if(FORMAT.Type[i] == "Float"){
+                    }else if(!strcmp(&FORMAT.Type[i][0], "Float")){
                         for(int j = 0; j < std::stoi(FORMAT.Number[i]); j++){
                             samp_float_tmp.name = FORMAT.ID[i] + std::to_string(j);
                             samp_columns.samp_float.push_back(samp_float_tmp);
@@ -1337,7 +1346,7 @@ public:
                 }
             }else{
                 //In progress -> parte con alternatives
-                if(FORMAT.Type[i] == "String"){ 
+                if(!strcmp(&FORMAT.Type[i][0], "String")){ 
                     samp_alt_string_tmp.name = FORMAT.ID[i];
                     alt_sample.samp_string.push_back(samp_alt_string_tmp);
                     alt_sample.samp_string.back().i_string.resize(batch_size*samp_columns.numSample*2, "\0");
@@ -1345,7 +1354,7 @@ public:
                     info_map[FORMAT.ID[i]] = 11;
                     var_columns.info_map1[FORMAT.ID[i]] = 11;
                     FORMAT.strings_alt++;
-                }else if(FORMAT.Type[i] == "Integer"){
+                }else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
                     samp_alt_int_tmp.name = FORMAT.ID[i];
                     alt_sample.samp_int.push_back(samp_alt_int_tmp);
                     alt_sample.samp_int.back().i_int.resize(batch_size*samp_columns.numSample*2, 0);
@@ -1353,7 +1362,7 @@ public:
                     info_map[FORMAT.ID[i]] = 12;
                     var_columns.info_map1[FORMAT.ID[i]] = 12;
                     FORMAT.ints_alt++;
-                }else if(FORMAT.Type[i] == "Float"){
+                }else if(!strcmp(&FORMAT.Type[i][0], "Float")){
                     samp_alt_float_tmp.name = FORMAT.ID[i];
                     alt_sample.samp_float.push_back(samp_alt_float_tmp);
                     alt_sample.samp_float.back().i_float.resize(batch_size*samp_columns.numSample*2, 0);
@@ -1370,6 +1379,13 @@ public:
         samp_columns.samp_string.resize(FORMAT.strings);
         samp_columns.var_id.resize((num_lines-1)*samp_columns.numSample, "\0");
         samp_columns.samp_id.resize((num_lines-1)*samp_columns.numSample, "\0");
+
+        alt_sample.samp_flag.resize(FORMAT.flags_alt);
+        alt_sample.samp_int.resize(FORMAT.ints_alt);
+        alt_sample.samp_float.resize(FORMAT.floats_alt);
+        alt_sample.samp_string.resize(FORMAT.strings_alt);
+        alt_sample.var_id.resize((num_lines-1)* alt_sample.numSample, "\0");
+        alt_sample.samp_id.resize((num_lines-1)*alt_sample.numSample, "\0");
     }
     void create_info_vectors(int num_threads){
         long batch_size = (num_lines-2+num_threads)/num_threads;
@@ -1679,6 +1695,9 @@ public:
         for(int i=0; i<FORMAT.strings_alt; i++){
             alt_sample.samp_string[i].i_string.resize(0);
         }
+        alt_sample.var_id.resize(0);
+        alt_sample.alt_id.resize(0);
+        alt_sample.samp_id.resize(0);    
         for(int i=0; i<num_threads; i++){
             alt_sample.var_id.insert(
                 alt_sample.var_id.end(),
@@ -1734,13 +1753,13 @@ public:
         alt_sample.var_id.resize(totSampAlt);
         alt_sample.samp_id.resize(totSampAlt);
         alt_sample.alt_id.resize(totSampAlt);
-        for(int j=0; j<INFO.ints_alt; j++){
+        for(int j=0; j<FORMAT.ints_alt; j++){
             alt_sample.samp_int[j].i_int.resize(totSampAlt);
         }
-        for(int j=0; j<INFO.floats_alt; j++){
+        for(int j=0; j<FORMAT.floats_alt; j++){
             alt_sample.samp_float[j].i_float.resize(totSampAlt);
         }
-        for(int j=0; j<INFO.strings_alt; j++){
+        for(int j=0; j<FORMAT.strings_alt; j++){
             alt_sample.samp_string[j].i_string.resize(totSampAlt);
         }
         
