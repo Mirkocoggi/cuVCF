@@ -47,6 +47,20 @@ int main(int argc, char *argv[]){
         }
     }
 
+    
+    vcf_parsed vcf;
+    vcf.run(vcf_filename, num_threadss);
+
+    vcf.print_header();
+    vcf.var_columns.print_var_columns(30);
+    vcf.alt_columns.print();
+    vcf.samp_columns.print();
+    vcf.alt_sample.print();
+
+
+
+    /*
+
 // Setting number of threads
     omp_set_num_threads(num_threadss);
 
@@ -134,7 +148,6 @@ int main(int argc, char *argv[]){
     //vcf.print_info_map();
     //vcf.print_info();
     vcf.reserve_var_columns();
-    //in progress
     vcf.create_sample_vectors(num_threadss);
     after = chrono::system_clock::now();
     auto reserve_var_columns = std::chrono::duration<double>(after - before).count();
@@ -178,6 +191,6 @@ int main(int argc, char *argv[]){
     //free(vcf.var_df);
     free(vcf.filestring);
     free(vcf.new_lines_index);
-    
+    */
     return 0;
 }

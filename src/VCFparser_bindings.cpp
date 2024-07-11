@@ -4,7 +4,7 @@
 
 namespace py = pybind11;
 
-PYBIND11_MODULE(vcfparser, m) {
+PYBIND11_MODULE(VCFParallelLib, m) {
     py::class_<info_flag>(m, "info_flag")
         .def(py::init<>())
         .def_readwrite("i_flag", &info_flag::i_flag)
@@ -25,25 +25,25 @@ PYBIND11_MODULE(vcfparser, m) {
         .def_readwrite("i_int", &info_int::i_int)
         .def_readwrite("name", &info_int::name);
 
-    py::class_<info_int>(m, "samp_Flag")
+    py::class_<samp_Flag>(m, "samp_Flag")
         .def(py::init<>())
         .def_readwrite("i_flag", &samp_Flag::i_flag)
         .def_readwrite("name", &samp_Flag::name)
         .def_readwrite("numb", &samp_Flag::numb);
 
-    py::class_<info_string>(m, "samp_String")
+    py::class_<samp_String>(m, "samp_String")
         .def(py::init<>())
         .def_readwrite("i_string", &samp_String::i_string)
         .def_readwrite("name", &samp_String::name)
         .def_readwrite("numb", &samp_String::numb);
 
-    py::class_<info_float>(m, "samp_Float")
+    py::class_<samp_Float>(m, "samp_Float")
         .def(py::init<>())
         .def_readwrite("i_float", &samp_Float::i_float)
         .def_readwrite("name", &samp_Float::name)
         .def_readwrite("numb", &samp_Float::numb);
 
-    py::class_<info_int>(m, "samp_Int")
+    py::class_<samp_Int>(m, "samp_Int")
         .def(py::init<>())
         .def_readwrite("i_int", &samp_Int::i_int)
         .def_readwrite("name", &samp_Int::name)
@@ -76,7 +76,7 @@ PYBIND11_MODULE(vcfparser, m) {
         .def_readwrite("alt_string", &alt_columns_df::alt_string)
         .def_readwrite("alt_int", &alt_columns_df::alt_int)
         .def_readwrite("numAlt", &alt_columns_df::numAlt)
-        .def("clone", &alt_columns_df::clone)
+        //.def("clone", &alt_columns_df::clone)
         .def("print", &alt_columns_df::print);
 
      py::class_<sample_columns_df>(m, "sample_columns_df")
@@ -102,7 +102,7 @@ PYBIND11_MODULE(vcfparser, m) {
         .def_readwrite("samp_int", &alt_format_df::samp_int)
         .def_readwrite("sampNames", &alt_format_df::sampNames)
         .def_readwrite("numSample", &alt_format_df::numSample)
-        .def("clone", &alt_format_df::clone)
+        //.def("clone", &alt_format_df::clone)
         .def("print", &alt_format_df::print);
 
     py::class_<var_columns_df>(m, "var_columns_df")
@@ -121,11 +121,11 @@ PYBIND11_MODULE(vcfparser, m) {
         .def_readwrite("in_string", &var_columns_df::in_string)
         .def_readwrite("in_int", &var_columns_df::in_int)
         .def_readwrite("info_map1", &var_columns_df::info_map1)
-        .def("get_vcf_line_in_var_columns", &var_columns_df::get_vcf_line_in_var_columns)
-        .def("get_vcf_line_in_var_columns_format", &var_columns_df::get_vcf_line_in_var_columns_format)
+        //.def("get_vcf_line_in_var_columns", &var_columns_df::get_vcf_line_in_var_columns)
+        //.def("get_vcf_line_in_var_columns_format", &var_columns_df::get_vcf_line_in_var_columns_format)
         .def("print_var_columns", &var_columns_df::print_var_columns);
 
-    py::class_<var>(m, "var")
+    /*py::class_<var>(m, "var")
         .def(py::init<>())  // Definisce il costruttore di default
         .def_readwrite("var_number", &var::var_number)  // Espone la variabile membro var_number
         .def_readwrite("chrom", &var::chrom)
@@ -139,41 +139,41 @@ PYBIND11_MODULE(vcfparser, m) {
         .def_readwrite("format", &var::format)
         .def_readwrite("samples", &var::samples)
         .def("get_vcf_line", &var::get_vcf_line)
-        .def("print_var", &var::print_var);
+        .def("print_var", &var::print_var);*/
 
     py::class_<vcf_parsed>(m, "vcf_parsed")
         .def(py::init<>())  // Definisce il costruttore di default
         .def_readwrite("id", &vcf_parsed::id)  // Espone la variabile membro id
-        .def_readwrite("filename", &vcf_parsed::filename)
-        .def_readwrite("var_df", &vcf_parsed::var_df)
+        //.def_readwrite("filename", &vcf_parsed::filename)
+        //.def_readwrite("var_df", &vcf_parsed::var_df)
         .def_readwrite("header", &vcf_parsed::header)
         .def_readwrite("INFO", &vcf_parsed::INFO)
-        .def_readwrite("info_map", &vcf_parsed::info_map)
+        //.def_readwrite("info_map", &vcf_parsed::info_map)
         .def_readwrite("FORMAT", &vcf_parsed::FORMAT)
-        .def_readwrite("filestring", &vcf_parsed::filestring)
-        .def_readwrite("header_size", &vcf_parsed::header_size)
-        .def_readwrite("filesize", &vcf_parsed::filesize)
-        .def_readwrite("variants_size", &vcf_parsed::variants_size)
-        .def_readwrite("num_lines", &vcf_parsed::num_lines)
-        .def_readwrite("new_lines_index", &vcf_parsed::new_lines_index)
+        //.def_readwrite("filestring", &vcf_parsed::filestring)
+        //.def_readwrite("header_size", &vcf_parsed::header_size)
+        //.def_readwrite("filesize", &vcf_parsed::filesize)
+        //.def_readwrite("variants_size", &vcf_parsed::variants_size)
+        //.def_readwrite("num_lines", &vcf_parsed::num_lines)
+        //.def_readwrite("new_lines_index", &vcf_parsed::new_lines_index)
         .def_readwrite("var_columns", &vcf_parsed::var_columns)
         .def_readwrite("alt_columns", &vcf_parsed::alt_columns)
         .def_readwrite("samp_columns", &vcf_parsed::samp_columns)
         .def_readwrite("alt_sample", &vcf_parsed::alt_sample)
-        .def("get_filename", &vcf_parsed::get_filename)  // Espone il metodo get_filename
-        .def("get_file_size", &vcf_parsed::get_file_size)
-        .def("get_header", &vcf_parsed::get_header)
-        .def("print_header", &vcf_parsed::print_header)
-        .def("get_and_parse_header", &vcf_parsed::get_and_parse_header)
-        .def("allocate_filestring", &vcf_parsed::allocate_filestring)
-        .def("find_new_lines_index", &vcf_parsed::find_new_lines_index)
-        .def("create_sample_vectors", &vcf_parsed::create_sample_vectors)
-        .def("create_info_vectors", &vcf_parsed::create_info_vectors)
-        .def("print_info_map", &vcf_parsed::print_info_map)
-        .def("print_info", &vcf_parsed::print_info)
-        .def("reserve_var_columns", &vcf_parsed::reserve_var_columns)
-        .def("populate_var_columns", &vcf_parsed::populate_var_columns)
-        .def("populate_var_struct", &vcf_parsed::populate_var_struct);
-
-
+        .def("run", &vcf_parsed::run)
+        //.def("get_filename", &vcf_parsed::get_filename)
+        //.def("get_file_size", &vcf_parsed::get_file_size)
+        //.def("get_header", &vcf_parsed::get_header)
+        .def("print_header", &vcf_parsed::print_header);
+        //.def("get_and_parse_header", &vcf_parsed::get_and_parse_header)
+        //.def("allocate_filestring", &vcf_parsed::allocate_filestring)
+        //.def("find_new_lines_index", &vcf_parsed::find_new_lines_index)
+        //.def("create_sample_vectors", &vcf_parsed::create_sample_vectors)
+        //.def("create_info_vectors", &vcf_parsed::create_info_vectors)
+        //.def("print_info_map", &vcf_parsed::print_info_map)
+        //.def("print_info", &vcf_parsed::print_info)
+        //.def("reserve_var_columns", &vcf_parsed::reserve_var_columns)
+        //.def("populate_var_columns", &vcf_parsed::populate_var_columns)
+        //.def("populate_var_struct", &vcf_parsed::populate_var_struct)
+        
 }
