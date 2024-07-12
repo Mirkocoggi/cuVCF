@@ -34,15 +34,15 @@ int main(int argc, char *argv[]){
             num_threadss = atoi(optarg);
             if (num_threadss == 1)
             {
-                //cout << "Single thread execution, sequential process!!" << endl;
+                cout << "Single thread execution, sequential process!!" << endl;
             }
             else
             {
-                //cout << "Multithreading execution, parallelization on " << num_threadss << " threads!!" << endl;
+                cout << "Multithreading execution, parallelization on " << num_threadss << " threads!!" << endl;
             }
             break;
         case '?':
-            //cout << "Unknown option: " << optopt << endl;
+            cout << "Unknown option: " << optopt << endl;
             break;
         }
     }
@@ -76,7 +76,7 @@ int main(int argc, char *argv[]){
     //return -1;
     //---------------------
 
-    
+   
     int cont=0;
     string line;
     vcf_parsed vcf;
@@ -100,13 +100,14 @@ int main(int argc, char *argv[]){
     inFile.close();
 
 // Allocating the filestring (the variations as a big char*, the dimension is: filesize - header_size)
+    before = chrono::system_clock::now();
     vcf.allocate_filestring();
 
 // Populate filestring and getting the number of lines (num_lines), saving the starting char index of each lines
-    before = chrono::system_clock::now();
+    // before = chrono::system_clock::now();
     vcf.find_new_lines_index(filename, num_threadss);
-    after = chrono::system_clock::now();
-    auto find_new_lines = std::chrono::duration<double>(after - before).count();
+    // after = chrono::system_clock::now();
+    // auto find_new_lines = std::chrono::duration<double>(after - before).count();
 
 // PRINT FROM FILESTRING
     
@@ -124,25 +125,31 @@ int main(int argc, char *argv[]){
 
 // Populating var structure:     
 
-    before = chrono::system_clock::now();
-    vcf.populate_var_struct(num_threadss);
-    after = chrono::system_clock::now();
-    auto populate_var_struct = std::chrono::duration<double>(after - before).count();
+    // before = chrono::system_clock::now();
+    // vcf.populate_var_struct(num_threadss);
+    // after = chrono::system_clock::now();
+    // auto populate_var_struct = std::chrono::duration<double>(after - before).count();
 
-    before = chrono::system_clock::now();
+    // before = chrono::system_clock::now();
     vcf.create_info_vectors(num_threadss);
     //vcf.print_info_map();
     //vcf.print_info();
+  
     vcf.reserve_var_columns();
     //in progress
-    vcf.create_sample_vectors(num_threadss);
-    after = chrono::system_clock::now();
-    auto reserve_var_columns = std::chrono::duration<double>(after - before).count();
+    if(vcf.samplesON){
+        vcf.create_sample_vectors(num_threadss);
+    }
+    
+    
+    // after = chrono::system_clock::now();
+    // auto reserve_var_columns = std::chrono::duration<double>(after - before).count();
 
     
 
-    before = chrono::system_clock::now();
+    // before = chrono::system_clock::now();
     vcf.populate_var_columns(num_threadss);
+    
     after = chrono::system_clock::now();
     auto populate_var_columns = std::chrono::duration<double>(after - before).count();
     // cout << "\nPrint from var_df: \n";
@@ -161,18 +168,18 @@ int main(int argc, char *argv[]){
     // for(int i=vcf.num_lines - 101; i<vcf.num_lines - 1; i++){
     //     vcf.var_df[i].print_var();
     // }
-    cout << endl;
+    // cout << endl;
 
-    vcf.samp_columns.print();
+    // vcf.samp_columns.print();
 
     //vcf.alt_columns.print();
     
-    cout << "Get file size: " << get_file_size << " s" << endl;
-    cout << "get_header: " << get_header << " s" << endl;
-    cout << "find_new_lines: " << find_new_lines << " s" << endl;
-    cout << "populate_var_struct: " << populate_var_struct << " s" << endl;
-    cout << "reserve: " << reserve_var_columns << " s" << endl;
-    cout << "populate_var_columns: " << populate_var_columns << " s" << endl;
+    // cout << "Get file size: " << get_file_size << " s" << endl;
+    // cout << "get_header: " << get_header << " s" << endl;
+    // cout << "find_new_lines: " << find_new_lines << " s" << endl;
+    // cout << "populate_var_struct: " << populate_var_struct << " s" << endl;
+    // cout << "reserve: " << reserve_var_columns << " s" << endl;
+    cout << "parsing time: " << populate_var_columns << " s" << endl;
 
     
     //free(vcf.var_df);
