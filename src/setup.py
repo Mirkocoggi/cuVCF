@@ -1,3 +1,4 @@
+#python3 setup.py build_ext --inplace
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
 import sys
