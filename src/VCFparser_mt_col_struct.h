@@ -293,7 +293,7 @@ public:
     map<string,int> info_map1;
     void get_vcf_line_in_var_columns(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt)
     {
-        //cout<<i<<"\t";
+        
         bool find1 = false;
         long iter=0;
         int local_alt = 1;
@@ -381,6 +381,7 @@ public:
                 iter++;
             }
         }
+        
         tmp="\0";
         find1=false;
         while(!find1){
@@ -433,6 +434,7 @@ public:
                                     el++;
                                 }
                                 find_info_type = true;
+                                
                             }else if(info_map1[tmp_elems[0]]==3){
                                 //String
                                 
@@ -466,6 +468,7 @@ public:
                                 while(!find_info_elem){
                                     if((*tmp_alt).alt_float[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                        
                                         for(int y = 0; y<local_alt; y++){
                                             (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = stof(tmp_split[y]);
                                         }
@@ -474,6 +477,7 @@ public:
                                     el++;
                                 }
                                 find_info_type = true;
+                                
                             }else if(info_map1[tmp_elems[0]]==6){
                                 //String Alt
                                 int el=0;
@@ -1581,14 +1585,14 @@ public:
         //in progress
         alt_format_df tmp_alt_format[num_threads];
         int tmp_num_alt_format[num_threads];
-        // cout<<"sqa"<<endl;
+        
 #pragma omp parallel
         {
             long start, end;
             int th_ID = omp_get_thread_num();
             //struttura temporanea del thread con alternatives.
             tmp_alt[th_ID].clone(alt_columns, INFO);
-            // cout<<"sqae"<<endl;
+            
             // tmp_alt_format[th_ID].clone(alt_sample, FORMAT); // si blocca qui
             // cout<<"sqar"<<endl;
             tmp_num_alt[th_ID] = 0;
@@ -1604,8 +1608,8 @@ public:
             start = th_ID*batch_size; // inizio del batch dello specifico thread
             end = start + batch_size; // fine del batch
             //cout<<"\nNum Lines: "<<num_lines-2<<endl;
+            
             if(samplesON){ 
-                // cout<<"sa"<<endl;
                 tmp_alt_format[th_ID].clone(alt_sample, FORMAT);
                 tmp_num_alt_format[th_ID] = 0;
                 tmp_alt_format[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, "\0");
@@ -1645,11 +1649,12 @@ public:
                 tmp_alt_format[th_ID].numSample = tmp_num_alt_format[th_ID]; 
 
             }else{
-                // cout<<"no"<<endl;
+                
                 for(long i=start; i<end && i<num_lines-1; i++){
                     var_columns.var_number[i] = i;
                     var_columns.get_vcf_line_in_var_columns(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]));
                 }
+               
                 tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
                 tmp_alt[th_ID].alt_id.resize(tmp_num_alt[th_ID]);
                 tmp_alt[th_ID].alt.resize(tmp_num_alt[th_ID]);
@@ -1714,6 +1719,7 @@ public:
             }
             totAlt+=tmp_num_alt[i];
         }
+        
         if(samplesON){
         // in progress Non troppo efficiente ma valido per ora
         for(int i=0; i<FORMAT.ints_alt; i++){
