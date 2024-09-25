@@ -2,8 +2,11 @@
 #define VCF_STRUCTS_H
 #include <chrono>
 #include <boost/algorithm/string.hpp>
+#include <OpenEXR/half.h>
 
 using namespace std;
+
+// classi con solo dati o funzioni minime in un file, trafroma in struct quelle che si possono trasformare
 
 class info_flag
 {
@@ -22,7 +25,7 @@ class info_string
 class info_float
 {
     public:
-    vector<float> i_float;
+    vector<half> i_float;
     string name;
 };
 
@@ -52,7 +55,7 @@ class samp_String
 class samp_Float
 {
     public:
-    vector<float> i_float;
+    vector<half> i_float;
     string name;
     int numb;
 };
@@ -63,6 +66,22 @@ class samp_Int
     vector<int> i_int;
     string name;
     int numb;
+};
+
+class samp_GT
+{
+    public:
+    vector<char> first;
+    vector<char> second;
+    vector<char> phase;
+    int numb;
+
+    void add(string s){
+        first[numb] =  (char)s[0];
+        phase[numb] = (char)s[1];
+        second[numb] = (char)s[2];
+        numb++;
+    }
 };
 
 class header_element
@@ -82,14 +101,15 @@ public:
     int floats=0;
     int strings=0;
     int flags=0;
-
+    //bool hasGT = false;
+    //char numGT = 0;
 };
 
 class alt_columns_df
 {
     public:
     vector<string> var_id;
-    vector<int> alt_id;
+    vector<char> alt_id;
     vector<string> alt;
     vector<info_float> alt_float;
     vector<info_flag> alt_flag; //non gestite per ora
@@ -101,7 +121,7 @@ class alt_columns_df
         int numAlt = INFO.alt_values;//sigsegv
         var_id.resize(numAlt, "\0");
         alt.resize(numAlt, "\0");
-        alt_id.resize(numAlt, 0);
+        alt_id.resize(numAlt, (char)0);
         int tmp = INFO.floats_alt;
         if(tmp>0){
             info_float tmpInfoFloat;
@@ -141,7 +161,7 @@ class alt_columns_df
     void print(){
         cout << "VarID\tAltID\tAlt\tFloat\t\tInt\t\tStr" << endl;
         for(int i=0; i<numAlt; i++){
-            cout << var_id[i] << "\t" << alt_id[i] << "\t" << alt[i] << "\t";
+            cout << var_id[i] << "\t" << (int)alt_id[i] << "\t" << alt[i] << "\t";
             for(int j=0; j < alt_float.size(); j++){
                 cout << alt_float[j].name << "=" << alt_float[j].i_float[i] << ";";
             }
@@ -162,12 +182,13 @@ class sample_columns_df //aka df3
 {
     public:
     vector<string> var_id;
-    vector<string> samp_id;
+    vector<unsigned short> samp_id;
     vector<samp_Float> samp_float;
     vector<samp_Flag> samp_flag;
     vector<samp_String> samp_string;
     vector<samp_Int> samp_int;
-    vector<string> sampNames;
+    std::map<std::string, unsigned short> sampNames;
+    //samp_GT sample_GT;
     int numSample; //numero di sample per riga
 
    void print(){
@@ -195,26 +216,23 @@ class alt_format_df //aka df4 in progress
 {
     public:
     vector<string> var_id;
-    vector<string> samp_id;
-    vector<int> alt_id;
+    vector<unsigned short> samp_id;
+    vector<char> alt_id;
     vector<samp_Float> samp_float;
     vector<samp_Flag> samp_flag;
     vector<samp_String> samp_string;
     vector<samp_Int> samp_int;
-    vector<string> sampNames;
+    std::map<std::string, unsigned short> sampNames;
+    //samp_GT sample_GT;
     int numSample;
 
     void clone(alt_format_df ref, header_element FORMAT){
         int numAlt = FORMAT.alt_values;
         var_id.resize(numAlt, "\0");
-        samp_id.resize(numAlt, "\0");
-        alt_id.resize(numAlt, 0);
+        samp_id.resize(numAlt, 0);
+        alt_id.resize(numAlt, (char)0);
         numSample = ref.numSample;
-        sampNames.resize(numSample, "\0");
-
-        for(int i=0; i<numSample; i++){
-            sampNames[i] = ref.sampNames[i];
-        }
+        sampNames = ref.sampNames;
 
         int tmp = FORMAT.floats_alt;
         if(tmp>0){
@@ -257,7 +275,7 @@ class alt_format_df //aka df4 in progress
         cout << "VarID\tSampID\talt_id\tFloat\t\tInt\t\tStr" << endl;
         int iter = samp_id.size();
         for(int i=0; i<iter; i++){
-            cout << var_id[i] << "\t" << samp_id[i] << "\t" << alt_id[i] << "\t";
+            cout << var_id[i] << "\t" << samp_id[i] << "\t" << (int)alt_id[i] << "\t";
             for(int j=0; j < samp_float.size(); j++){
                 cout << samp_float[j].name << "=" << samp_float[j].i_float[i] << ";";
             }
@@ -274,23 +292,27 @@ class alt_format_df //aka df4 in progress
     }
 };
 
+//file a parte
 class var_columns_df
 {
 public:
     vector<long> var_number;
-    vector<string> chrom;
+    std::map<std::string, char> chrom_map;
+    vector<char> chrom;
     vector<long>pos;
     vector<string> id;
     vector<string> ref;
     vector<string> alt;
-    vector<float> qual;
-    vector<string> filter;
+    vector<half> qual;
+    std::map<std::string, char> filter_map;
+    vector<char> filter;
     vector<string> info;
     vector<info_float> in_float;
     vector<info_flag> in_flag;
     vector<info_string> in_string;
     vector<info_int> in_int;
     map<string,int> info_map1;
+    
     void get_vcf_line_in_var_columns(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt)
     {
         //cout<<i<<"\t";
@@ -305,7 +327,10 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
-                chrom[i] = tmp;
+                if(chrom_map.find(tmp) == chrom_map.end()){
+                    chrom_map.insert(std::make_pair(tmp, (char)chrom_map.size()));
+                }
+                chrom[i] = chrom_map[tmp];
             }else{
                 tmp += line[start+iter];
                 iter++;
@@ -357,7 +382,7 @@ public:
                 local_alt = tmp_split.size();
                 for(int y = 0; y<local_alt; y++){
                     (*tmp_alt).alt[(*tmp_num_alt)+y] = tmp_split[y];
-                    (*tmp_alt).alt_id[(*tmp_num_alt)+y] = y;
+                    (*tmp_alt).alt_id[(*tmp_num_alt)+y] = (char)y;
                     (*tmp_alt).var_id[(*tmp_num_alt)+y] = id[i]; 
                 }
             }else{
@@ -374,7 +399,11 @@ public:
                 if(strcmp(&tmp[0], ".")==0){
                     qual[i] = 0.0f;
                 }else{
-                    qual[i] = stof(tmp); // da cambiare, in futuro
+                    try{
+                        qual[i] = (half)stof(tmp);
+                    }catch (const std::exception& e){
+                        qual[i] = 0;
+                    }
                 }
             }else{
                 tmp += line[start+iter];
@@ -387,7 +416,10 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
-                filter[i] = tmp;
+                if(filter_map.find(tmp) == filter_map.end()){
+                    filter_map.insert(std::make_pair(tmp, (char)filter_map.size()));
+                }
+                filter[i] = filter_map[tmp];
             }else{
                 tmp += line[start+iter];
                 iter++;
@@ -427,7 +459,12 @@ public:
                                 int el=0;
                                 while(!find_info_elem){
                                     if(in_float[el].name == tmp_elems[0]){
-                                        in_float[el].i_float[i] = stof(tmp_elems[1]);
+                                        try{
+                                            in_float[el].i_float[i] = (half)stof(tmp_elems[1]);
+                                        }catch (const std::exception& e){
+                                            in_float[el].i_float[i] = 0;
+                                        }
+                                        
                                         find_info_elem = true;
                                     } 
                                     el++;
@@ -467,7 +504,11 @@ public:
                                     if((*tmp_alt).alt_float[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                         for(int y = 0; y<local_alt; y++){
-                                            (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = stof(tmp_split[y]);
+                                            try{
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = (half)stof(tmp_split[y]);
+                                            }catch (const std::exception& e){
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
+                                            }
                                         }
                                         find_info_elem = true;
                                     }
@@ -533,7 +574,10 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
-                chrom[i] = tmp;
+                if(chrom_map.find(tmp) == chrom_map.end()){
+                    chrom_map.insert(std::make_pair(tmp, (char)chrom_map.size()));
+                }
+                chrom[i] = chrom_map[tmp];
             }else{
                 tmp += line[start+iter];
                 iter++;
@@ -585,7 +629,7 @@ public:
                 local_alt = tmp_split.size();
                 for(int y = 0; y<local_alt; y++){
                     (*tmp_alt).alt[(*tmp_num_alt)+y] = tmp_split[y];
-                    (*tmp_alt).alt_id[(*tmp_num_alt)+y] = y;
+                    (*tmp_alt).alt_id[(*tmp_num_alt)+y] = (char)y;
                     (*tmp_alt).var_id[(*tmp_num_alt)+y] = id[i];
                 }
             }else{
@@ -602,7 +646,11 @@ public:
                 if(strcmp(&tmp[0], ".")==0){
                     qual[i] = 0.0f;
                 }else{
-                    qual[i] = stof(tmp); // da cambiare, in futuro
+                    try{
+                        qual[i] = (half)stof(tmp);
+                    }catch (const std::exception& e){
+                        qual[i] = 0;
+                    }
                 }
             }else{
                 tmp += line[start+iter];
@@ -615,7 +663,10 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
-                filter[i] = tmp;
+                if(filter_map.find(tmp) == filter_map.end()){
+                    filter_map.insert(std::make_pair(tmp, (char)filter_map.size()));
+                }
+                filter[i] = filter_map[tmp];
             }else{
                 tmp += line[start+iter];
                 iter++;
@@ -654,7 +705,11 @@ public:
                                 int el=0;
                                 while(!find_info_elem){
                                     if(in_float[el].name == tmp_elems[0]){
-                                        in_float[el].i_float[i] = stof(tmp_elems[1]);
+                                        try{
+                                            in_float[el].i_float[i] = (half)stof(tmp_elems[1]);
+                                        }catch (const std::exception& e){
+                                            in_float[el].i_float[i] = 0;
+                                        }
                                         find_info_elem = true;
                                     } 
                                     el++;
@@ -692,7 +747,11 @@ public:
                                     if((*tmp_alt).alt_float[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                         for(int y = 0; y<local_alt; y++){
-                                            (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = stof(tmp_split[y]);
+                                            try{
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = (half)stof(tmp_split[y]);
+                                            }catch (const std::exception& e){
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
+                                            }
                                         }
                                         find_info_elem = true;
                                     }
@@ -771,7 +830,7 @@ public:
                             if(info_map1[tmp_format_split[j]] == 8 || info_map1[tmp_format_split[j] + std::to_string(1)] == 8){
                                 //String
                                 (*sample).var_id[i*(*sample).numSample + samp] = id[i];
-                                (*sample).samp_id[i*(*sample).numSample + samp] = (*sample).sampNames[samp];
+                                (*sample).samp_id[i*(*sample).numSample + samp] = samp;
                                 int el = 0;
                                 while(!find_elem){
                                     if(!(*sample).samp_string[el].name.compare(0, tmp_format_split[j].length(), tmp_format_split[j], 0, tmp_format_split[j].length())){
@@ -794,7 +853,7 @@ public:
                             }else if(info_map1[tmp_format_split[j]] == 9 || info_map1[tmp_format_split[j] + std::to_string(1)] == 9){
                                 //Integer
                                 (*sample).var_id[i*(*sample).numSample + samp] = id[i];
-                                (*sample).samp_id[i*(*sample).numSample + samp] = (*sample).sampNames[samp];
+                                (*sample).samp_id[i*(*sample).numSample + samp] = samp;
                                 int el = 0;
                                 while(!find_elem){
                                     if(!(*sample).samp_int[el].name.compare(0, tmp_format_split[j].length(), tmp_format_split[j], 0, tmp_format_split[j].length())){
@@ -817,19 +876,27 @@ public:
                             }else if(info_map1[tmp_format_split[j]] == 10 || info_map1[tmp_format_split[j] + std::to_string(1)] == 10){
                                 //Float
                                 (*sample).var_id[i*(*sample).numSample + samp] = id[i];
-                                (*sample).samp_id[i*(*sample).numSample + samp] = (*sample).sampNames[samp];
+                                (*sample).samp_id[i*(*sample).numSample + samp] = samp;
                                 int el = 0;
                                 while(!find_elem){
                                     if(!(*sample).samp_float[el].name.compare(0, tmp_format_split[j].length(), tmp_format_split[j], 0, tmp_format_split[j].length())){
                                         if((*sample).samp_float[el].numb==1){
                                             //aggiorna solo la cella corrispondente
-                                            (*sample).samp_float[el].i_float[i*(*sample).numSample + samp] = std::stof(tmp_split[j]);
+                                            try{
+                                                (*sample).samp_float[el].i_float[i*(*sample).numSample + samp] = (half)std::stof(tmp_split[j]);
+                                            }catch (const std::exception& e){
+                                                (*sample).samp_float[el].i_float[i*(*sample).numSample + samp] = 0;
+                                            }
                                         }else{
                                             //itera anche sulle liste che hanno il nome con in aggiunta il numero che saranno ad el + numero
                                             vector<string> tmp_sub;
                                             boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                             for(int i = 0; i<(*sample).samp_float[el].numb; i++){
-                                                (*sample).samp_float[el+i].i_float[i*(*sample).numSample + samp] = std::stof(tmp_sub[i]);
+                                                try{
+                                                    (*sample).samp_float[el+i].i_float[i*(*sample).numSample + samp] = (half)std::stof(tmp_sub[i]);
+                                                }catch (const std::exception& e){
+                                                    (*sample).samp_float[el+i].i_float[i*(*sample).numSample + samp] = 0;
+                                                }
                                             }
                                         }
                                         find_elem = true;
@@ -847,8 +914,8 @@ public:
                                         //da fare su misura per alternativesp
                                         for(int y = 0; y<local_alt; y++){ //in progress da inizializzare local_alt
                                             (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = id[i];
-                                            (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = (*tmp_alt_format).sampNames[samp];
-                                            (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = y;
+                                            (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
+                                            (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
                                             (*tmp_alt_format).samp_string[el].i_string[(*tmp_num_alt_format) + y] = tmp_sub[y];
                                         }
                                         find_elem = true;
@@ -867,8 +934,8 @@ public:
                                         //da fare su misura per alternatives
                                         for(int y = 0; y<local_alt; y++){ //in progress da inizializzare local_alt
                                             (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = id[i];
-                                            (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = (*tmp_alt_format).sampNames[samp];
-                                            (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = y;
+                                            (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
+                                            (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
                                             (*tmp_alt_format).samp_int[el].i_int[(*tmp_num_alt_format) + y] = std::stoi(tmp_sub[y]);
                                         }
                                         find_elem = true;
@@ -887,9 +954,13 @@ public:
                                         //da fare su misura per alternatives
                                         for(int y = 0; y<local_alt; y++){ //in progress da inizializzare local_alt
                                             (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = id[i];
-                                            (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = (*tmp_alt_format).sampNames[samp];
-                                            (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = y;
-                                            (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = std::stof(tmp_sub[y]);
+                                            (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
+                                            (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
+                                            try{
+                                                (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = (half)std::stof(tmp_sub[y]);
+                                            }catch (const std::exception& e){
+                                                (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = 0;
+                                            }
                                         }
                                         find_elem = true;
                                         (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
@@ -912,13 +983,13 @@ public:
     void print_var_columns(long num_lines){
         for(long i=0; i<num_lines; i++){
             cout << "Var" << var_number[i] << ":\t";
-            cout << chrom[i] << "\t";
+            cout << chrom_map.find(std::string(1, chrom[i]))->first << "\t";
             cout << to_string(pos[i]) << "\t";
             cout << id[i] << "\t";
             cout << ref[i] << "\t";
             cout << alt[i] << "\t";
             cout << to_string(qual[i]) << "\t";
-            cout << filter[i] << "\t";
+            cout << filter_map.find(std::string(1, filter[i]))->first << "\t";
             cout << info[i] << "\t";
             for(int j=0; j<in_flag.size(); j++){
                 cout<<in_flag[j].name<<": "<<in_flag[j].i_flag[i]<<", ";
@@ -938,6 +1009,7 @@ public:
     }    
 };
 
+// file a parte o nel primo file
 class var
 {
 public:
@@ -947,11 +1019,12 @@ public:
     string id="\0"; // id della variation, spesso .
     string ref="\0"; // nucleotide della reference
     string alt="\0"; // possibili alternative (possono essere più di una)
-    float qual; // quality score
+    half qual; // quality score
     string filter="\0"; // filtro penso usato durante il sequenziamento
     string info="\0"; // info varie deducibili dall'header, potrebbe essere utile averle in collegamento
     string format="\0"; // formato dei samples, info variabiliti, mi dice come sono ordinate
     string samples="\0"; // una colonna per ogni sample in cui ognuno descrive i valori indicati in format
+
     void get_vcf_line(char *line, long start, long end)
     {
         bool find1 = false;
@@ -1016,7 +1089,11 @@ public:
                 if(strcmp(&tmp[0], ".")==0){
                     qual = 0.0;
                 }else{
-                    qual = stof(tmp); // da cambiare, in futuro
+                    try{
+                        qual = (half)stof(tmp); // da cambiare, in futuro
+                    }catch (const std::exception& e){
+                        qual = 0;
+                    }
                 }
             }else{
                 tmp += line[start+iter];
@@ -1060,6 +1137,7 @@ public:
         }*/
         
     }
+    
     void print_var()
     {
         cout << "Var" << var_number << ":\t";
@@ -1077,6 +1155,7 @@ public:
     }
 };
 
+// file a parte
 class vcf_parsed
 {
 public:
@@ -1113,9 +1192,11 @@ public:
             //cout << "\nFile already uncompressed!\n" << endl;
         }
     }
+    
     void get_file_size(string filename){
         filesize = filesystem::file_size(filename);
     }
+    
     void get_header(ifstream *file){
         string line;
         //removing the header and storing it in vcf.header
@@ -1128,9 +1209,11 @@ public:
         variants_size = filesize - header_size; //ora che ho tolto l'header ho un file piu piccolo quindi una nuova size
         //cout<<"filesize: "<<filesize<<" variants_size: "<<variants_size<<endl;
     }
+    
     void print_header(){
         //cout << "VCF header:\n" << header << endl;
     }
+    
     void get_and_parse_header(ifstream *file){
         string line;
         vector<string> line_el; //all the characteristics together
@@ -1156,7 +1239,16 @@ public:
                         if(i==2) INFO.Type.push_back(line_el2[1]);
                     }
                     if(Format){
-                        if(i==0) FORMAT.ID.push_back(line_el2[1]);
+                        if(i==0){
+                            //if(line_el2[1] == "GT"){
+                            //    FORMAT.hasGT = true;
+                            //    boost::split(line_el2, line_el1[1], boost::is_any_of("="));
+                            //    FORMAT.numGT = line_el2[1];
+                            //    i+=3;
+                            //}else{
+                                FORMAT.ID.push_back(line_el2[1]);
+                            //}
+                        } 
                         if(i==1) FORMAT.Number.push_back(line_el2[1]);
                         if(i==1 && line_el2[1] == "A") FORMAT.alt_values++;
                         if(i==2) FORMAT.Type.push_back(line_el2[1]);
@@ -1170,12 +1262,12 @@ public:
         if(tmp_split.size() > 9){
             samp_columns.numSample = tmp_split.size() - 9;
             alt_sample.numSample = samp_columns.numSample;
-            samp_columns.sampNames.resize(samp_columns.numSample, "\0");
-            alt_sample.sampNames.resize(samp_columns.numSample, "\0");
+
             for(int i = 0; i < samp_columns.numSample; i++){
-                samp_columns.sampNames[i] = tmp_split[9+i];
-                alt_sample.sampNames[i] = tmp_split[9+i];
+                samp_columns.sampNames.insert(std::make_pair(tmp_split[9+i], i));
+                alt_sample.sampNames.insert(std::make_pair(tmp_split[9+i], i));
             }
+
         }else{
             samp_columns.numSample = 0;
         }
@@ -1192,9 +1284,11 @@ public:
         variants_size = filesize - header_size; //ora che ho tolto l'header ho un file piu piccolo quindi una nuova size
         //cout<<"filesize: "<<filesize<<" variants_size: "<<variants_size<<endl;
     }   
+    
     void allocate_filestring(){
         filestring = (char*)malloc(variants_size);
     }
+    
     void find_new_lines_index(string w_filename, int num_threads){ //popola anche il filestring 
         new_lines_index = (long*)malloc(variants_size); //per ora ho esagerato con la dimensione (è come se permettessi tutti \n. Si puo ridurre (euristicamente), pero ipotizzarlo è meglio perche senno devo passare il file due volte solo per vedere dove iniziano le linee)
         new_lines_index[0] = 0; //il primo elemento lo metto a zero per indicare l'inizio della prima linea
@@ -1263,6 +1357,7 @@ public:
         auto f_new_lines = std::chrono::duration<double>(after - before).count(); 
         //cout << "\nFilestring time: " << filestring_time << " s " << "New lines time: " << f_new_lines << " s\n\n" << endl;
     }
+    
     void create_sample_vectors(int num_threads){
         long batch_size = (num_lines-2+num_threads)/num_threads;
         samp_Flag samp_flag_tmp;
@@ -1378,15 +1473,15 @@ public:
         samp_columns.samp_float.resize(FORMAT.floats);
         samp_columns.samp_string.resize(FORMAT.strings);
         samp_columns.var_id.resize((num_lines-1)*samp_columns.numSample, "\0");
-        samp_columns.samp_id.resize((num_lines-1)*samp_columns.numSample, "\0");
 
         alt_sample.samp_flag.resize(FORMAT.flags_alt);
         alt_sample.samp_int.resize(FORMAT.ints_alt);
         alt_sample.samp_float.resize(FORMAT.floats_alt);
         alt_sample.samp_string.resize(FORMAT.strings_alt);
         alt_sample.var_id.resize((num_lines-1)* alt_sample.numSample, "\0");
-        alt_sample.samp_id.resize((num_lines-1)*alt_sample.numSample, "\0");
+        alt_sample.samp_id.resize((num_lines-1)*alt_sample.numSample, 0);
     }
+    
     void create_info_vectors(int num_threads){
         long batch_size = (num_lines-2+num_threads)/num_threads;
         info_flag info_flag_tmp;
@@ -1473,11 +1568,13 @@ public:
         alt_columns.alt_float.resize(INFO.floats_alt);
         alt_columns.alt_string.resize(INFO.strings_alt);
     }
+    
     void print_info_map(){
         for(const auto& element : info_map){
             cout<<element.first<<": "<<element.second<<endl;
         }
     }
+    
     void print_info(){
         cout<<"Flags size: "<<var_columns.in_flag.size()<<endl;
         for(int i=0; i<var_columns.in_flag.size(); i++){
@@ -1556,6 +1653,7 @@ public:
         // }
         // cout<<endl;
     }
+    
     void reserve_var_columns(){
         var_columns.var_number.resize(num_lines-1);
         var_columns.chrom.resize(num_lines-1);
@@ -1568,6 +1666,7 @@ public:
         var_columns.info.resize(num_lines-1);
         //cout<<"Finish resize!"<<endl;
     }
+    
     void populate_var_columns(int num_threads){
         long batch_size = (num_lines-2+num_threads)/num_threads;
         alt_columns_df tmp_alt[num_threads];
@@ -1592,7 +1691,7 @@ public:
             tmp_num_alt_format[th_ID] = 0;
             tmp_alt_format[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, "\0");
             tmp_alt_format[th_ID].alt_id.resize(batch_size*2*samp_columns.numSample, 0);
-            tmp_alt_format[th_ID].samp_id.resize(batch_size*2*samp_columns.numSample, "\0");
+            tmp_alt_format[th_ID].samp_id.resize(batch_size*2*samp_columns.numSample, 0);
             //cout << "\nThread id: "<<th_ID<<endl;
             start = th_ID*batch_size; // inizio del batch dello specifico thread
             end = start + batch_size; // fine del batch

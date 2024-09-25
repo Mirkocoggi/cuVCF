@@ -139,16 +139,14 @@ int main(int argc, char *argv[]){
     after = chrono::system_clock::now();
     auto reserve_var_columns = std::chrono::duration<double>(after - before).count();
 
-    
-
     before = chrono::system_clock::now();
     vcf.populate_var_columns(num_threadss);
     after = chrono::system_clock::now();
     auto populate_var_columns = std::chrono::duration<double>(after - before).count();
-    // cout << "\nPrint from var_df: \n";
-    // for(int i=0; i<vcf.num_lines-1; i++){
-    //    vcf.var_df[i].print_var();
-    // }
+    cout << "\nPrint from var_df: \n";
+    for(int i=0; i<vcf.num_lines-1; i++){
+       vcf.var_df[i].print_var();
+    }
 
     //cout << "\nPrint from var_columns: \n";
     //vcf.var_columns.print_var_columns(10);
@@ -164,6 +162,7 @@ int main(int argc, char *argv[]){
     cout << endl;
 
     vcf.samp_columns.print();
+    vcf.alt_sample.print();
 
     //vcf.alt_columns.print();
     
