@@ -315,7 +315,7 @@ public:
     
     void get_vcf_line_in_var_columns(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt)
     {
-        //cout<<i<<"\t";
+        
         bool find1 = false;
         long iter=0;
         int local_alt = 1;
@@ -410,6 +410,7 @@ public:
                 iter++;
             }
         }
+        
         tmp="\0";
         find1=false;
         while(!find1){
@@ -470,6 +471,7 @@ public:
                                     el++;
                                 }
                                 find_info_type = true;
+                                
                             }else if(info_map1[tmp_elems[0]]==3){
                                 //String
                                 
@@ -503,6 +505,7 @@ public:
                                 while(!find_info_elem){
                                     if((*tmp_alt).alt_float[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                        
                                         for(int y = 0; y<local_alt; y++){
                                             try{
                                                 (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = (half)stof(tmp_split[y]);
@@ -515,6 +518,7 @@ public:
                                     el++;
                                 }
                                 find_info_type = true;
+                                
                             }else if(info_map1[tmp_elems[0]]==6){
                                 //String Alt
                                 int el=0;
@@ -1172,6 +1176,7 @@ public:
     long variants_size;
     long num_lines=0;
     long *new_lines_index;
+    bool samplesON = false;
     var_columns_df var_columns;
     alt_columns_df alt_columns;
     sample_columns_df samp_columns;
@@ -1260,6 +1265,7 @@ public:
         vector<string> tmp_split;
         boost::split(tmp_split, line, boost::is_any_of("\t"));
         if(tmp_split.size() > 9){
+            samplesON = true;
             samp_columns.numSample = tmp_split.size() - 9;
             alt_sample.numSample = samp_columns.numSample;
 
@@ -1273,12 +1279,12 @@ public:
         }
         
  
-        //for(int i=0; i<INFO.ID.size(); i++){
+        // for(int i=0; i<INFO.ID.size(); i++){
         //    cout<<"INFO.ID["<<i<<"]: "<<INFO.ID[i]<<" | INFO.Number["<<i<<"]: "<<INFO.Number[i]<<" | INFO.Type["<<i<<"]: "<<INFO.Type[i]<<endl;
-        //}
+        // }
         INFO.total_values = INFO.ID.size();
         INFO.no_alt_values = INFO.total_values - INFO.alt_values;
-        //cout<<"INFO.total_values: "<< INFO.total_values << " INFO.alt_values: "<<INFO.alt_values<<" INFO.no_alt_values: "<<INFO.no_alt_values<<endl;
+        // cout<<"INFO.total_values: "<< INFO.total_values << " INFO.alt_values: "<<INFO.alt_values<<" INFO.no_alt_values: "<<INFO.no_alt_values<<endl;
         header_size += line.length() + 1;
         //cout << "\nheader char: " << to_string(header_size) << endl;
         variants_size = filesize - header_size; //ora che ho tolto l'header ho un file piu piccolo quindi una nuova size
@@ -1370,6 +1376,7 @@ public:
         samp_String samp_alt_string_tmp;
 
         int numIter = FORMAT.ID.size();
+        // cout << "numiter: " << numIter<<endl;
         for(int i = 0; i < numIter; i++){
             if(strcmp(&FORMAT.Number[i][0], "A") != 0){
                 if(strcmp(&FORMAT.Number[i][0], "1")==0){
@@ -1468,6 +1475,9 @@ public:
                 }
             }
         }
+        
+        // cout << "numiter: " << numIter<<endl;
+        
         samp_columns.samp_flag.resize(FORMAT.flags);
         samp_columns.samp_int.resize(FORMAT.ints);
         samp_columns.samp_float.resize(FORMAT.floats);
@@ -1674,15 +1684,16 @@ public:
         //in progress
         alt_format_df tmp_alt_format[num_threads];
         int tmp_num_alt_format[num_threads];
-
+        
 #pragma omp parallel
         {
             long start, end;
             int th_ID = omp_get_thread_num();
             //struttura temporanea del thread con alternatives.
             tmp_alt[th_ID].clone(alt_columns, INFO);
-            tmp_alt_format[th_ID].clone(alt_sample, FORMAT);
-
+            
+            // tmp_alt_format[th_ID].clone(alt_sample, FORMAT); // si blocca qui
+            // cout<<"sqar"<<endl;
             tmp_num_alt[th_ID] = 0;
             tmp_alt[th_ID].var_id.resize(batch_size*2, "\0");
             tmp_alt[th_ID].alt_id.resize(batch_size*2, 0);
@@ -1696,44 +1707,68 @@ public:
             start = th_ID*batch_size; // inizio del batch dello specifico thread
             end = start + batch_size; // fine del batch
             //cout<<"\nNum Lines: "<<num_lines-2<<endl;
-            if(samp_columns.numSample>0){
+            
+            if(samplesON){ 
+                tmp_alt_format[th_ID].clone(alt_sample, FORMAT);
+                tmp_num_alt_format[th_ID] = 0;
+                tmp_alt_format[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, "\0");
+                tmp_alt_format[th_ID].alt_id.resize(batch_size*2*samp_columns.numSample, 0);
+                tmp_alt_format[th_ID].samp_id.resize(batch_size*2*samp_columns.numSample, "\0");
                 for(long i=start; i<end && i<num_lines-1; i++){ 
                     var_columns.var_number[i] = i;
                     var_columns.get_vcf_line_in_var_columns_format(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]), &samp_columns, &FORMAT, &(tmp_num_alt_format[th_ID]), &(tmp_alt_format[th_ID]));
                 }
+
+                tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
+                tmp_alt[th_ID].alt_id.resize(tmp_num_alt[th_ID]);
+                tmp_alt[th_ID].alt.resize(tmp_num_alt[th_ID]);
+                for(int i=0; i<INFO.ints_alt; i++){
+                    tmp_alt[th_ID].alt_int[i].i_int.resize(tmp_num_alt[th_ID]);
+                }
+                for(int i=0; i<INFO.floats_alt; i++){
+                    tmp_alt[th_ID].alt_float[i].i_float.resize(tmp_num_alt[th_ID]);
+                }
+                for(int i=0; i<INFO.strings_alt; i++){
+                    tmp_alt[th_ID].alt_string[i].i_string.resize(tmp_num_alt[th_ID]);
+                }
+                tmp_alt[th_ID].numAlt = tmp_num_alt[th_ID];
+
+                tmp_alt_format[th_ID].var_id.resize(tmp_num_alt_format[th_ID]);
+                tmp_alt_format[th_ID].alt_id.resize(tmp_num_alt_format[th_ID]);
+                tmp_alt_format[th_ID].samp_id.resize(tmp_num_alt_format[th_ID]);
+                for(int i=0; i<FORMAT.ints_alt; i++){
+                   tmp_alt_format[th_ID].samp_int[i].i_int.resize(tmp_num_alt_format[th_ID]);
+                }
+                for(int i=0; i<FORMAT.floats_alt; i++){
+                    tmp_alt_format[th_ID].samp_float[i].i_float.resize(tmp_num_alt_format[th_ID]);
+                }
+                for(int i=0; i<FORMAT.strings_alt; i++){
+                    tmp_alt_format[th_ID].samp_string[i].i_string.resize(tmp_num_alt_format[th_ID]);
+                }
+                tmp_alt_format[th_ID].numSample = tmp_num_alt_format[th_ID]; 
+
             }else{
+                
                 for(long i=start; i<end && i<num_lines-1; i++){
                     var_columns.var_number[i] = i;
                     var_columns.get_vcf_line_in_var_columns(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]));
                 }
-            }            
-            tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
-            tmp_alt[th_ID].alt_id.resize(tmp_num_alt[th_ID]);
-            tmp_alt[th_ID].alt.resize(tmp_num_alt[th_ID]);
-            for(int i=0; i<INFO.ints_alt; i++){
+               
+                tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
+                tmp_alt[th_ID].alt_id.resize(tmp_num_alt[th_ID]);
+                tmp_alt[th_ID].alt.resize(tmp_num_alt[th_ID]);
+                for(int i=0; i<INFO.ints_alt; i++){
                 tmp_alt[th_ID].alt_int[i].i_int.resize(tmp_num_alt[th_ID]);
-            }
-            for(int i=0; i<INFO.floats_alt; i++){
+                }
+                for(int i=0; i<INFO.floats_alt; i++){
                 tmp_alt[th_ID].alt_float[i].i_float.resize(tmp_num_alt[th_ID]);
-            }
-            for(int i=0; i<INFO.strings_alt; i++){
+                }
+                for(int i=0; i<INFO.strings_alt; i++){
                 tmp_alt[th_ID].alt_string[i].i_string.resize(tmp_num_alt[th_ID]);
-            }
-            tmp_alt[th_ID].numAlt = tmp_num_alt[th_ID];
-
-            tmp_alt_format[th_ID].var_id.resize(tmp_num_alt_format[th_ID]);
-            tmp_alt_format[th_ID].alt_id.resize(tmp_num_alt_format[th_ID]);
-            tmp_alt_format[th_ID].samp_id.resize(tmp_num_alt_format[th_ID]);
-            for(int i=0; i<FORMAT.ints_alt; i++){
-                tmp_alt_format[th_ID].samp_int[i].i_int.resize(tmp_num_alt_format[th_ID]);
-            }
-            for(int i=0; i<FORMAT.floats_alt; i++){
-                tmp_alt_format[th_ID].samp_float[i].i_float.resize(tmp_num_alt_format[th_ID]);
-            }
-            for(int i=0; i<FORMAT.strings_alt; i++){
-                tmp_alt_format[th_ID].samp_string[i].i_string.resize(tmp_num_alt_format[th_ID]);
-            }
-            tmp_alt_format[th_ID].numSample = tmp_num_alt_format[th_ID];            
+                }
+                tmp_alt[th_ID].numAlt = tmp_num_alt[th_ID];
+            }            
+                       
         }
         int totAlt = 0;
         int totSampAlt = 0;
@@ -1783,7 +1818,8 @@ public:
             }
             totAlt+=tmp_num_alt[i];
         }
-
+        
+        if(samplesON){
         // in progress Non troppo efficiente ma valido per ora
         for(int i=0; i<FORMAT.ints_alt; i++){
             alt_sample.samp_int[i].i_int.resize(0);
@@ -1860,6 +1896,7 @@ public:
         }
         for(int j=0; j<FORMAT.strings_alt; j++){
             alt_sample.samp_string[j].i_string.resize(totSampAlt);
+        }
         }
         
     }
