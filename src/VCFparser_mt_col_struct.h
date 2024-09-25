@@ -224,7 +224,7 @@ class alt_format_df //aka df4 in progress
     vector<samp_Int> samp_int;
     std::map<std::string, unsigned short> sampNames;
     //samp_GT sample_GT;
-    int numSample;
+    int numSample; 
 
     void clone(alt_format_df ref, header_element FORMAT){
         int numAlt = FORMAT.alt_values;
