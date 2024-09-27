@@ -127,7 +127,7 @@ class alt_columns_df
             info_float tmpInfoFloat;
             for(int i = 0; i<tmp; i++){
                 tmpInfoFloat.name = ref.alt_float[i].name;
-                tmpInfoFloat.i_float.resize(ref.alt_float[i].i_float.size(), 0);
+                tmpInfoFloat.i_float.resize(ref.alt_float[i].i_float.size(), 0.0f);
                 alt_float.push_back(tmpInfoFloat);
             }
             alt_float.resize(tmp);
@@ -573,7 +573,6 @@ public:
         vector<string> tmp_split;
         vector<string> tmp_format_split;
         vector<string> tmp_subSplit;
-        
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
@@ -648,7 +647,7 @@ public:
                 find1 = true;
                 iter++;
                 if(strcmp(&tmp[0], ".")==0){
-                    qual[i] = 0.0f;
+                    qual[i] = (half)0.0f;
                 }else{
                     try{
                         qual[i] = (half)stof(tmp);
@@ -816,7 +815,6 @@ public:
                 iter++;
             }
         }
-
         int samp;
         for(samp = 0; samp < (*sample).numSample; samp++){
             tmp="\0";
@@ -834,8 +832,9 @@ public:
                             if(info_map1[tmp_format_split[j]] == 8 || info_map1[tmp_format_split[j] + std::to_string(1)] == 8){
                                 //String
                                 (*sample).var_id[i*(*sample).numSample + samp] = id[i];
-                                (*sample).samp_id[i*(*sample).numSample + samp] = samp;
+                                (*sample).samp_id[i*(*sample).numSample + samp] =  static_cast<unsigned short>(samp); // error
                                 int el = 0;
+                                
                                 while(!find_elem){
                                     if(!(*sample).samp_string[el].name.compare(0, tmp_format_split[j].length(), tmp_format_split[j], 0, tmp_format_split[j].length())){
                                         if((*sample).samp_string[el].numb==1){
@@ -1483,13 +1482,15 @@ public:
         samp_columns.samp_float.resize(FORMAT.floats);
         samp_columns.samp_string.resize(FORMAT.strings);
         samp_columns.var_id.resize((num_lines-1)*samp_columns.numSample, "\0");
+        samp_columns.samp_id.resize((num_lines-1)*samp_columns.numSample, static_cast<unsigned short>(0));
 
         alt_sample.samp_flag.resize(FORMAT.flags_alt);
         alt_sample.samp_int.resize(FORMAT.ints_alt);
         alt_sample.samp_float.resize(FORMAT.floats_alt);
         alt_sample.samp_string.resize(FORMAT.strings_alt);
         alt_sample.var_id.resize((num_lines-1)* alt_sample.numSample, "\0");
-        alt_sample.samp_id.resize((num_lines-1)*alt_sample.numSample, 0);
+        alt_sample.samp_id.resize((num_lines-1)*alt_sample.numSample, static_cast<unsigned short>(0));
+
     }
     
     void create_info_vectors(int num_threads){
@@ -1698,27 +1699,29 @@ public:
             tmp_alt[th_ID].var_id.resize(batch_size*2, "\0");
             tmp_alt[th_ID].alt_id.resize(batch_size*2, 0);
             tmp_alt[th_ID].alt.resize(batch_size*2, "\0");
-
+            
             tmp_num_alt_format[th_ID] = 0;
             tmp_alt_format[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, "\0");
             tmp_alt_format[th_ID].alt_id.resize(batch_size*2*samp_columns.numSample, 0);
-            tmp_alt_format[th_ID].samp_id.resize(batch_size*2*samp_columns.numSample, 0);
+            tmp_alt_format[th_ID].samp_id.resize(batch_size*2*samp_columns.numSample, static_cast<unsigned short>(0));
+            
             //cout << "\nThread id: "<<th_ID<<endl;
             start = th_ID*batch_size; // inizio del batch dello specifico thread
             end = start + batch_size; // fine del batch
             //cout<<"\nNum Lines: "<<num_lines-2<<endl;
             
-            if(samplesON){ 
+            if(samplesON){
                 tmp_alt_format[th_ID].clone(alt_sample, FORMAT);
                 tmp_num_alt_format[th_ID] = 0;
                 tmp_alt_format[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, "\0");
                 tmp_alt_format[th_ID].alt_id.resize(batch_size*2*samp_columns.numSample, 0);
-                tmp_alt_format[th_ID].samp_id.resize(batch_size*2*samp_columns.numSample, "\0");
+                tmp_alt_format[th_ID].samp_id.resize(batch_size*2*samp_columns.numSample, static_cast<unsigned short>(0));
                 for(long i=start; i<end && i<num_lines-1; i++){ 
                     var_columns.var_number[i] = i;
                     var_columns.get_vcf_line_in_var_columns_format(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]), &samp_columns, &FORMAT, &(tmp_num_alt_format[th_ID]), &(tmp_alt_format[th_ID]));
+                    
                 }
-
+                
                 tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
                 tmp_alt[th_ID].alt_id.resize(tmp_num_alt[th_ID]);
                 tmp_alt[th_ID].alt.resize(tmp_num_alt[th_ID]);
@@ -1732,7 +1735,6 @@ public:
                     tmp_alt[th_ID].alt_string[i].i_string.resize(tmp_num_alt[th_ID]);
                 }
                 tmp_alt[th_ID].numAlt = tmp_num_alt[th_ID];
-
                 tmp_alt_format[th_ID].var_id.resize(tmp_num_alt_format[th_ID]);
                 tmp_alt_format[th_ID].alt_id.resize(tmp_num_alt_format[th_ID]);
                 tmp_alt_format[th_ID].samp_id.resize(tmp_num_alt_format[th_ID]);
@@ -1748,12 +1750,10 @@ public:
                 tmp_alt_format[th_ID].numSample = tmp_num_alt_format[th_ID]; 
 
             }else{
-                
                 for(long i=start; i<end && i<num_lines-1; i++){
                     var_columns.var_number[i] = i;
                     var_columns.get_vcf_line_in_var_columns(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]));
                 }
-               
                 tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
                 tmp_alt[th_ID].alt_id.resize(tmp_num_alt[th_ID]);
                 tmp_alt[th_ID].alt.resize(tmp_num_alt[th_ID]);
@@ -1770,6 +1770,7 @@ public:
             }            
                        
         }
+
         int totAlt = 0;
         int totSampAlt = 0;
         // in progress Non troppo efficiente ma valido per ora
@@ -1913,6 +1914,9 @@ public:
         auto after = chrono::system_clock::now();
         auto pre_pragma = std::chrono::duration<double>(after - before).count();
         //cout << "Pre_pragma: " << pre_pragma << " s" << endl;
+
+
+
 
 #pragma omp parallel
         {
