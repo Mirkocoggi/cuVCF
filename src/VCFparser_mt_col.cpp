@@ -12,8 +12,12 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <filesystem>
+#include <OpenEXR/half.h>
 #include <omp.h>
 #include "VCFparser_mt_col_struct.h"
+#include "VCF_parsed.h"
+#include "VCF_var.h"
+#include "VCF_var_columns_df.h"
 
 using namespace std;
 
