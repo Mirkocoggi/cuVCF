@@ -59,7 +59,7 @@ int main(int argc, char *argv[]){
     if(!strcmp((vcf_filename + strlen(vcf_filename) - 3), ".gz")){
         std::string command = "gzip -df ";
         command += vcf_filename;
-        int res = system(command.c_str());
+        int res = system(command.c_str()); // TODO more secure
         if(res){
             cout << "ERROR: cannot unzipp file" << endl;
         }else{

@@ -12,7 +12,7 @@ class vcf_parsed
 public:
     int id;
     string filename;
-    var *var_df;
+    //var *var_df;
     string header;
     header_element INFO;
     map<string,int> info_map; //Flag=0, Int=1, Float=2, String=3;
@@ -29,7 +29,7 @@ public:
     sample_columns_df samp_columns;
     alt_format_df alt_sample;
 
-    void get_filename(string path_to_filename){ //TODO è ancora necessario il controllo sul .gz?
+    void get_filename(string path_to_filename){ //TODO non è necessario il controllo sul .gz - cambia a path
         vector<string> line_el;
         boost::split(line_el, path_to_filename, boost::is_any_of("/"));
         filename = line_el[line_el.size()-1];
@@ -392,33 +392,32 @@ public:
                     var_columns.in_int.push_back(info_int_tmp);
                     info_map[INFO.ID[i]] = 1;
                     var_columns.info_map1[INFO.ID[i]] = 1;
-                }
-                if(strcmp(&INFO.Type[i][0], "Float")==0){
+                } else if(strcmp(&INFO.Type[i][0], "Float")==0){
                     INFO.floats++;
                     info_float_tmp.name = INFO.ID[i];
                     info_float_tmp.i_float.resize(num_lines-1, 0);
                     var_columns.in_float.push_back(info_float_tmp);
                     info_map[INFO.ID[i]] = 2;
                     var_columns.info_map1[INFO.ID[i]] = 2;
-                }
-                if(strcmp(&INFO.Type[i][0], "String")==0){
+                } else if(strcmp(&INFO.Type[i][0], "String")==0){
                     INFO.strings++;
                     info_string_tmp.name = INFO.ID[i];
                     info_string_tmp.i_string.resize(num_lines-1, "\0");
                     var_columns.in_string.push_back(info_string_tmp);
                     info_map[INFO.ID[i]] = 3;
                     var_columns.info_map1[INFO.ID[i]] = 3;
-                }
-                if(strcmp(&INFO.Type[i][0], "Flag")==0){
+                } else if(strcmp(&INFO.Type[i][0], "Flag")==0){
                     INFO.flags++;
                     info_flag_tmp.name = INFO.ID[i];
                     info_flag_tmp.i_flag.resize(num_lines-1, 0);
                     var_columns.in_flag.push_back(info_flag_tmp);
                     info_map[INFO.ID[i]] = 0;
                     var_columns.info_map1[INFO.ID[i]] = 0;
-                }else{
-                    //in progress, se num > 1 TODO
                 }
+            }else if(/*fai il punto*/ false){
+                
+            }else{
+                //in progress, se num > 1 TODO
             }
         }
         
@@ -654,36 +653,36 @@ public:
         for(int i=0; i<num_threads; i++){
             alt_columns.var_id.insert(
                 alt_columns.var_id.end(),
-                tmp_alt[i].var_id.begin(),
-                tmp_alt[i].var_id.end()
+                std::make_move_iterator(tmp_alt[i].var_id.begin()),
+                std::make_move_iterator(tmp_alt[i].var_id.end())
             );
             alt_columns.alt_id.insert(
                 alt_columns.alt_id.end(),
-                tmp_alt[i].alt_id.begin(),
-                tmp_alt[i].alt_id.end()
+                std::make_move_iterator(tmp_alt[i].alt_id.begin()),
+                std::make_move_iterator(tmp_alt[i].alt_id.end())
             );
             alt_columns.alt.insert(
                 alt_columns.alt.end(),
-                tmp_alt[i].alt.begin(),
-                tmp_alt[i].alt.end()
+                std::make_move_iterator(tmp_alt[i].alt.begin()),
+                std::make_move_iterator(tmp_alt[i].alt.end())
             );
             for(int j=0; j<INFO.ints_alt; j++){
                 alt_columns.alt_int[j].i_int.insert(
                     alt_columns.alt_int[j].i_int.end(), 
-                    tmp_alt[i].alt_int[j].i_int.begin(), 
-                    tmp_alt[i].alt_int[j].i_int.end());
+                    std::make_move_iterator(tmp_alt[i].alt_int[j].i_int.begin()), 
+                    std::make_move_iterator(tmp_alt[i].alt_int[j].i_int.end()));
             }
             for(int j=0; j<INFO.floats_alt; j++){
                 alt_columns.alt_float[j].i_float.insert(
                     alt_columns.alt_float[j].i_float.end(), 
-                    tmp_alt[i].alt_float[j].i_float.begin(), 
-                    tmp_alt[i].alt_float[j].i_float.end());
+                    std::make_move_iterator(tmp_alt[i].alt_float[j].i_float.begin()), 
+                    std::make_move_iterator(tmp_alt[i].alt_float[j].i_float.end()));
             }
             for(int j=0; j<INFO.strings_alt; j++){
                 alt_columns.alt_string[j].i_string.insert(
                     alt_columns.alt_string[j].i_string.end(), 
-                    tmp_alt[i].alt_string[j].i_string.begin(), 
-                    tmp_alt[i].alt_string[j].i_string.end());
+                    std::make_move_iterator(tmp_alt[i].alt_string[j].i_string.begin()), 
+                    std::make_move_iterator(tmp_alt[i].alt_string[j].i_string.end()));
             }
             totAlt+=tmp_num_alt[i];
         }
@@ -707,36 +706,36 @@ public:
             for(int i=0; i<num_threads; i++){
                 alt_sample.var_id.insert(
                     alt_sample.var_id.end(),
-                    tmp_alt_format[i].var_id.begin(),
-                    tmp_alt_format[i].var_id.end()
+                    std::make_move_iterator(tmp_alt_format[i].var_id.begin()),
+                    std::make_move_iterator(tmp_alt_format[i].var_id.end())
                 );
                 alt_sample.alt_id.insert(
                     alt_sample.alt_id.end(),
-                    tmp_alt_format[i].alt_id.begin(),
-                    tmp_alt_format[i].alt_id.end()
+                    std::make_move_iterator(tmp_alt_format[i].alt_id.begin()),
+                    std::make_move_iterator(tmp_alt_format[i].alt_id.end())
                 );
                 alt_sample.samp_id.insert(
                     alt_sample.samp_id.end(),
-                    tmp_alt_format[i].samp_id.begin(),
-                    tmp_alt_format[i].samp_id.end()
+                    std::make_move_iterator(tmp_alt_format[i].samp_id.begin()),
+                    std::make_move_iterator(tmp_alt_format[i].samp_id.end())
                 );
                 for(int j=0; j<FORMAT.ints_alt; j++){
                     alt_sample.samp_int[j].i_int.insert(
                         alt_sample.samp_int[j].i_int.end(), 
-                        tmp_alt_format[i].samp_int[j].i_int.begin(), 
-                        tmp_alt_format[i].samp_int[j].i_int.end());
+                        std::make_move_iterator(tmp_alt_format[i].samp_int[j].i_int.begin()), 
+                        std::make_move_iterator(tmp_alt_format[i].samp_int[j].i_int.end()));
                 }
                 for(int j=0; j<FORMAT.floats_alt; j++){
                     alt_sample.samp_float[j].i_float.insert(
                         alt_sample.samp_float[j].i_float.end(), 
-                        tmp_alt_format[i].samp_float[j].i_float.begin(), 
-                        tmp_alt_format[i].samp_float[j].i_float.end());
+                        std::make_move_iterator(tmp_alt_format[i].samp_float[j].i_float.begin()), 
+                        std::make_move_iterator(tmp_alt_format[i].samp_float[j].i_float.end()));
                 }
                 for(int j=0; j<FORMAT.strings_alt; j++){
                     alt_sample.samp_string[j].i_string.insert(
                         alt_sample.samp_string[j].i_string.end(), 
-                        tmp_alt_format[i].samp_string[j].i_string.begin(), 
-                        tmp_alt_format[i].samp_string[j].i_string.end());
+                        std::make_move_iterator(tmp_alt_format[i].samp_string[j].i_string.begin()), 
+                        std::make_move_iterator(tmp_alt_format[i].samp_string[j].i_string.end()));
                 }
                 totSampAlt+=tmp_num_alt_format[i];
             }
@@ -772,6 +771,7 @@ public:
         
     }
 
+/*
     void populate_var_struct(int num_threads){
         
         auto before = chrono::system_clock::now();
@@ -800,7 +800,7 @@ public:
             }
 
         }
-    }
+    }*/
 
 };
 
