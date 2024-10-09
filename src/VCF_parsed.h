@@ -12,6 +12,7 @@ class vcf_parsed
 public:
     int id;
     string filename;
+    string path_to_filename;
     //var *var_df;
     string header;
     header_element INFO;
@@ -29,20 +30,11 @@ public:
     sample_columns_df samp_columns;
     alt_format_df alt_sample;
 
-    void get_filename(string path_to_filename){ //TODO non è necessario il controllo sul .gz - cambia a path
+    void get_filename(string path_filename){
         vector<string> line_el;
-        boost::split(line_el, path_to_filename, boost::is_any_of("/"));
+        path_to_filename = path_filename;
+        boost::split(line_el, path_filename, boost::is_any_of("/"));
         filename = line_el[line_el.size()-1];
-        //cout << "\nOnly file name: " << filename << endl;
-        line_el.clear();
-        boost::split(line_el, filename, boost::is_any_of("."));
-        if(line_el[line_el.size()-1] == "gz")
-        {
-            cout << "\nFile must be uncompressed!\n" << endl;
-            exit(0);
-        }else{
-            //cout << "\nFile already uncompressed!\n" << endl;
-        }
     }
     
     void get_file_size(string filename){
@@ -301,7 +293,7 @@ public:
                 if(!strcmp(&FORMAT.Type[i][0], "String")){ 
                     samp_alt_string_tmp.name = FORMAT.ID[i];
                     alt_sample.samp_string.push_back(samp_alt_string_tmp);
-                    alt_sample.samp_string.back().i_string.resize(batch_size*samp_columns.numSample*2, "\0");
+                    //alt_sample.samp_string.back().i_string.resize(batch_size*samp_columns.numSample*2, "\0");
                     alt_sample.samp_string.back().numb = -1;
                     info_map[FORMAT.ID[i]] = 11;
                     var_columns.info_map1[FORMAT.ID[i]] = 11;
@@ -309,7 +301,7 @@ public:
                 }else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
                     samp_alt_int_tmp.name = FORMAT.ID[i];
                     alt_sample.samp_int.push_back(samp_alt_int_tmp);
-                    alt_sample.samp_int.back().i_int.resize(batch_size*samp_columns.numSample*2, 0);
+                    //alt_sample.samp_int.back().i_int.resize(batch_size*samp_columns.numSample*2, 0);
                     alt_sample.samp_int.back().numb = -1;
                     info_map[FORMAT.ID[i]] = 12;
                     var_columns.info_map1[FORMAT.ID[i]] = 12;
@@ -317,7 +309,7 @@ public:
                 }else if(!strcmp(&FORMAT.Type[i][0], "Float")){
                     samp_alt_float_tmp.name = FORMAT.ID[i];
                     alt_sample.samp_float.push_back(samp_alt_float_tmp);
-                    alt_sample.samp_float.back().i_float.resize(batch_size*samp_columns.numSample*2, 0);
+                    //alt_sample.samp_float.back().i_float.resize(batch_size*samp_columns.numSample*2, 0);
                     alt_sample.samp_float.back().numb = -1;
                     info_map[FORMAT.ID[i]] = 13;
                     var_columns.info_map1[FORMAT.ID[i]] = 13;
@@ -358,7 +350,7 @@ public:
                 if(strcmp(&INFO.Type[i][0], "Integer")==0){
                     INFO.ints_alt++;
                     alt_int_tmp.name = INFO.ID[i];
-                    alt_int_tmp.i_int.resize(2*batch_size, 0);
+                    //alt_int_tmp.i_int.resize(2*batch_size, 0);
                     alt_columns.alt_int.push_back(alt_int_tmp);
                     info_map[INFO.ID[i]] = 4;
                     var_columns.info_map1[INFO.ID[i]] = 4;
@@ -366,7 +358,7 @@ public:
                 if(strcmp(&INFO.Type[i][0], "Float")==0){
                     INFO.floats_alt++;
                     alt_float_tmp.name = INFO.ID[i];
-                    alt_float_tmp.i_float.resize(2*batch_size, 0);
+                    //alt_float_tmp.i_float.resize(2*batch_size, 0);
                     alt_columns.alt_float.push_back(alt_float_tmp);
                     info_map[INFO.ID[i]] = 5;
                     var_columns.info_map1[INFO.ID[i]] = 5;
@@ -374,7 +366,7 @@ public:
                 if(strcmp(&INFO.Type[i][0], "String")==0){
                     INFO.strings_alt++;
                     alt_string_tmp.name = INFO.ID[i];
-                    alt_string_tmp.i_string.resize(2*batch_size, "\0");
+                    //alt_string_tmp.i_string.resize(2*batch_size, "\0");
                     alt_columns.alt_string.push_back(alt_string_tmp);
                     info_map[INFO.ID[i]] = 6;
                     var_columns.info_map1[INFO.ID[i]] = 6;
@@ -418,6 +410,7 @@ public:
                 
             }else{
                 //in progress, se num > 1 TODO
+                // Può avere solo come valori: 0, 1, R, A, G, .
             }
         }
         
@@ -541,12 +534,9 @@ public:
             long start, end;
             int th_ID = omp_get_thread_num();
             // Temporary structure of the thread with alternatives.
-            tmp_alt[th_ID].clone(alt_columns, INFO);
+            tmp_alt[th_ID].init(alt_columns, INFO, batch_size);
             
             tmp_num_alt[th_ID] = 0;
-            tmp_alt[th_ID].var_id.resize(batch_size*2, "\0");
-            tmp_alt[th_ID].alt_id.resize(batch_size*2, 0);
-            tmp_alt[th_ID].alt.resize(batch_size*2, "\0");
             
             tmp_num_alt_format[th_ID] = 0;
             tmp_alt_format[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, "\0");
@@ -558,7 +548,7 @@ public:
             
             if(samplesON){
                 // There are samples in the dataset
-                tmp_alt_format[th_ID].clone(alt_sample, FORMAT);
+                tmp_alt_format[th_ID].init(alt_sample, FORMAT, batch_size);
                 tmp_num_alt_format[th_ID] = 0;
                 tmp_alt_format[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, "\0");
                 tmp_alt_format[th_ID].alt_id.resize(batch_size*2*samp_columns.numSample, 0);
@@ -636,10 +626,9 @@ public:
         }
 
     //Here finish the parallel part and we merge the threads results
-
         int totAlt = 0;
         int totSampAlt = 0;
-        // TODO Can be more efficient
+        /* TODO Can be more efficient
         for(int i=0; i<INFO.ints_alt; i++){
             alt_columns.alt_int[i].i_int.resize(0);
         }
@@ -648,8 +637,7 @@ public:
         }
         for(int i=0; i<INFO.strings_alt; i++){
             alt_columns.alt_string[i].i_string.resize(0);
-        }
-
+        }*/
         for(int i=0; i<num_threads; i++){
             alt_columns.var_id.insert(
                 alt_columns.var_id.end(),

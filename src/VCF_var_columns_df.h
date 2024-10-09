@@ -452,7 +452,7 @@ public:
                                 }
                                 find_info_type = true;
                             }else if(info_map1[tmp_elems[0]]==FLOAT){
-                                //Float                                
+                                //Float                  
                                 int el=0;
                                 while(!find_info_elem){
                                     if(in_float[el].name == tmp_elems[0]){
@@ -522,7 +522,7 @@ public:
                                     }
                                     el++;
                                 }
-                                find_info_type = true;                            
+                                find_info_type = true;   
                             }else{
                                 find_info_type = true;
                             }
@@ -564,6 +564,7 @@ public:
                 iter++;
             }
         }
+        
         int samp;
         for(samp = 0; samp < (*sample).numSample; samp++){
             tmp="\0";
@@ -734,6 +735,7 @@ public:
                 }
             }
         }
+        
     }
 
     void print_var_columns(long num_lines){
