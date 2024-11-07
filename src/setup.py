@@ -22,11 +22,13 @@ ext_modules = [
         include_dirs=[
             # Path to pybind11 headers
             get_pybind_include(),
-            get_pybind_include()
+            get_pybind_include(),
+            '/usr/include/OpenEXR'
         ],
+        libraries=['IlmImf', 'Half'],
         language='c++',
-        extra_compile_args=['-fopenmp'],
-        extra_link_args=['-fopenmp']
+        extra_compile_args=['-fopenmp', '-std=c++17'],
+        extra_link_args=['-fopenmp', '-lstdc++fs']
     ),
 ]
 

@@ -6,6 +6,15 @@
 #include <chrono>
 #include <boost/algorithm/string.hpp>
 #include <OpenEXR/half.h>
+#include <omp.h>
+#include <fstream>
+#include <filesystem>
+#include <sys/wait.h>
+#include <unistd.h>
+#include "VCFparser_mt_col_struct.h"
+#include "VCF_var.h"
+#include "VCF_var_columns_df.h"
+
 
 class vcf_parsed
 {
@@ -29,6 +38,95 @@ public:
     alt_columns_df alt_columns;
     sample_columns_df samp_columns;
     alt_format_df alt_sample;
+
+    void unzip_gz_file(char* vcf_filename) {
+        // Check the extension ".gz"
+        if (strcmp(vcf_filename + strlen(vcf_filename) - 3, ".gz") == 0) {
+            pid_t pid = fork();
+            if (pid == 0) {
+                // Child proces
+                execlp("gzip", "gzip", "-df", vcf_filename, nullptr);
+                // If execlp fails
+                cout<< "ERROR: Failed to execute gzip command" << std::endl;
+                exit(EXIT_FAILURE);
+            } else if (pid > 0) {
+                // Parent proces waits for the child proces
+                int status;
+                waitpid(pid, &status, 0);
+                if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+                    // Remove ".gz" from the filename
+                    char* mutable_vcf_filename = const_cast<char*>(vcf_filename);
+                    mutable_vcf_filename[strlen(vcf_filename) - 3] = '\0';
+                } else {
+                    cout<< "ERROR: cannot unzip file" << std::endl;
+                }
+            } else {
+                // Error in the fork() call
+                cout<< "ERROR: Failed to fork process" << std::endl;
+            }
+        }
+    }
+
+    void run(char* vcf_filename, int num_threadss){
+        string filename = vcf_filename; 
+        int cont=0;
+        string line;
+        vcf_parsed vcf;
+        // Setting number of threads
+        omp_set_num_threads(num_threadss);
+        // Open input file, gzip -df compressed_file1.gz
+        if(!strcmp((vcf_filename + strlen(vcf_filename) - 3), ".gz")){
+            unzip_gz_file(vcf_filename);
+        }
+        
+        ifstream inFile(filename);
+        if(!inFile){
+            cout << "ERROR: cannot open file " << filename << endl;
+        }
+        // Saving filename
+        get_filename(filename);
+        
+        // Getting filesize (number of char in the file)
+        auto before = chrono::system_clock::now();
+        get_file_size(filename);
+        auto after = chrono::system_clock::now();
+        auto get_file_size = std::chrono::duration<double>(after - before).count();
+        // Getting the header (Saving the header into a string and storing the header size )
+        before = chrono::system_clock::now();
+        get_and_parse_header(&inFile); //serve per separare l'header dal resto del file
+        //vcf.print_header();
+        after = chrono::system_clock::now();
+        auto get_header = std::chrono::duration<double>(after - before).count();
+        inFile.close();
+        // Allocating the filestring (the variations as a big char*, the dimension is: filesize - header_size)
+        allocate_filestring();
+        // Populate filestring and getting the number of lines (num_lines), saving the starting char index of each lines
+        before = chrono::system_clock::now();
+        find_new_lines_index(filename, num_threadss);
+        after = chrono::system_clock::now();
+        auto find_new_lines = std::chrono::duration<double>(after - before).count();
+
+        auto populate_var_struct = std::chrono::duration<double>(after - before).count();
+        before = chrono::system_clock::now();
+        create_info_vectors(num_threadss);
+        reserve_var_columns();
+        create_sample_vectors(num_threadss);
+        after = chrono::system_clock::now();
+        auto reserve_var_columns = std::chrono::duration<double>(after - before).count();
+        before = chrono::system_clock::now();
+        populate_var_columns(num_threadss);
+        after = chrono::system_clock::now();
+        auto populate_var_columns = std::chrono::duration<double>(after - before).count();
+        
+        cout << "Get file size: " << get_file_size << " s" << endl;
+        cout << "get_header: " << get_header << " s" << endl;
+        cout << "find_new_lines: " << find_new_lines << " s" << endl;
+        cout << "populate_var_struct: " << populate_var_struct << " s" << endl;
+        cout << "reserve: " << reserve_var_columns << " s" << endl;
+        cout << "populate_var_columns: " << populate_var_columns << " s" << endl;
+        free(filestring);
+        free(new_lines_index);
+    }
 
     void get_filename(string path_filename){
         vector<string> line_el;

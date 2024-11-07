@@ -1,4 +1,4 @@
-import VCFParallelLib as vcf
+import VCFparser_mt_col_struct as vcf
 import pandas as pd
 
 res = vcf.vcf_parsed()
@@ -15,10 +15,8 @@ data1 = {
     'pos': df1tmp.pos,
     'id':  df1tmp.id,
     'ref': df1tmp.ref,
-    #'alt': df1tmp.alt,
     'qual': df1tmp.qual,
     'filter': df1tmp.filter
-    #'info': df1tmp.info
 }
 #è necessario aggiungere dinamicamente le colonne deelle varie strutture
 for elem in df1tmp.in_float:
