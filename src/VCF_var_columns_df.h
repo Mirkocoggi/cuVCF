@@ -561,6 +561,8 @@ public:
             }
         }
         
+        //(*sample).print();
+
         //TODO - Da gestire il GT qui dentro
         int samp;
         for(samp = 0; samp < (*sample).numSample; samp++){
@@ -578,7 +580,9 @@ public:
                         while(!find_type){
                             if(!strcmp(tmp_format_split[j].c_str(), "GT")){
                                 // TODO - da considerare come rifare la struttura visto che se numb > 1 servono + array
+                                cout<<"i: "<<i<<" (*sample).numSample: "<< (*sample).numSample << " samp: "<<samp<<" var_number[i]: "<<var_number[i] <<endl;
                                 (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
+                                
                                 (*sample).samp_id[i*(*sample).numSample + samp] =  static_cast<unsigned short>(samp);
                                 if((*sample).sample_GT.size() > 1){ //sample_columns_df* sample, alt_format_df* tmp_alt_format
                                     tmp_sub;

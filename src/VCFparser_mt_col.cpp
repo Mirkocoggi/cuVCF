@@ -85,11 +85,11 @@ int main(int argc, char *argv[]){
     vcf_parsed vcf;
     vcf.run(vcf_filename, num_threadss);
 
-    vcf.print_header();
-    vcf.var_columns.print_var_columns(30);
-    vcf.alt_columns.print();
-    vcf.samp_columns.print();
-    vcf.alt_sample.print();
+    //vcf.print_header();
+    //vcf.var_columns.print_var_columns(30);
+    //vcf.alt_columns.print();
+    //vcf.samp_columns.print();
+    //vcf.alt_sample.print();
 
 
 
@@ -212,10 +212,10 @@ int main(int argc, char *argv[]){
     cout << "populate_var_struct: " << populate_var_struct << " s" << endl;
     cout << "reserve: " << reserve_var_columns << " s" << endl;
 */
-    cout << "parsing time: " << populate_var_columns << " s" << endl;
+    //cout << "parsing time: " << populate_var_columns << " s" << endl;
 
     //free(vcf.var_df);
-    free(vcf.filestring);
+    //free(vcf.filestring);
     //free(vcf.new_lines_index);
 
 

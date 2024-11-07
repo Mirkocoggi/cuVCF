@@ -33,7 +33,7 @@ public:
     long num_lines=0;
     unsigned int *new_lines_index;
     bool samplesON = false;
-    bool hasNotAltSamples = false;
+    bool hasDetSamples = false;
     var_columns_df var_columns;
     alt_columns_df alt_columns;
     sample_columns_df samp_columns;
@@ -192,8 +192,11 @@ public:
                             }
                         } 
                         if(i==1) FORMAT.Number.push_back(line_el2[1]);
-                        if(i==1 && line_el2[1] == "A") FORMAT.alt_values++;
-                        if(i==1 && line_el2[1] != "A") hasNotAltSamples = true;
+                        if(i==1 && line_el2[1] == "A"){
+                            FORMAT.alt_values++;
+                        }else{
+                            hasDetSamples = true;
+                        }
                         if(i==2) FORMAT.Type.push_back(line_el2[1]);
                     }
                 }
@@ -201,11 +204,11 @@ public:
         }
 
         vector<string> tmp_split;
-        boost::split(tmp_split, line, boost::is_any_of("\t"));
+        boost::split(tmp_split, line, boost::is_any_of("\t "));
         if(tmp_split.size() > 9){
             samplesON = true;
             samp_columns.numSample = tmp_split.size() - 9;
-            alt_sample.numSample = samp_columns.numSample;
+            alt_sample.numSample = samp_columns.numSample; //TODO - controlla perchè è subito anche negli alt
 
             for(int i = 0; i < samp_columns.numSample; i++){
                 samp_columns.sampNames.insert(std::make_pair(tmp_split[9+i], i));
@@ -216,6 +219,8 @@ public:
             samp_columns.numSample = 0;
         }
         
+        cout << "Num Samples = " << samp_columns.numSample << endl;
+
         INFO.total_values = INFO.ID.size();
         INFO.no_alt_values = INFO.total_values - INFO.alt_values;
 
@@ -325,7 +330,7 @@ public:
                 tmp.numb = iter;
                 tmp.GT.resize((num_lines-1)*samp_columns.numSample, (char)0);
                 samp_columns.sample_GT.push_back(tmp);
-            }       
+            }   
         }
 
         for(int i = 0; i < numIter; i++){
@@ -435,7 +440,8 @@ public:
         samp_columns.samp_int.resize(FORMAT.ints);
         samp_columns.samp_float.resize(FORMAT.floats);
         samp_columns.samp_string.resize(FORMAT.strings);
-        if(hasNotAltSamples){
+        if(hasDetSamples){
+            cout << "AAAAAAAAAAAAAaa" << endl;
             samp_columns.var_id.resize((num_lines-1)*samp_columns.numSample, 0);
             samp_columns.samp_id.resize((num_lines-1)*samp_columns.numSample, static_cast<unsigned short>(0));
         }    
