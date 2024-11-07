@@ -13,7 +13,6 @@ public:
     int id;
     string filename;
     string path_to_filename;
-    //var *var_df;
     string header;
     header_element INFO;
     map<string,int> info_map; //Flag=0, Int=1, Float=2, String=3;
@@ -23,8 +22,9 @@ public:
     long filesize;
     long variants_size;
     long num_lines=0;
-    long *new_lines_index;
+    unsigned int *new_lines_index;
     bool samplesON = false;
+    bool hasNotAltSamples = false;
     var_columns_df var_columns;
     alt_columns_df alt_columns;
     sample_columns_df samp_columns;
@@ -84,18 +84,18 @@ public:
                     }
                     if(Format){
                         if(i==0){
-                            // TODO
-                            //if(line_el2[1] == "GT"){
-                            //    FORMAT.hasGT = true;
-                            //    boost::split(line_el2, line_el1[1], boost::is_any_of("="));
-                            //    FORMAT.numGT = line_el2[1];
-                            //    i+=3;
-                            //}else{
+                            if(line_el2[1] == "GT"){
+                                FORMAT.hasGT = true;
+                                boost::split(line_el2, line_el1[1], boost::is_any_of("="));
+                                FORMAT.numGT = line_el2[1][0];
+                                i+=3;
+                            }else{
                                 FORMAT.ID.push_back(line_el2[1]);
-                            //}
+                            }
                         } 
                         if(i==1) FORMAT.Number.push_back(line_el2[1]);
                         if(i==1 && line_el2[1] == "A") FORMAT.alt_values++;
+                        if(i==1 && line_el2[1] != "A") hasNotAltSamples = true;
                         if(i==2) FORMAT.Type.push_back(line_el2[1]);
                     }
                 }
@@ -134,11 +134,9 @@ public:
     // It also fills the 'filestring' variable (if applicable).
     void find_new_lines_index(string w_filename, int num_threads){
         // Allocate memory for the `new_lines_index` array. The size is exaggerated (assuming every character is a new line).
-        new_lines_index = (long*)malloc(variants_size);
-        new_lines_index[0] = 0; // The first element is set to 0, indicating the start of the first line.
+         // The first element is set to 0, indicating the start of the first line.
         num_lines++; // Increment the line counter to account for the first line.
         long tmp_num_lines[num_threads]; // Temporary array to store the number of lines found by each thread.
-        
         
         auto before = chrono::system_clock::now();
         long batch_infile = (variants_size - 1 + num_threads)/num_threads; // Number of characters each thread will process        
@@ -172,6 +170,12 @@ public:
         auto filestring_time = std::chrono::duration<double>(after - before).count();
         
         before = chrono::system_clock::now();
+        num_lines = tmp_num_lines[0];
+        for(int i=1; i<num_threads; i++){
+            num_lines= num_lines + tmp_num_lines[i];
+        }
+        new_lines_index = (unsigned int*)malloc(sizeof(unsigned int)*(num_lines+1));
+        new_lines_index[0] = 0;
 #pragma omp parallel
         {
             int thr_ID = omp_get_thread_num();
@@ -193,10 +197,7 @@ public:
                 }
             }
         }
-        num_lines = tmp_num_lines[0];
-        for(int i=1; i<num_threads; i++){
-            num_lines= num_lines + tmp_num_lines[i];
-        }
+        
         after = chrono::system_clock::now();
         auto f_new_lines = std::chrono::duration<double>(after - before).count(); 
         //cout << "\nFilestring time: " << filestring_time << " s " << "New lines time: " << f_new_lines << " s\n\n" << endl;
@@ -215,19 +216,33 @@ public:
 
         int numIter = FORMAT.ID.size();
 
+        if(FORMAT.hasGT && FORMAT.numGT == 'A'){
+            alt_sample.initMapGT();
+            alt_sample.sample_GT.numb = -1;
+        }else if(FORMAT.hasGT){
+            int iter = FORMAT.numGT - '0';//std::stoi(FORMAT.numGT); //number of vector needed TODO - da sistemare, se no non possiamo avere numb=10...
+            samp_columns.initMapGT();
+            for(int i=0; i<iter; i++){ //create a vector of vectors
+                samp_GT tmp;
+                tmp.numb = iter;
+                tmp.GT.resize((num_lines-1)*samp_columns.numSample, (char)0);
+                samp_columns.sample_GT.push_back(tmp);
+            }       
+        }
+
         for(int i = 0; i < numIter; i++){
             if(strcmp(&FORMAT.Number[i][0], "A") != 0){
                 // Without Alternatives
                 if(strcmp(&FORMAT.Number[i][0], "1")==0){ 
                     //Number = 1
-                    if(!strcmp(&FORMAT.Type[i][0], "String")){ 
+                    if(!strcmp(&FORMAT.Type[i][0], "String")){
                         samp_string_tmp.name = FORMAT.ID[i];
                         samp_columns.samp_string.push_back(samp_string_tmp);
                         samp_columns.samp_string.back().i_string.resize((num_lines-1)*samp_columns.numSample, "\0");
                         samp_columns.samp_string.back().numb = std::stoi(FORMAT.Number[i]);
                         info_map[FORMAT.ID[i]] = 8;
                         var_columns.info_map1[FORMAT.ID[i]] = 8;
-                        FORMAT.strings++;
+                        FORMAT.strings++;                        
                     }else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
                         samp_int_tmp.name = FORMAT.ID[i];
                         samp_columns.samp_int.push_back(samp_int_tmp);
@@ -322,14 +337,15 @@ public:
         samp_columns.samp_int.resize(FORMAT.ints);
         samp_columns.samp_float.resize(FORMAT.floats);
         samp_columns.samp_string.resize(FORMAT.strings);
-        samp_columns.var_id.resize((num_lines-1)*samp_columns.numSample, "\0");
-        samp_columns.samp_id.resize((num_lines-1)*samp_columns.numSample, static_cast<unsigned short>(0));
-
+        if(hasNotAltSamples){
+            samp_columns.var_id.resize((num_lines-1)*samp_columns.numSample, 0);
+            samp_columns.samp_id.resize((num_lines-1)*samp_columns.numSample, static_cast<unsigned short>(0));
+        }    
         alt_sample.samp_flag.resize(FORMAT.flags_alt);
         alt_sample.samp_int.resize(FORMAT.ints_alt);
         alt_sample.samp_float.resize(FORMAT.floats_alt);
         alt_sample.samp_string.resize(FORMAT.strings_alt);
-        alt_sample.var_id.resize((num_lines-1)* alt_sample.numSample, "\0");
+        alt_sample.var_id.resize((num_lines-1)* alt_sample.numSample, 0);
         alt_sample.samp_id.resize((num_lines-1)*alt_sample.numSample, static_cast<unsigned short>(0));
 
     }
@@ -469,43 +485,43 @@ public:
             cout<<" size: "<<var_columns.in_int[i].i_int.size();
             cout<<endl;
         }
-        //cout<<endl;
-        // cout<<"Flags: "<<endl;
-        // for(int i=0; i<var_columns.in_flag.size(); i++){
-        //     cout<<var_columns.in_flag[i].name<<": ";
-        //     for(int j=0; j<var_columns.in_flag[i].i_flag.size(); j++){
-        //         cout<<var_columns.in_flag[i].i_flag[j]<<" ";
-        //     }
-        //     cout<<endl;
-        // }
-        // cout<<endl;
-        // cout<<"Floats: "<<endl;
-        // for(int i=0; i<var_columns.in_float.size(); i++){
-        //     cout<<var_columns.in_float[i].name<<": ";
-        //     for(int j=0; j<var_columns.in_float[i].i_float.size(); j++){
-        //         cout<<var_columns.in_float[i].i_float[j]<<" ";
-        //     }
-        //     cout<<endl;
-        // }
-        // cout<<endl;
-        // cout<<"Strings: "<<endl;
-        // for(int i=0; i<var_columns.in_string.size(); i++){
-        //     cout<<var_columns.in_string[i].name<<": ";
-        //     for(int j=0; j<var_columns.in_string[i].i_string.size(); j++){
-        //         cout<<var_columns.in_string[i].i_string[j]<<" ";
-        //     }
-        //     cout<<endl;
-        // }
-        // cout<<endl;
-        // cout<<"Ints: "<<endl;
-        // for(int i=0; i<var_columns.in_int.size(); i++){
-        //     cout<<var_columns.in_int[i].name<<": ";
-        //     for(int j=0; j<var_columns.in_int[i].i_int.size(); j++){
-        //         cout<<var_columns.in_int[i].i_int[j]<<" ";
-        //     }
-        //     cout<<endl;
-        // }
-        // cout<<endl;
+        /*cout<<endl;
+        cout<<"Flags: "<<endl;
+        for(int i=0; i<var_columns.in_flag.size(); i++){
+            cout<<var_columns.in_flag[i].name<<": ";
+            for(int j=0; j<var_columns.in_flag[i].i_flag.size(); j++){
+                cout<<var_columns.in_flag[i].i_flag[j]<<" ";
+            }
+            cout<<endl;
+        }
+        cout<<endl;
+        cout<<"Floats: "<<endl;
+        for(int i=0; i<var_columns.in_float.size(); i++){
+            cout<<var_columns.in_float[i].name<<": ";
+            for(int j=0; j<var_columns.in_float[i].i_float.size(); j++){
+                cout<<var_columns.in_float[i].i_float[j]<<" ";
+            }
+            cout<<endl;
+        }
+        cout<<endl;
+        cout<<"Strings: "<<endl;
+        for(int i=0; i<var_columns.in_string.size(); i++){
+            cout<<var_columns.in_string[i].name<<": ";
+            for(int j=0; j<var_columns.in_string[i].i_string.size(); j++){
+                cout<<var_columns.in_string[i].i_string[j]<<" ";
+            }
+            cout<<endl;
+        }
+        cout<<endl;
+        cout<<"Ints: "<<endl;
+        for(int i=0; i<var_columns.in_int.size(); i++){
+            cout<<var_columns.in_int[i].name<<": ";
+            for(int j=0; j<var_columns.in_int[i].i_int.size(); j++){
+                cout<<var_columns.in_int[i].i_int[j]<<" ";
+            }
+            cout<<endl;
+        }
+        cout<<endl;*/
     }
     
     void reserve_var_columns(){
@@ -513,11 +529,9 @@ public:
         var_columns.chrom.resize(num_lines-1);
         var_columns.id.resize(num_lines-1);
         var_columns.pos.resize(num_lines-1);
-        var_columns.ref.resize(num_lines-1);
-        var_columns.alt.resize(num_lines-1);
+        var_columns.ref.resize(num_lines-1); 
         var_columns.qual.resize(num_lines-1);
         var_columns.filter.resize(num_lines-1);
-        var_columns.info.resize(num_lines-1);
     }
     
     void populate_var_columns(int num_threads){
@@ -539,7 +553,7 @@ public:
             tmp_num_alt[th_ID] = 0;
             
             tmp_num_alt_format[th_ID] = 0;
-            tmp_alt_format[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, "\0");
+            tmp_alt_format[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, 0);
             tmp_alt_format[th_ID].alt_id.resize(batch_size*2*samp_columns.numSample, 0);
             tmp_alt_format[th_ID].samp_id.resize(batch_size*2*samp_columns.numSample, static_cast<unsigned short>(0));
             
@@ -550,9 +564,13 @@ public:
                 // There are samples in the dataset
                 tmp_alt_format[th_ID].init(alt_sample, FORMAT, batch_size);
                 tmp_num_alt_format[th_ID] = 0;
-                tmp_alt_format[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, "\0");
+                tmp_alt_format[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, 0);
                 tmp_alt_format[th_ID].alt_id.resize(batch_size*2*samp_columns.numSample, 0);
                 tmp_alt_format[th_ID].samp_id.resize(batch_size*2*samp_columns.numSample, static_cast<unsigned short>(0));
+                if(FORMAT.hasGT && FORMAT.numGT == 'A'){ //TODO
+                    tmp_alt_format[th_ID].sample_GT.GT.resize(batch_size*2*samp_columns.numSample, (char)0),
+                    tmp_alt_format[th_ID].initMapGT();
+                }
                 
                 // For each line in the batch
                 for(long i=start; i<end && i<num_lines-1; i++){ 
@@ -628,16 +646,6 @@ public:
     //Here finish the parallel part and we merge the threads results
         int totAlt = 0;
         int totSampAlt = 0;
-        /* TODO Can be more efficient
-        for(int i=0; i<INFO.ints_alt; i++){
-            alt_columns.alt_int[i].i_int.resize(0);
-        }
-        for(int i=0; i<INFO.floats_alt; i++){
-            alt_columns.alt_float[i].i_float.resize(0);
-        }
-        for(int i=0; i<INFO.strings_alt; i++){
-            alt_columns.alt_string[i].i_string.resize(0);
-        }*/
         for(int i=0; i<num_threads; i++){
             alt_columns.var_id.insert(
                 alt_columns.var_id.end(),
@@ -676,21 +684,6 @@ public:
         }
         
         if(samplesON){
-            // TODO Can be more efficient
-            for(int i=0; i<FORMAT.ints_alt; i++){
-                alt_sample.samp_int[i].i_int.resize(0);
-            }
-            for(int i=0; i<FORMAT.floats_alt; i++){
-                alt_sample.samp_float[i].i_float.resize(0);
-            }
-            for(int i=0; i<FORMAT.strings_alt; i++){
-                alt_sample.samp_string[i].i_string.resize(0);
-            }
-
-            alt_sample.var_id.resize(0);
-            alt_sample.alt_id.resize(0);
-            alt_sample.samp_id.resize(0);
-
             for(int i=0; i<num_threads; i++){
                 alt_sample.var_id.insert(
                     alt_sample.var_id.end(),
@@ -758,37 +751,6 @@ public:
         }
         
     }
-
-/*
-    void populate_var_struct(int num_threads){
-        
-        auto before = chrono::system_clock::now();
-        
-        var_df = (var*)calloc((num_lines-1), sizeof(var)); // allocating var_df    
-
-        long batch_size = (num_lines-2+num_threads)/num_threads; // number of lines passed to each thread
-        
-        auto after = chrono::system_clock::now();
-        auto pre_pragma = std::chrono::duration<double>(after - before).count();
-
-#pragma omp parallel
-        {
-            long start, end;
-            int th_ID = omp_get_thread_num();
-
-            start = th_ID*batch_size;
-            end = start + batch_size;
-            
-            // start and end tells me the interval executed by each thread,
-            //so the 'i' represents the i_th line (var) that starts at new_lines_index[i] and ends at new_lines_index[i+1] (excluded)
-            for(long i=start; i<end && i<num_lines-1; i++){
-                var_df[i].get_vcf_line(filestring, new_lines_index[i], new_lines_index[i+1]); //translation from char* to var structure of the line
-                var_df[i].var_number = i; // dato aggiuntivo come se fosse un altro ID interno TODO, è necessario??
-                                          // Il var_df alla fine di tutto ha una copia di tutti i dati dentro ma quali servono??
-            }
-
-        }
-    }*/
 
 };
 

@@ -14,12 +14,43 @@
 #include <filesystem>
 #include <OpenEXR/half.h>
 #include <omp.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include "VCFparser_mt_col_struct.h"
 #include "VCF_parsed.h"
 #include "VCF_var.h"
 #include "VCF_var_columns_df.h"
 
 using namespace std;
+
+//Securely unzip the file
+void unzip_gz_file(char* vcf_filename) {
+    // Check the extension ".gz"
+    if (strcmp(vcf_filename + strlen(vcf_filename) - 3, ".gz") == 0) {
+        pid_t pid = fork();
+        if (pid == 0) {
+            // Child proces
+            execlp("gzip", "gzip", "-df", vcf_filename, nullptr);
+            // If execlp fails
+            cout<< "ERROR: Failed to execute gzip command" << std::endl;
+            exit(EXIT_FAILURE);
+        } else if (pid > 0) {
+            // Parent proces waits for the child proces
+            int status;
+            waitpid(pid, &status, 0);
+            if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+                // Remove ".gz" from the filename
+                char* mutable_vcf_filename = const_cast<char*>(vcf_filename);
+                mutable_vcf_filename[strlen(vcf_filename) - 3] = '\0';
+            } else {
+                cout<< "ERROR: cannot unzip file" << std::endl;
+            }
+        } else {
+            // Error in the fork() call
+            cout<< "ERROR: Failed to fork process" << std::endl;
+        }
+    }
+}
 
 int main(int argc, char *argv[]){
    
@@ -32,7 +63,6 @@ int main(int argc, char *argv[]){
         {
         case 'v':
             vcf_filename = optarg;
-            //cout << "vcf_filename: " << vcf_filename << endl;
             break;
         case 't':
             num_threadss = atoi(optarg);
@@ -57,14 +87,7 @@ int main(int argc, char *argv[]){
 // Open input file
     // gzip -df compressed_file1.gz
     if(!strcmp((vcf_filename + strlen(vcf_filename) - 3), ".gz")){
-        std::string command = "gzip -df ";
-        command += vcf_filename;
-        int res = system(command.c_str()); // TODO more secure
-        if(res){
-            cout << "ERROR: cannot unzipp file" << endl;
-        }else{
-            vcf_filename[strlen(vcf_filename) - 3] = '\0';
-        }
+        unzip_gz_file(vcf_filename);
     }
 
     string filename = vcf_filename; 
@@ -79,7 +102,6 @@ int main(int argc, char *argv[]){
     //cout << test << endl;
     //return -1;
     //---------------------
-
    
     int cont=0;
     string line;
@@ -114,6 +136,7 @@ int main(int argc, char *argv[]){
     // after = chrono::system_clock::now();
     // auto find_new_lines = std::chrono::duration<double>(after - before).count();
 
+
 // PRINT FROM FILESTRING
     
     // cout<<"\nnum_char: "<<vcf.variants_size<<endl;
@@ -139,52 +162,50 @@ int main(int argc, char *argv[]){
     vcf.create_info_vectors(num_threadss);
     //vcf.print_info_map();
     //vcf.print_info();
-  
     vcf.reserve_var_columns();
     //in progress
     vcf.create_sample_vectors(num_threadss);
     after = chrono::system_clock::now();
     auto reserve_var_columns = std::chrono::duration<double>(after - before).count();
-        
     before = chrono::system_clock::now();
     vcf.populate_var_columns(num_threadss);
 
     after = chrono::system_clock::now();
     auto populate_var_columns = std::chrono::duration<double>(after - before).count();
+/* cout << "\nPrint from var_df: \n";
+    for(int i=0; i<vcf.num_lines-1; i++){
+       vcf.var_df[i].print_var();
+    }
+
+    cout << "\nPrint from var_columns: \n";
+    vcf.var_columns.print_var_columns(10);
+
     cout << "\nPrint from var_df: \n";
-    //for(int i=0; i<vcf.num_lines-1; i++){
-    //   vcf.var_df[i].print_var();
-    //}
+    for(int i=0; i<5; i++){
+        vcf.var_df[i].print_var();
+    }
+    cout << "\n\n\nLAST 100: \n\n\n";
+    for(int i=vcf.num_lines - 101; i<vcf.num_lines - 1; i++){
+        vcf.var_df[i].print_var();
+    }
+    cout << endl;
 
-    //cout << "\nPrint from var_columns: \n";
-    //vcf.var_columns.print_var_columns(10);
-
-    // cout << "\nPrint from var_df: \n";
-    // for(int i=0; i<5; i++){
-    //     vcf.var_df[i].print_var();
-    // }
-    // cout << "\n\n\nLAST 100: \n\n\n";
-    // for(int i=vcf.num_lines - 101; i<vcf.num_lines - 1; i++){
-    //     vcf.var_df[i].print_var();
-    // }
-    // cout << endl;
-
-    //vcf.samp_columns.print();
-    //vcf.alt_sample.print();
-
-    //vcf.alt_columns.print();
+    vcf.samp_columns.print();
+    vcf.alt_sample.print();
+    vcf.alt_columns.print();
     
-    // cout << "Get file size: " << get_file_size << " s" << endl;
-    // cout << "get_header: " << get_header << " s" << endl;
-    // cout << "find_new_lines: " << find_new_lines << " s" << endl;
-    // cout << "populate_var_struct: " << populate_var_struct << " s" << endl;
-    // cout << "reserve: " << reserve_var_columns << " s" << endl;
+    cout << "Get file size: " << get_file_size << " s" << endl;
+    cout << "get_header: " << get_header << " s" << endl;
+    cout << "find_new_lines: " << find_new_lines << " s" << endl;
+    cout << "populate_var_struct: " << populate_var_struct << " s" << endl;
+    cout << "reserve: " << reserve_var_columns << " s" << endl;
+*/
     cout << "parsing time: " << populate_var_columns << " s" << endl;
 
-    
     //free(vcf.var_df);
     free(vcf.filestring);
-    free(vcf.new_lines_index);
-    
+    //free(vcf.new_lines_index);
+
+
     return 0;
 }

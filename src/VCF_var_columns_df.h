@@ -24,17 +24,15 @@ const int FLOAT_FORMAT_ALT = 13;
 class var_columns_df
 {
 public:
-    vector<long> var_number;
+    vector<unsigned int> var_number;
     std::map<std::string, char> chrom_map;
     vector<char> chrom;
-    vector<long>pos;
+    vector<unsigned int>pos;
     vector<string> id;
     vector<string> ref;
-    vector<string> alt;
     vector<half> qual;
     std::map<std::string, char> filter_map;
     vector<char> filter;
-    vector<string> info;
     vector<info_float> in_float;
     vector<info_flag> in_flag;
     vector<info_string> in_string;
@@ -119,7 +117,7 @@ public:
                 for(int y = 0; y<local_alt; y++){
                     (*tmp_alt).alt[(*tmp_num_alt)+y] = tmp_split[y];
                     (*tmp_alt).alt_id[(*tmp_num_alt)+y] = (char)y;
-                    (*tmp_alt).var_id[(*tmp_num_alt)+y] = id[i]; 
+                    (*tmp_alt).var_id[(*tmp_num_alt)+y] = var_number[i];
                 }
             }else{
                 tmp += line[start+iter];
@@ -173,7 +171,6 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '||line[start+iter]=='\n'){
                 find1 = true;
                 iter++;
-                info[i] = tmp;
                 vector<string> tmp_el;
                 boost::split(tmp_el, tmp, boost::is_any_of(";")); //Info arguments separation
                 vector<string> tmp_elems;
@@ -375,7 +372,7 @@ public:
                 for(int y = 0; y<local_alt; y++){
                     (*tmp_alt).alt[(*tmp_num_alt)+y] = tmp_split[y];
                     (*tmp_alt).alt_id[(*tmp_num_alt)+y] = (char)y;
-                    (*tmp_alt).var_id[(*tmp_num_alt)+y] = id[i];
+                    (*tmp_alt).var_id[(*tmp_num_alt)+y] = var_number[i];
                 }
             }else{
                 tmp += line[start+iter];
@@ -429,7 +426,6 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '||line[start+iter]=='\n'){
                 find1 = true;
                 iter++;
-                info[i] = tmp;
                 vector<string> tmp_el;
                 boost::split(tmp_el, tmp, boost::is_any_of(";")); //Info arguments separation
                 vector<string> tmp_elems;
@@ -565,6 +561,7 @@ public:
             }
         }
         
+        //TODO - Da gestire il GT qui dentro
         int samp;
         for(samp = 0; samp < (*sample).numSample; samp++){
             tmp="\0";
@@ -579,9 +576,34 @@ public:
                         bool find_type = false;
                         bool find_elem = false;
                         while(!find_type){
-                            if(info_map1[tmp_format_split[j]] == STRING_FORMAT || info_map1[tmp_format_split[j] + std::to_string(1)] == 8){
+                            if(!strcmp(tmp_format_split[j].c_str(), "GT")){
+                                // TODO - da considerare come rifare la struttura visto che se numb > 1 servono + array
+                                (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
+                                (*sample).samp_id[i*(*sample).numSample + samp] =  static_cast<unsigned short>(samp);
+                                if((*sample).sample_GT.size() > 1){ //sample_columns_df* sample, alt_format_df* tmp_alt_format
+                                    tmp_sub;
+                                    boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
+                                    for(int k=0; k < (*sample).sample_GT[0].numb; k++){ 
+                                        (*sample).sample_GT[k].GT[i*(*sample).numSample + samp] = (*sample).GTMap[tmp_sub[k]];
+                                    }
+                                }else if((*sample).sample_GT.size() == 1){
+                                    (*sample).sample_GT[0].GT[i*(*sample).numSample + samp] = (*sample).GTMap[tmp_split[j]];
+                                }else{
+                                    boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
+                                    local_alt = tmp_sub.size();
+                                    for(int y = 0; y<local_alt; y++){
+                                        //Fill a tuple for each alternatives
+                                        (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_number[i];
+                                        (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
+                                        (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
+                                        (*tmp_alt_format).sample_GT.GT[(*tmp_num_alt_format) + y] = (*tmp_alt_format).GTMap[tmp_sub[y]];
+                                    }
+                                    (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
+                                }
+                                find_type = true;
+                            }else if(info_map1[tmp_format_split[j]] == STRING_FORMAT || info_map1[tmp_format_split[j] + std::to_string(1)] == STRING_FORMAT){
                                 //String - deterministic
-                                (*sample).var_id[i*(*sample).numSample + samp] = id[i];
+                                (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
                                 (*sample).samp_id[i*(*sample).numSample + samp] =  static_cast<unsigned short>(samp);
                                 int el = 0;
                                 
@@ -605,9 +627,9 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_map1[tmp_format_split[j]] == INT_FORMAT || info_map1[tmp_format_split[j] + std::to_string(1)] == 9){
+                            }else if(info_map1[tmp_format_split[j]] == INT_FORMAT || info_map1[tmp_format_split[j] + std::to_string(1)] == INT_FORMAT){
                                 //Integer - deterministic
-                                (*sample).var_id[i*(*sample).numSample + samp] = id[i];
+                                (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
                                 (*sample).samp_id[i*(*sample).numSample + samp] = samp;
                                 int el = 0;
                                 while(!find_elem){
@@ -628,9 +650,9 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_map1[tmp_format_split[j]] == FLOAT_FORMAT || info_map1[tmp_format_split[j] + std::to_string(1)] == 10){
+                            }else if(info_map1[tmp_format_split[j]] == FLOAT_FORMAT || info_map1[tmp_format_split[j] + std::to_string(1)] == FLOAT_FORMAT){
                                 //Float - deterministic
-                                (*sample).var_id[i*(*sample).numSample + samp] = id[i];
+                                (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
                                 (*sample).samp_id[i*(*sample).numSample + samp] = samp;
                                 int el = 0;
                                 while(!find_elem){
@@ -661,6 +683,7 @@ public:
                                 find_type = true;
                             }else if(info_map1[tmp_format_split[j]] == STRING_FORMAT_ALT){
                                 //String alternatives
+                                // TODO - Da gestire i GT con alternatives
                                 boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                 local_alt = tmp_sub.size();
                                 int el = 0;
@@ -669,7 +692,7 @@ public:
                                     if(!(*tmp_alt_format).samp_string[el].name.compare(tmp_format_split[j])){
                                         for(int y = 0; y<local_alt; y++){
                                             //Fill a tuple for each alternatives
-                                            (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = id[i];
+                                            (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_number[i];
                                             (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
                                             (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
                                             (*tmp_alt_format).samp_string[el].i_string[(*tmp_num_alt_format) + y] = tmp_sub[y];
@@ -690,7 +713,7 @@ public:
                                     if(!(*tmp_alt_format).samp_int[el].name.compare(tmp_format_split[j])){
                                         //Fill a tuple for each alternatives
                                         for(int y = 0; y<local_alt; y++){
-                                            (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = id[i];
+                                            (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_number[i];
                                             (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
                                             (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
                                             (*tmp_alt_format).samp_int[el].i_int[(*tmp_num_alt_format) + y] = std::stoi(tmp_sub[y]);
@@ -711,7 +734,7 @@ public:
                                     if(!(*tmp_alt_format).samp_float[el].name.compare(tmp_format_split[j])){
                                         //Fill a tuple for each alternatives
                                         for(int y = 0; y<local_alt; y++){
-                                            (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = id[i];
+                                            (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_number[i];
                                             (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
                                             (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
                                             try{
@@ -745,10 +768,7 @@ public:
             cout << to_string(pos[i]) << "\t";
             cout << id[i] << "\t";
             cout << ref[i] << "\t";
-            cout << alt[i] << "\t";
-            cout << to_string(qual[i]) << "\t";
             cout << filter_map.find(std::string(1, filter[i]))->first << "\t";
-            cout << info[i] << "\t";
             for(int j=0; j<in_flag.size(); j++){
                 cout<<in_flag[j].name<<": "<<in_flag[j].i_flag[i]<<", ";
             }

@@ -58,20 +58,10 @@ struct samp_Int
     int numb;
 };
 
-class samp_GT
+struct samp_GT //TODO
 {
-    public:
-    vector<char> first;
-    vector<char> second;
-    vector<char> phase;
-    int numb;
-
-    void add(string s){
-        first[numb] =  (char)s[0];
-        phase[numb] = (char)s[1];
-        second[numb] = (char)s[2];
-        numb++;
-    }
+    vector<char> GT;
+    int numb;    
 };
 
 struct header_element
@@ -90,14 +80,14 @@ struct header_element
     int floats=0;
     int strings=0;
     int flags=0;
-    //bool hasGT = false;
-    //char numGT = 0;
+    bool hasGT = false;
+    char numGT = 0;
 };
 
 class alt_columns_df
 {
     public:
-    vector<string> var_id;
+    vector<unsigned int> var_id;
     vector<char> alt_id;
     vector<string> alt;
     vector<info_float> alt_float;
@@ -108,7 +98,7 @@ class alt_columns_df
 
     void init(alt_columns_df ref, header_element INFO, long batch_size){
         int numAlt = 2*batch_size;
-        var_id.resize(numAlt, "\0");
+        var_id.resize(numAlt, 0);
         alt.resize(numAlt, "\0");
         alt_id.resize(numAlt, (char)0);
         int tmp = INFO.floats_alt;
@@ -149,7 +139,7 @@ class alt_columns_df
 
     void clone(alt_columns_df ref, header_element INFO, long batch_size){
         int numAlt = INFO.alt_values;//sigsegv
-        var_id.resize(numAlt, "\0");
+        var_id.resize(numAlt, 0);
         alt.resize(numAlt, "\0");
         alt_id.resize(numAlt, (char)0);
         int tmp = INFO.floats_alt;
@@ -218,15 +208,36 @@ class alt_columns_df
 class sample_columns_df //aka df3
 {
     public:
-    vector<string> var_id;
+    vector<unsigned int> var_id;
     vector<unsigned short> samp_id;
     vector<samp_Float> samp_float;
     vector<samp_Flag> samp_flag;
     vector<samp_String> samp_string;
     vector<samp_Int> samp_int;
     std::map<std::string, unsigned short> sampNames;
-    //samp_GT sample_GT;
+    map<string, char> GTMap;
+    vector<samp_GT> sample_GT;
     int numSample; //numero di sample per riga
+
+    void initMapGT(){
+        int value = 0;
+        // First half of the map from 0|0 to 10|10
+        for (int i = 0; i < 11; ++i) {
+            for (int j = 0; j < 11; ++j) {
+                std::string key = std::to_string(i) + "|" + std::to_string(j);
+                GTMap[key] = value;
+                value++;
+            }
+        }
+        // Second half of the map from 0/0 to 10/10
+        for (int i = 0; i < 11; ++i) {
+            for (int j = 0; j < 11; ++j) {
+                std::string key = std::to_string(i) + "/" + std::to_string(j);
+                GTMap[key] = value;
+                value++;
+            }
+        }
+    }
 
    void print(){
         cout << "VarID\tSampID\tFloat\t\tInt\t\tStr" << endl;
@@ -266,7 +277,7 @@ class sample_columns_df //aka df3
 class alt_format_df //aka df4 in progress
 {
     public:
-    vector<string> var_id;
+    vector<unsigned int> var_id;
     vector<unsigned short> samp_id;
     vector<char> alt_id;
     vector<samp_Float> samp_float;
@@ -274,14 +285,15 @@ class alt_format_df //aka df4 in progress
     vector<samp_String> samp_string;
     vector<samp_Int> samp_int;
     std::map<std::string, unsigned short> sampNames;
-    //samp_GT sample_GT;
+    samp_GT sample_GT;
+    map<string, char> GTMap;
     int numSample; 
 
     void init(alt_format_df ref, header_element FORMAT, long batch_size){
         numSample = ref.numSample;
         sampNames = ref.sampNames;
         int numAlt = batch_size*numSample*2;
-        var_id.resize(numAlt, "\0");
+        var_id.resize(numAlt, 0);
         samp_id.resize(numAlt, 0);
         alt_id.resize(numAlt, (char)0);
         
@@ -296,9 +308,7 @@ class alt_format_df //aka df4 in progress
             }
             samp_float.resize(tmp);
         }
-    
         tmp = FORMAT.ints_alt;
-
         if(tmp>0){
             samp_Int tmpInt;
             for(int i = 0; i<tmp; i++){
@@ -322,9 +332,30 @@ class alt_format_df //aka df4 in progress
         }       
     }   
 
+    void initMapGT(){
+        int value = 0;
+        // First half of the map from 0|0 to 10|10
+        for (int i = 0; i < 11; ++i) {
+            for (int j = 0; j < 11; ++j) {
+                std::string key = std::to_string(i) + "|" + std::to_string(j);
+                GTMap[key] = value;
+                value++;
+            }
+        }
+        // Second half of the map from 0/0 to 10/10
+        for (int i = 0; i < 11; ++i) {
+            for (int j = 0; j < 11; ++j) {
+                std::string key = std::to_string(i) + "/" + std::to_string(j);
+                GTMap[key] = value;
+                value++;
+            }
+        }
+    }
+
+    //Not used, need to be updated
     void clone(alt_format_df ref, header_element FORMAT){
         int numAlt = FORMAT.alt_values;
-        var_id.resize(numAlt, "\0");
+        var_id.resize(numAlt, 0);
         samp_id.resize(numAlt, 0);
         alt_id.resize(numAlt, (char)0);
         numSample = ref.numSample;
