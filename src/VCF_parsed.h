@@ -441,7 +441,6 @@ public:
         samp_columns.samp_float.resize(FORMAT.floats);
         samp_columns.samp_string.resize(FORMAT.strings);
         if(hasDetSamples){
-            cout << "AAAAAAAAAAAAAaa" << endl;
             samp_columns.var_id.resize((num_lines-1)*samp_columns.numSample, 0);
             samp_columns.samp_id.resize((num_lines-1)*samp_columns.numSample, static_cast<unsigned short>(0));
         }    

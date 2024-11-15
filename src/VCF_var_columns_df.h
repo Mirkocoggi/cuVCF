@@ -580,7 +580,6 @@ public:
                         while(!find_type){
                             if(!strcmp(tmp_format_split[j].c_str(), "GT")){
                                 // TODO - da considerare come rifare la struttura visto che se numb > 1 servono + array
-                                cout<<"i: "<<i<<" (*sample).numSample: "<< (*sample).numSample << " samp: "<<samp<<" var_number[i]: "<<var_number[i] <<endl;
                                 (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
                                 
                                 (*sample).samp_id[i*(*sample).numSample + samp] =  static_cast<unsigned short>(samp);

@@ -1,5 +1,7 @@
 #!/bin/bash
 
+#/usr/bin/time -f "Max Mem: %M KB" ./bin/VCFparser -v data/tiny2.vcf -t 1
+#
 # Define the number of times to run the C++ program
 NUM_RUNS=1
 

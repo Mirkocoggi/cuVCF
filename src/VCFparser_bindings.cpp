@@ -1,11 +1,33 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/stl_bind.h>
+#include <half.h>
 #include "VCF_parsed.h"
 #include "VCF_var_columns_df.h"
 #include "VCFparser_mt_col_struct.h"
 namespace py = pybind11;
 
+// Bind `half` as a Python type
+void bind_half(py::module &m) {
+    py::class_<half>(m, "half")
+        .def(py::init<>())
+        .def("__float__", [](const half &h) { return static_cast<float>(h); })  // Conversion to float
+        .def("__repr__", [](const half &h) {
+            return std::to_string(static_cast<float>(h));
+        });
+}
+
+// Explicitly bind `std::vector<half>`
+PYBIND11_MAKE_OPAQUE(std::vector<half>);
+
+void bind_vector_half(py::module &m) {
+    py::bind_vector<std::vector<half>>(m, "VectorHalf");
+}
+
 PYBIND11_MODULE(VCFparser_mt_col_struct, m) {
+    bind_half(m);            // Register `half`
+    bind_vector_half(m);     // Register `std::vecto
+
     py::class_<info_flag>(m, "info_flag")
         .def(py::init<>())
         .def_readwrite("i_flag", &info_flag::i_flag)
