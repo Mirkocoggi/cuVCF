@@ -2,7 +2,7 @@ import VCFparser_mt_col_struct as vcf
 import pandas as pd
 
 res = vcf.vcf_parsed()
-res.run("data/tiny.vcf", 1)
+res.run("data/tiny2.vcf", 1)
 df1tmp = res.var_columns
 df2tmp = res.alt_columns
 df3tmp = res.samp_columns
@@ -68,12 +68,19 @@ for elem in df3tmp.samp_string:
 for elem in df3tmp.samp_int:
     if len(elem.i_int) > 0:
         data3[elem.name] = elem.i_int
+i = 0
+for elem in df3tmp.sample_GT:
+    if len(elem.GT) > 0:
+        data3[f"GT{i}"] = elem.GT
+        i = i + 1
+
 df3 = pd.DataFrame(data3)
 
 data4 = {
     'var_id': df4tmp.var_id,
     'samp_id': df4tmp.samp_id,
-    'alt_id': df4tmp.alt_id
+    'alt_id': df4tmp.alt_id,
+    'GT': df4tmp.sample_GT
 }
 for elem in df4tmp.samp_float:
     if len(elem.i_float) > 0:
@@ -97,3 +104,4 @@ print("DATAFRAME 3:")
 print(df3)
 print("DATAFRAME 4:")
 print(df4)
+res.alt_sample.print(10)

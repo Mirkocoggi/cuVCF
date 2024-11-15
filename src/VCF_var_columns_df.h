@@ -26,7 +26,7 @@ class var_columns_df
 public:
     vector<unsigned int> var_number;
     std::map<std::string, char> chrom_map;
-    vector<char> chrom;
+    vector<char> chrom; // TODO si riempie in modo sequenziale, ha gli stessi valori di var_number
     vector<unsigned int>pos;
     vector<string> id;
     vector<string> ref;
@@ -764,7 +764,23 @@ public:
         
     }
 
-    void print_var_columns(long num_lines){
+/*vector<unsigned int> var_number;
+    std::map<std::string, char> chrom_map;
+    vector<char> chrom;
+    vector<unsigned int>pos;
+    vector<string> id;
+    vector<string> ref;
+    vector<half> qual;
+    std::map<std::string, char> filter_map;
+    vector<char> filter;
+    vector<info_float> in_float;
+    vector<info_flag> in_flag;
+    vector<info_string> in_string;
+    vector<info_int> in_int;
+    map<string,int> info_map1;*/
+
+    void print(long num_lines){
+        int iter = (num_lines>var_number.size()) ? var_number.size() : num_lines;
         for(long i=0; i<num_lines; i++){
             cout << "Var" << var_number[i] << ":\t";
             cout << chrom_map.find(std::string(1, chrom[i]))->first << "\t";
@@ -772,6 +788,9 @@ public:
             cout << id[i] << "\t";
             cout << ref[i] << "\t";
             cout << filter_map.find(std::string(1, filter[i]))->first << "\t";
+
+            cout << "AAAAAAAA 1.1" << endl;
+
             for(int j=0; j<in_flag.size(); j++){
                 cout<<in_flag[j].name<<": "<<in_flag[j].i_flag[i]<<", ";
             }

@@ -178,9 +178,10 @@ class alt_columns_df
         }       
     }
     
-    void print(){
+    void print(int n){
         cout << "VarID\tAltID\tAlt\tFloat\t\tInt\t\tStr" << endl;
-        for(int i=0; i<numAlt; i++){
+        int iter = (n>var_id.size()) ? var_id.size() : n;
+        for(int i=0; i<iter; i++){
 
             cout << var_id[i] << "\t" << (int)alt_id[i] << "\t" << alt[i] << "\t";
             
@@ -239,11 +240,20 @@ class sample_columns_df //aka df3
         }
     }
 
-   void print(){
-        cout << "VarID\tSampID\tFloat\t\tInt\t\tStr" << endl;
+    std::string getGTStringFromChar(char gtChar) const {
+        for (const auto& pair : GTMap) {
+            if (pair.second == gtChar) {
+                return pair.first;
+            }
+        }
+        return "Not found";
+    }
 
-        int iter = samp_id.size();
-        
+   void print(int n){
+        cout << "VarID\tSampID\tFloat\t\tInt\t\tStr\t\tGT" << endl;
+
+        int iter = (n>samp_id.size()) ? samp_id.size() : n;
+
         for(int i=0; i<iter; i++){
         
             cout << var_id[i] << "\t";
@@ -269,6 +279,12 @@ class sample_columns_df //aka df3
             for(int j=0; j < samp_string.size(); j++){
                 cout << samp_string[j].name << "=" << samp_string[j].i_string[i] << ";";
             }
+            cout << "\t";
+
+            for(int j=0; j < sample_GT.size(); j++){
+                cout << "GT"<< j << "=" << getGTStringFromChar(sample_GT[j].GT[i]) << ";";
+            }
+
             cout << endl;
         }
     }
@@ -352,6 +368,15 @@ class alt_format_df //aka df4 in progress
         }
     }
 
+    std::string getGTStringFromChar(char gtChar) const {
+        for (const auto& pair : GTMap) {
+            if (pair.second == gtChar) {
+                return pair.first;
+            }
+        }
+        return "Not found";
+    }
+
     //Not used, need to be updated
     void clone(alt_format_df ref, header_element FORMAT){
         int numAlt = FORMAT.alt_values;
@@ -398,10 +423,11 @@ class alt_format_df //aka df4 in progress
         }       
     }   
  
-    void print(){ //TODO
-        cout << "VarID\tSampID\talt_id\tFloat\t\tInt\t\tStr" << endl;
+    void print(int n){ //TODO
+        cout << "VarID\tSampID\talt_id\tFloat\t\tInt\t\tStr\t\tGT" << endl;
 
-        int iter = samp_id.size();
+        int iter = (n>samp_id.size()) ? samp_id.size() : n;
+
         for(int i=0; i<iter; i++){
 
             cout << var_id[i] << "\t";
@@ -429,7 +455,9 @@ class alt_format_df //aka df4 in progress
             for(int j=0; j < samp_string.size(); j++){
                 cout << samp_string[j].name << "=" << samp_string[j].i_string[i] << ";";
             }
-            
+
+            cout << "\t";
+            cout << getGTStringFromChar(sample_GT.GT[i]) << ";";
             cout << endl;
         }
     }

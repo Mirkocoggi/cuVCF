@@ -7,6 +7,53 @@
 #include "VCFparser_mt_col_struct.h"
 namespace py = pybind11;
 
+class GTWrapper {
+public:
+    char gt_value;  // Il valore `char` rappresentativo in C++
+    static std::map<std::string, char> GTMap;  // La mappa condivisa per la conversione
+
+    // Costruttore
+    GTWrapper(char value) : gt_value(value) {}
+
+    // Funzione per rappresentare il valore `gt_value` come stringa utilizzando `GTMap`
+    std::string to_string() const {
+        for (const auto& pair : GTMap) {
+            if (pair.second == gt_value) {
+                return pair.first;  // Restituisce la stringa corrispondente a `char`
+            }
+        }
+        return std::string(1, gt_value);  // Se non trovato, ritorna semplicemente `char`
+    }
+};
+
+// Inizializza GTMap
+std::map<std::string, char> GTWrapper::GTMap;
+
+void init_GTMap() {
+    int value = 0;
+    for (int i = 0; i < 11; ++i) {
+        for (int j = 0; j < 11; ++j) {
+            std::string key1 = std::to_string(i) + "|" + std::to_string(j);
+            GTWrapper::GTMap[key1] = value;
+            value++;
+        }
+    }
+    for (int i = 0; i < 11; ++i) {
+        for (int j = 0; j < 11; ++j) {
+            std::string key2 = std::to_string(i) + "/" + std::to_string(j);
+            GTWrapper::GTMap[key2] = value;
+            value++;
+        }
+    }
+}
+
+void bind_GTWrapper(py::module &m) {
+    py::class_<GTWrapper>(m, "GT")
+        .def(py::init<char>())  // Costruttore che accetta un `char`
+        .def("__repr__", &GTWrapper::to_string);  // Rappresentazione leggibile usando `GTMap`
+}
+
+
 // Bind `half` as a Python type
 void bind_half(py::module &m) {
     py::class_<half>(m, "half")
@@ -27,6 +74,13 @@ void bind_vector_half(py::module &m) {
 PYBIND11_MODULE(VCFparser_mt_col_struct, m) {
     bind_half(m);            // Register `half`
     bind_vector_half(m);     // Register `std::vecto
+    init_GTMap();            // Inizializza GTMap
+    bind_GTWrapper(m);       // Registra GTWrapper
+
+    py::class_<samp_GT>(m, "samp_GT")
+        .def(py::init<>())
+        .def_readwrite("GT", &samp_GT::GT)
+        .def_readwrite("numb", &samp_GT::numb); 
 
     py::class_<info_flag>(m, "info_flag")
         .def(py::init<>())
@@ -111,6 +165,7 @@ PYBIND11_MODULE(VCFparser_mt_col_struct, m) {
         .def_readwrite("samp_int", &sample_columns_df::samp_int)
         .def_readwrite("sampNames", &sample_columns_df::sampNames)
         .def_readwrite("numSample", &sample_columns_df::numSample)
+        .def_readwrite("sample_GT", &sample_columns_df::sample_GT)
         .def("print", &sample_columns_df::print);
 
     py::class_<alt_format_df>(m, "alt_format_df")
@@ -124,6 +179,7 @@ PYBIND11_MODULE(VCFparser_mt_col_struct, m) {
         .def_readwrite("samp_int", &alt_format_df::samp_int)
         .def_readwrite("sampNames", &alt_format_df::sampNames)
         .def_readwrite("numSample", &alt_format_df::numSample)
+        .def_readwrite("sample_GT", &alt_format_df::sample_GT)
         .def("print", &alt_format_df::print);
 
     py::class_<var_columns_df>(m, "var_columns_df")
@@ -140,7 +196,7 @@ PYBIND11_MODULE(VCFparser_mt_col_struct, m) {
         .def_readwrite("in_string", &var_columns_df::in_string)
         .def_readwrite("in_int", &var_columns_df::in_int)
         .def_readwrite("info_map1", &var_columns_df::info_map1)
-        .def("print_var_columns", &var_columns_df::print_var_columns);
+        .def("print", &var_columns_df::print);
 
     py::class_<vcf_parsed>(m, "vcf_parsed")
         .def(py::init<>())

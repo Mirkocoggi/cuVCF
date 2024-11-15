@@ -86,13 +86,11 @@ int main(int argc, char *argv[]){
     vcf.run(vcf_filename, num_threadss);
 
     //vcf.print_header();
-    //vcf.var_columns.print_var_columns(30);
-    //vcf.alt_columns.print();
-    //vcf.samp_columns.print();
-    //vcf.alt_sample.print();
-
-
-
+    cout << "AAAAAA 1 " << endl;
+    //vcf.var_columns.print(10); //TODO
+    vcf.alt_columns.print(10);
+    vcf.samp_columns.print(10);
+    vcf.alt_sample.print(10); //TODO
     /*
 // Setting number of threads
     omp_set_num_threads(num_threadss);
