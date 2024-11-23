@@ -80,8 +80,10 @@ data4 = {
     'var_id': df4tmp.var_id,
     'samp_id': df4tmp.samp_id,
     'alt_id': df4tmp.alt_id,
-    'GT': df4tmp.sample_GT
 }
+if(len(df4tmp.sample_GT.GT)>0):
+   data4['GT'] = df4tmp.sample_GT.GT
+
 for elem in df4tmp.samp_float:
     if len(elem.i_float) > 0:
         data4[elem.name] = elem.i_float
@@ -104,4 +106,3 @@ print("DATAFRAME 3:")
 print(df3)
 print("DATAFRAME 4:")
 print(df4)
-res.alt_sample.print(10)
