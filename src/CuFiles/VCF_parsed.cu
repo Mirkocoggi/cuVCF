@@ -1,20 +1,19 @@
-#ifndef VCF_PARCED_H
-#define VCF_PARCED_H
-#include "VCFparser_mt_col_struct.h"
-#include "VCF_var.h"
-#include "VCF_var_columns_df.h"
-#include <chrono>
+#ifndef VCF_PARCED_CU_H
+#define VCF_PARCED_CU_H
+#include <cuda_runtime.h>     
+#include <cuda_fp16.h>  
+#include <thrust/device_ptr.h> 
+#include <thrust/sort.h>
 #include <boost/algorithm/string.hpp>
-#include <OpenEXR/half.h>
-#include <omp.h>
+#include <chrono>
 #include <fstream>
 #include <filesystem>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <omp.h> 
 #include "VCFparser_mt_col_struct.h"
 #include "VCF_var.h"
 #include "VCF_var_columns_df.h"
-
 
 class vcf_parsed
 {
@@ -27,11 +26,13 @@ public:
     map<string,int> info_map; //Flag=0, Int=1, Float=2, String=3;
     header_element FORMAT;
     char *filestring;
+    char *d_filestring;
     int header_size=0;
     long filesize;
     long variants_size;
     long num_lines=0;
     unsigned int *new_lines_index;
+    unsigned int *d_new_lines_index;
     bool samplesON = false;
     bool hasDetSamples = false;
     var_columns_df var_columns;
@@ -72,9 +73,14 @@ public:
         int cont=0;
         string line;
         vcf_parsed vcf;
-        // Setting number of threads
+
+        // TODO - definire parametri da usare per lanciare su GPU
+            //lanciare una query per capire il numero di risorse della scheda e da li settare i parametro
+        
+        //TODO - da rimuovere o capire come gestire una volta finita l'implementazione GPU
         omp_set_num_threads(num_threadss);
         // Open input file, gzip -df compressed_file1.gz
+        
         if(!strcmp((vcf_filename + strlen(vcf_filename) - 3), ".gz")){
             unzip_gz_file(vcf_filename);
         }
@@ -101,8 +107,11 @@ public:
         // Allocating the filestring (the variations as a big char*, the dimension is: filesize - header_size)
         allocate_filestring();
         // Populate filestring and getting the number of lines (num_lines), saving the starting char index of each lines
+        // TODO - Da sostituire con il kernel GPU, alloca mem necessaria, num_lines++, bisogna caricare già tutto il file su una stringa;
         before = chrono::system_clock::now();
-        find_new_lines_index(filename, num_threadss);
+        //TODO - potrebbe essere più veloce, dato che la CPU può farlo fare accesso in parallelo a file per
+        // il conteggio dei \n e poi passare tutta la stringa per l'analisi in un secondo momento
+        find_new_lines_index(filename, num_threadss); 
         after = chrono::system_clock::now();
         auto find_new_lines = std::chrono::duration<double>(after - before).count();
 
@@ -113,6 +122,8 @@ public:
         create_sample_vectors(num_threadss);
         after = chrono::system_clock::now();
         auto reserve_var_columns = std::chrono::duration<double>(after - before).count();
+        
+        //TODO - da sostituire con il kernel CUDA
         before = chrono::system_clock::now();
         populate_var_columns(num_threadss);
         after = chrono::system_clock::now();
@@ -126,6 +137,96 @@ public:
         cout << "populate_var_columns: " << populate_var_columns << " s" << endl;
         free(filestring);
         free(new_lines_index);
+    }
+
+    __global__ cu_find_new_lines_index(const char* input, unsigned int len, unsigned int* output, unsigned int len_output, unsigned int* global_count){
+        unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;  // Indice globale del thread
+
+        if (idx < len && __ldg(data[idx]) == '\n') { //coaleasced read only
+            unsigned int pos = atomicAdd(global_count, 1); //primo spazio libero dove salvare
+            output_array[pos] = idx;  // Salva la posizione trovata nell'array finale == idx
+        }else if(idx == len){
+            //invece che mettere a 0 il primo valore dell'array che darebbe problemi per synch 
+            //o per offset lo metto alla fine tanto poi va ordinato
+            output_array[len_output-1] = 0; 
+        }
+    }
+
+    void find_new_lines_index(string w_filename, int num_threads){
+        // Allocate memory for the `new_lines_index` array. The size is exaggerated (assuming every character is a new line).
+        // The first element is set to 0, indicating the start of the first line.
+        num_lines++; // Increment the line counter to account for the first line.
+        long tmp_num_lines[num_threads]; // Temporary array to store the number of lines found by each thread.
+        
+        auto before = chrono::system_clock::now();
+        long batch_infile = (variants_size - 1 + num_threads)/num_threads; // Number of characters each thread will process        
+#pragma omp parallel
+        {
+            int thr_ID = omp_get_thread_num();
+            ifstream infile(w_filename); // Open the same file with an ifstream in each thread
+            infile.seekg((header_size + thr_ID*batch_infile), ios::cur); // Move each thread's file pointer to its starting position
+            long start, end;
+            start = thr_ID*batch_infile; // Starting position of the current thread’s batch
+            end = start + batch_infile; // Ending position of the batch for the current thread
+            
+            tmp_num_lines[thr_ID] = 0;
+            if(thr_ID==0){
+                tmp_num_lines[0] = 1;
+            } 
+
+            for(long i=start; i<end && i<variants_size; i++){
+                filestring[i] = infile.get();
+                if(filestring[i]=='\n'){
+                    tmp_num_lines[thr_ID] = tmp_num_lines[thr_ID] + 1;
+                }
+            }
+        }
+        while(filestring[variants_size-1]=='\n'){
+            variants_size--;
+        }
+        filestring[variants_size] = '\n';
+        variants_size++;
+        auto after = chrono::system_clock::now();
+        auto filestring_time = std::chrono::duration<double>(after - before).count();
+        
+        before = chrono::system_clock::now();
+        num_lines = tmp_num_lines[0];
+        for(int i=1; i<num_threads; i++){
+            num_lines= num_lines + tmp_num_lines[i];
+        }
+        new_lines_index = (unsigned int*)malloc(sizeof(unsigned int)*(num_lines+1));
+        new_lines_index[0] = 0;
+
+        cudaMalloc(&d_filestring, variants_size*sizeof(char));
+        cidaMalloc(&d_new_lines_index, sizeof(unsigned int)*(num_lines+1));
+        cudaMemcpy(d_filestring, filestring, sizeof(char)*variants_size, cudaMemcpyHostToDevice);
+        unsigned int* d_count;
+        cudaMalloc3D(&d_count, sizeof(unsigned int));
+        cudaMemset(d_count, 0, sizeof(long int));
+        dim3 threads = 1024;
+        dim3 blocks = ceil(variants_size/1024);
+        cu_find_new_lines_index<<<thrads, blocks>>>(
+            d_filestring,
+            variants_size,
+            d_new_lines_index,
+            num_lines+1,
+            d_count
+        );
+
+        //ordering with Thrust library
+        thrust::device_ptr<unsigned int> d_new_lines_index_ptr = thrust::device_pointer_cast(d_new_lines_index);
+        thrust::sort(d_new_lines_index_ptr, d_new_lines_index_ptr + (num_lines+1));
+        cudaMemcpy(new_lines_index, d_new_lines_index, sizeof(unsigned int)*(num_lines+1));
+
+        //da capire cosa lasciare su GPU e cosa liberare
+        cudaFree(d_count);
+        cudaFree(d_new_lines_index_ptr);
+        cudaFree(d_filestring);
+        
+        for(int i = 0; i <= num_lines; i++){
+            cout << new_lines_index[i] << " | ";
+        }
+        cout << endl;
     }
 
     void get_filename(string path_filename){
@@ -232,80 +333,7 @@ public:
     void allocate_filestring(){
         filestring = (char*)malloc(variants_size);
     }
-  
-    // This function identifies the indices of new line characters in the file and populates the `new_lines_index` array.
-    // It also fills the 'filestring' variable (if applicable).
-    void find_new_lines_index(string w_filename, int num_threads){
-        // Allocate memory for the `new_lines_index` array. The size is exaggerated (assuming every character is a new line).
-         // The first element is set to 0, indicating the start of the first line.
-        num_lines++; // Increment the line counter to account for the first line.
-        long tmp_num_lines[num_threads]; // Temporary array to store the number of lines found by each thread.
-        
-        auto before = chrono::system_clock::now();
-        long batch_infile = (variants_size - 1 + num_threads)/num_threads; // Number of characters each thread will process        
-#pragma omp parallel
-        {
-            int thr_ID = omp_get_thread_num();
-            ifstream infile(w_filename); // Open the same file with an ifstream in each thread
-            infile.seekg((header_size + thr_ID*batch_infile), ios::cur); // Move each thread's file pointer to its starting position
-            long start, end;
-            start = thr_ID*batch_infile; // Starting position of the current thread’s batch
-            end = start + batch_infile; // Ending position of the batch for the current thread
-            
-            tmp_num_lines[thr_ID] = 0;
-            if(thr_ID==0){
-                tmp_num_lines[0] = 1;
-            } 
 
-            for(long i=start; i<end && i<variants_size; i++){
-                filestring[i] = infile.get();
-                if(filestring[i]=='\n'){
-                    tmp_num_lines[thr_ID] = tmp_num_lines[thr_ID] + 1;
-                }
-            }
-        }
-        while(filestring[variants_size-1]=='\n'){
-            variants_size--;
-        }
-        filestring[variants_size] = '\n';
-        variants_size++;
-        auto after = chrono::system_clock::now();
-        auto filestring_time = std::chrono::duration<double>(after - before).count();
-        
-        before = chrono::system_clock::now();
-        num_lines = tmp_num_lines[0];
-        for(int i=1; i<num_threads; i++){
-            num_lines= num_lines + tmp_num_lines[i];
-        }
-        new_lines_index = (unsigned int*)malloc(sizeof(unsigned int)*(num_lines+1));
-        new_lines_index[0] = 0;
-#pragma omp parallel
-        {
-            int thr_ID = omp_get_thread_num();
-            long start, end;
-            start = thr_ID*batch_infile; // Starting position of the current thread’s batch
-            end = start + batch_infile;  // Ending position of the batch for the current thread
-            long startNLI = 1;
-            if(thr_ID!=0){
-                for(int i=0; i<thr_ID; i++){
-                    startNLI = startNLI + tmp_num_lines[i];
-                }
-                startNLI--;
-            }
-            long lineCount = 0;
-            for(long i=start; i<end && i<variants_size; i++){
-                if(filestring[i]=='\n'&& filestring[i+1]!='\n'){
-                    new_lines_index[startNLI+lineCount] = i+1;
-                    lineCount++;
-                }
-            }
-        }
-        
-        after = chrono::system_clock::now();
-        auto f_new_lines = std::chrono::duration<double>(after - before).count(); 
-        //cout << "\nFilestring time: " << filestring_time << " s " << "New lines time: " << f_new_lines << " s\n\n" << endl;
-    }
-    
     void create_sample_vectors(int num_threads){
         long batch_size = (num_lines-2+num_threads)/num_threads;
         samp_Flag samp_flag_tmp;
@@ -660,7 +688,7 @@ public:
             tmp_alt_format[th_ID].alt_id.resize(batch_size*2*samp_columns.numSample, 0);
             tmp_alt_format[th_ID].samp_id.resize(batch_size*2*samp_columns.numSample, static_cast<unsigned short>(0));
             
-            start = th_ID*batch_size; // Starting point of the thread's batch
+            start = th_ID * batch_size; // Starting point of the thread's batch
             end = start + batch_size; // Ending point of the thread's batch
             
             if(samplesON){
@@ -855,7 +883,6 @@ public:
         
     }
 
-};
-
+}
 
 #endif
