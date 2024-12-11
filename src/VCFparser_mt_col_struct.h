@@ -58,7 +58,7 @@ struct samp_Int
     int numb;
 };
 
-struct samp_GT //TODO
+struct samp_GT 
 {
     vector<char> GT;
     int numb;    
