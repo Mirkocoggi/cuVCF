@@ -677,7 +677,7 @@ public:
                 
                 // For each line in the batch
                 for(long i=start; i<end && i<num_lines-1; i++){ 
-                    var_columns.var_number[i] = i;
+                    //var_columns.var_number[i] = i; -> on the device
                     var_columns.get_vcf_line_in_var_columns_format(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]), &samp_columns, &FORMAT, &(tmp_num_alt_format[th_ID]), &(tmp_alt_format[th_ID]));
                 }
                 
@@ -721,7 +721,7 @@ public:
             }else{
                 // There aren't samples in the dataset
                 for(long i=start; i<end && i<num_lines-1; i++){
-                    var_columns.var_number[i] = i;
+                    //var_columns.var_number[i] = i; -> on the device
                     var_columns.get_vcf_line_in_var_columns(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]));
                 }
 

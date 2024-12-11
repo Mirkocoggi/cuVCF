@@ -764,21 +764,6 @@ public:
         
     }
 
-/*vector<unsigned int> var_number;
-    std::map<std::string, char> chrom_map;
-    vector<char> chrom;
-    vector<unsigned int>pos;
-    vector<string> id;
-    vector<string> ref;
-    vector<half> qual;
-    std::map<std::string, char> filter_map;
-    vector<char> filter;
-    vector<info_float> in_float;
-    vector<info_flag> in_flag;
-    vector<info_string> in_string;
-    vector<info_int> in_int;
-    map<string,int> info_map1;*/
-
     void print(long num_lines){
         int iter = (num_lines>var_number.size()) ? var_number.size() : num_lines;
         for(long i=0; i<num_lines; i++){

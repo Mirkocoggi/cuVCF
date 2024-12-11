@@ -10,10 +10,16 @@
 #include <filesystem>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <map>
 #include <omp.h> 
-#include "VCFparser_mt_col_struct.h"
-#include "VCF_var.h"
-#include "VCF_var_columns_df.h"
+#include "VCFparser_mt_col_struct_CU.h"
+//#include "VCF_var.h"
+#include "VCF_var_columns_df_CU.h"
+
+#define NUM_KEYS 242
+#define MAX_KEY_LENGTH 5 
+
+using namespace std;
 
 class vcf_parsed
 {
@@ -26,7 +32,7 @@ public:
     map<string,int> info_map; //Flag=0, Int=1, Float=2, String=3;
     header_element FORMAT;
     char *filestring;
-    char *d_filestring;
+    char *d_filestring; 
     int header_size=0;
     long filesize;
     long variants_size;
@@ -39,6 +45,23 @@ public:
     alt_columns_df alt_columns;
     sample_columns_df samp_columns;
     alt_format_df alt_sample;
+
+    unsigned int *d_VC_var_number;
+    unsigned int *d_VC_pos;
+    __half *d_VC_qual;
+    info_float_d *d_VC_in_float;
+    info_flag_d *d_VC_in_flag;
+    info_int_d *d_VC_in_int;
+
+    unsigned int *d_SC_var_id;
+    unsigned short *d_SC_samp_id;
+    samp_Float_d *d_SC_samp_float;
+    samp_Flag_d *d_SC_samp_flag;
+    samp_Int_d *d_SC_samp_int;
+    samp_GT_d *d_SC_sample_GT;
+
+    __constant__ char d_keys[NUM_KEYS][MAX_KEY_LENGTH]; // Chiavi nella constant memory
+    __constant__ char d_values[NUM_KEYS];                // Valori nella constant memory
 
     void unzip_gz_file(char* vcf_filename) {
         // Check the extension ".gz"
@@ -76,11 +99,54 @@ public:
 
         // TODO - definire parametri da usare per lanciare su GPU
             //lanciare una query per capire il numero di risorse della scheda e da li settare i parametro
+        // Variables to hold device information
+        size_t globalMemory = 0;        // Total global memory
+        size_t sharedMemory = 0;       // Shared memory per block
+        size_t constantMemory = 0;     // Constant memory
+        size_t textureAlignment = 0;   // Texture alignment
+        int maxThreadsPerBlock = 0;    // Maximum threads per block
+        int threadsDim[3] = {0};       // Maximum threads per block dimensions
+        int gridDim[3] = {0};          // Maximum grid dimensions
+
+        // Query device properties
+        cudaDeviceProp prop;
+        cudaError_t err = cudaGetDeviceProperties(&prop, 0); // Query the first (and only) device
+
+        if (err == cudaSuccess) {
+            globalMemory = prop.totalGlobalMem;
+            sharedMemory = prop.sharedMemPerBlock;
+            constantMemory = prop.totalConstMem;
+            textureAlignment = prop.textureAlignment;
+            maxThreadsPerBlock = prop.maxThreadsPerBlock;
+
+            // Threads and grid dimensions
+            threadsDim[0] = prop.maxThreadsDim[0];
+            threadsDim[1] = prop.maxThreadsDim[1];
+            threadsDim[2] = prop.maxThreadsDim[2];
+
+            gridDim[0] = prop.maxGridSize[0];
+            gridDim[1] = prop.maxGridSize[1];
+            gridDim[2] = prop.maxGridSize[2];
+
+            // Print the saved values
+            std::cout << "Device Information:" << std::endl;
+            std::cout << "Global memory: " << globalMemory / (1024.0 * 1024.0) << " MB" << std::endl;
+            std::cout << "Shared memory per block: " << sharedMemory / 1024.0 << " KB" << std::endl;
+            std::cout << "Constant memory: " << constantMemory / 1024.0 << " KB" << std::endl;
+            std::cout << "Texture alignment: " << textureAlignment << " bytes" << std::endl;
+            std::cout << "Maximum threads per block: " << maxThreadsPerBlock << std::endl;
+            std::cout << "Threads per block dimensions: "
+                    << threadsDim[0] << " x " << threadsDim[1] << " x " << threadsDim[2] << std::endl;
+            std::cout << "Grid dimensions: "
+                    << gridDim[0] << " x " << gridDim[1] << " x " << gridDim[2] << std::endl;
+        } else {
+            std::cerr << "Failed to query device properties: " << cudaGetErrorString(err) << std::endl;
+        }
+
         
-        //TODO - da rimuovere o capire come gestire una volta finita l'implementazione GPU
         omp_set_num_threads(num_threadss);
+
         // Open input file, gzip -df compressed_file1.gz
-        
         if(!strcmp((vcf_filename + strlen(vcf_filename) - 3), ".gz")){
             unzip_gz_file(vcf_filename);
         }
@@ -123,7 +189,18 @@ public:
         after = chrono::system_clock::now();
         auto reserve_var_columns = std::chrono::duration<double>(after - before).count();
         
-        //TODO - da sostituire con il kernel CUDA
+         /*
+        TODO:
+            0 - capire se posso passare a python una stringa con il padding -> Va riparsato!!
+            1 - allocare memoria var_column e samp_columns su GPU -> non più di 80% global, (string a 10 char + heap + atomic o mutex)
+            2 - scrivere i kernel dedicati e lanciarli
+            3 - scaricare i risultati da GPU sulle strutture dell'host:
+                cudaMemcpy(cpuStruct.i_int.data(), gpuStruct.i_int, size * sizeof(int), cudaMemcpyDeviceToHost);
+        */
+
+       //Allocate and initialize device memory
+       device_allocation();
+
         before = chrono::system_clock::now();
         populate_var_columns(num_threadss);
         after = chrono::system_clock::now();
@@ -138,17 +215,198 @@ public:
         free(filestring);
         free(new_lines_index);
     }
+    
+    void copyMapToConstantMemory(const std::map<std::string, char>& map) {
+        char h_keys[NUM_KEYS][MAX_KEY_LENGTH] = {0};
+        char h_values[NUM_KEYS] = {0};
 
-    __global__ cu_find_new_lines_index(const char* input, unsigned int len, unsigned int* output, unsigned int len_output, unsigned int* global_count){
+        size_t index = 0;
+        for (const auto& [key, value] : map) {
+            if (index >= NUM_KEYS) break;
+
+            // Copia la chiave, con padding se necessario
+            std::strncpy(h_keys[index], key.c_str(), MAX_KEY_LENGTH - 1);
+
+            // Copia il valore corrispondente
+            h_values[index] = value;
+
+            ++index;
+        }
+        cudaMemcpyToSymbol(d_keys, h_keys, sizeof(h_keys));
+        cudaMemcpyToSymbol(d_values, h_values, sizeof(h_values));
+    }
+
+    __device__ int getValueFromKey(const char* key) {
+        for (int i = 0; i < NUM_KEYS; ++i) {
+            if (strncmp(key, d_keys[i], MAX_KEY_LENGTH) == 0) {
+                return d_values[i];
+            }
+        }
+        return -1;
+    }
+
+    void device_allocation(){
+
+       /*
+        Per ora:
+        unsigned int *d_VC_var_number;
+        unsigned int *d_VC_pos;
+        __half *d_VC_qual;
+        info_float_d *d_VC_in_float;
+        info_flag_d *d_VC_in_flag;
+        info_int_d *d_VC_in_int;
+
+        TODO - serve la info_map1 su gpu - costant memory
+       */
+
+        cudaMalloc(&d_VC_var_number, (num_lines-1)*sizeof(unsigned int));
+        cudaMalloc(&d_VC_pos, (num_lines-1)*sizeof(unsigned int));
+        cudaMalloc(&d_VC_qual, (num_lines-1)*sizeof(__half));
+
+        int tmp = var_columns.in_float.size();
+        cudaMalloc(&d_VC_in_float, tmp*sizeof(info_float_d));
+        for(int i=0; i < tmp; i++){
+            cudaMalloc(&(d_VC_in_float[i].i_float), (num_lines-1)*sizeof(__half));
+            cudaMalloc(&(d_VC_in_float[i].name), var_columns.in_float[i].name.size() + 1);
+            cudaMemcpy(d_VC_in_float[i].name, var_columns.in_float[i].name.c_str(), var_columns.in_float[i].name.size() + 1, cudaMemcpyHostToDevice);
+        }
+
+        tmp = var_columns.in_flag.size();
+        cudaMalloc(&d_VC_in_flag, tmp*sizeof(info_flag_d));
+        for(int i=0; i < tmp; i++){
+            cudaMalloc(&(d_VC_in_flag[i].i_flag), (num_lines-1)*sizeof(bool));
+            cudaMalloc(&(d_VC_in_flag[i].name), var_columns.in_flag[i].name.size() + 1);
+            cudaMemcpy(d_VC_in_flag[i].name, var_columns.in_flag[i].name.c_str(), var_columns.in_flag[i].name.size() + 1, cudaMemcpyHostToDevice);
+        }
+
+        tmp = var_columns.in_int.size();
+        cudaMalloc(&d_VC_in_int, tmp*sizeof(info_int_d));
+        for(int i=0; i < tmp; i++){
+            cudaMalloc(&(d_VC_in_int[i].i_int), (num_lines-1)*sizeof(int));
+            cudaMalloc(&(d_VC_in_int[i].name), var_columns.in_int[i].name.size() + 1);
+            cudaMemcpy(d_VC_in_int[i].name, var_columns.in_int[i].name.c_str(), var_columns.in_int[i].name.size() + 1, cudaMemcpyHostToDevice);
+        }
+
+        /*
+        unsigned int *d_SC_var_id;
+        unsigned short *d_SC_samp_id;
+        samp_Float *d_SC_samp_float;
+        samp_Flag *d_SC_samp_flag;
+        samp_Int *d_SC_samp_int;
+        samp_GT *d_SC_sample_GT;
+        map<string, char> GTMap;
+        */
+
+       if(hasDetSamples){
+            copyMapToConstantMemory(samp_columns.GTMap);
+            cudaMalloc(&d_SC_var_id, (num_lines-1)*sizeof(unsigned int));
+            cudaMemset(d_SC_var_id, 0, (num_lines-1)*sizeof(unsigned int));
+            cudaMalloc(&d_SC_samp_id, (num_lines-1)*sizeof(unsigned short));
+            cudaMemset(d_SC_samp_id, 0, (num_lines-1)*sizeof(unsigned short));
+
+            tmp = samp_columns.samp_float.size();
+            cudaMalloc(&d_SC_samp_float, tmp*sizeof(samp_Float_d));
+            for(int i=0; i < tmp; i++){
+                cudaMalloc(&(d_SC_samp_float[i].i_float), (num_lines-1)*sizeof(__half));
+                cudaMalloc(&(d_SC_samp_float[i].name), samp_columns.samp_float[i].name.size() + 1);
+                cudaMemcpy(d_SC_samp_float[i].name, samp_columns.samp_float[i].name.c_str(), samp_columns.samp_float[i].name.size() + 1, cudaMemcpyHostToDevice);
+                cudaMemcpy(&(d_SC_samp_float[i].numb), &(samp_columns.samp_float[i].numb), sizeof(int), cudaMemcpyHostToDevice);
+            }
+
+            tmp = samp_columns.samp_flag.size();
+            cudaMalloc(&d_SC_samp_flag, tmp*sizeof(samp_Flag_d));
+            for(int i=0; i < tmp; i++){
+                cudaMalloc(&(d_SC_samp_flag[i].i_flag), (num_lines-1)*sizeof(bool));
+                cudaMalloc(&(d_SC_samp_flag[i].name), samp_columns.samp_flag[i].name.size() + 1);
+                cudaMemcpy(d_SC_samp_flag[i].name, samp_columns.samp_flag[i].name.c_str(), samp_columns.samp_flag[i].name.size() + 1, cudaMemcpyHostToDevice);
+                cudaMemcpy(&(d_SC_samp_flag[i].numb), &(samp_columns.samp_flag[i].numb), sizeof(int), cudaMemcpyHostToDevice);
+            }
+
+            tmp = samp_columns.samp_int.size();
+            cudaMalloc(&d_SC_samp_int, tmp*sizeof(samp_Int_d));
+            for(int i=0; i < tmp; i++){
+                cudaMalloc(&(d_SC_samp_int[i].i_int), (num_lines-1)*sizeof(int));
+                cudaMalloc(&(d_SC_samp_int[i].name), samp_columns.samp_int[i].name.size() + 1);
+                cudaMemcpy(d_SC_samp_int[i].name, samp_columns.samp_int[i].name.c_str(), samp_columns.samp_int[i].name.size() + 1, cudaMemcpyHostToDevice);
+                cudaMemcpy(&(d_SC_samp_int[i].numb), &(samp_columns.samp_int[i].numb), sizeof(int), cudaMemcpyHostToDevice);
+            }
+
+            tmp = samp_columns.sample_GT.size();
+            cudaMalloc(&d_SC_sample_GT, tmp*sizeof(samp_GT_d));
+            for(int i=0; i < tmp; i++){
+                cudaMalloc(&(d_SC_sample_GT[i].GT), (num_lines-1)*sizeof(char));
+                cudaMemcpy(&(d_SC_sample_GT[i].numb), &(samp_columns.sample_GT[i].numb), sizeof(int), cudaMemcpyHostToDevice);
+            }
+        }
+    }
+
+    void device_free(){
+        cudaFree(&d_VC_var_number);
+        cudaFree(&d_VC_pos);
+        cudaFree(&d_VC_qual);
+
+        int tmp = var_columns.in_float.size();
+        
+        for(int i=0; i < tmp; i++){
+            cudaFree(&d_VC_in_float[i].i_float);
+        }
+        cudaFree(&d_VC_in_float);
+
+        tmp = var_columns.in_flag.size();
+        for(int i=0; i < tmp; i++){
+            cudaFree(&d_VC_in_flag[i].i_flag);
+        }
+        cudaFree(&d_VC_in_flag);
+
+        tmp = var_columns.in_int.size();
+        for(int i=0; i < tmp; i++){
+            cudaFree(&d_VC_in_int[i].i_int);
+        }
+        cudaFree(&d_VC_in_int);
+
+        cudaFree(&d_filestring);
+        cudaFree(&d_new_lines_index);
+
+       if(hasDetSamples){
+            cudaFree(&d_SC_var_id);
+            cudaFree(&d_SC_samp_id);
+
+            tmp = samp_columns.samp_float.size();
+            for(int i=0; i < tmp; i++){
+                cudaFree(&d_SC_samp_float[i].i_float);
+            }
+            cudaFree(&d_SC_samp_float);
+
+            tmp = samp_columns.samp_flag.size();
+            for(int i=0; i < tmp; i++){
+                cudaFree(&d_SC_samp_flag[i].i_flag);
+            }
+            cudaFree(&d_SC_samp_flag);
+
+            tmp = samp_columns.samp_int.size();
+            for(int i=0; i < tmp; i++){
+                cudaFree(&d_SC_samp_int[i].i_int);
+            }
+            cudaFree(&d_SC_samp_int);
+
+            tmp = samp_columns.sample_GT.size();
+            for(int i=0; i < tmp; i++){
+                cudaFree(&d_SC_sample_GT[i].GT);
+            }
+            cudaFree(&d_SC_sample_GT);
+        }
+    }
+
+    __global__ void cu_find_new_lines_index(const char* input, unsigned int len, unsigned int* output, unsigned int len_output, unsigned int* global_count){
         unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;  // Indice globale del thread
 
-        if (idx < len && __ldg(data[idx]) == '\n') { //coaleasced read only
+        if (idx < len && __ldg(&input[idx]) == '\n') { //coaleasced read only
             unsigned int pos = atomicAdd(global_count, 1); //primo spazio libero dove salvare
-            output_array[pos] = idx;  // Salva la posizione trovata nell'array finale == idx
+            output[pos] = idx;  // Salva la posizione trovata nell'array finale == idx
         }else if(idx == len){
             //invece che mettere a 0 il primo valore dell'array che darebbe problemi per synch 
             //o per offset lo metto alla fine tanto poi va ordinato
-            output_array[len_output-1] = 0; 
+            output[len_output-1] = 0; 
         }
     }
 
@@ -198,14 +456,14 @@ public:
         new_lines_index[0] = 0;
 
         cudaMalloc(&d_filestring, variants_size*sizeof(char));
-        cidaMalloc(&d_new_lines_index, sizeof(unsigned int)*(num_lines+1));
+        cudaMalloc(&d_new_lines_index, sizeof(unsigned int)*(num_lines+1));
         cudaMemcpy(d_filestring, filestring, sizeof(char)*variants_size, cudaMemcpyHostToDevice);
         unsigned int* d_count;
-        cudaMalloc3D(&d_count, sizeof(unsigned int));
+        cudaMalloc(&d_count, sizeof(unsigned int));
         cudaMemset(d_count, 0, sizeof(long int));
         dim3 threads = 1024;
         dim3 blocks = ceil(variants_size/1024);
-        cu_find_new_lines_index<<<thrads, blocks>>>(
+        cu_find_new_lines_index<<<threads, blocks>>>(
             d_filestring,
             variants_size,
             d_new_lines_index,
@@ -216,12 +474,12 @@ public:
         //ordering with Thrust library
         thrust::device_ptr<unsigned int> d_new_lines_index_ptr = thrust::device_pointer_cast(d_new_lines_index);
         thrust::sort(d_new_lines_index_ptr, d_new_lines_index_ptr + (num_lines+1));
-        cudaMemcpy(new_lines_index, d_new_lines_index, sizeof(unsigned int)*(num_lines+1));
+        cudaMemcpy(new_lines_index, d_new_lines_index, sizeof(unsigned int)*(num_lines+1), cudaMemcpyDeviceToHost);
 
         //da capire cosa lasciare su GPU e cosa liberare
-        cudaFree(d_count);
-        cudaFree(d_new_lines_index_ptr);
-        cudaFree(d_filestring);
+        cudaFree(&d_count);
+        cudaFree(&d_new_lines_index_ptr);
+        cudaFree(&d_filestring);
         
         for(int i = 0; i <= num_lines; i++){
             cout << new_lines_index[i] << " | ";
@@ -358,7 +616,8 @@ public:
                 tmp.numb = iter;
                 tmp.GT.resize((num_lines-1)*samp_columns.numSample, (char)0);
                 samp_columns.sample_GT.push_back(tmp);
-            }   
+            }
+            samp_columns.sample_GT.resize(FORMAT.numGT);   
         }
 
         for(int i = 0; i < numIter; i++){
@@ -591,7 +850,7 @@ public:
         for(int i=0; i<var_columns.in_float.size(); i++){
             cout<<var_columns.in_float[i].name<<": ";
             for(int j=0; j<10; j++){
-                cout<<var_columns.in_float[i].i_float[j]<<" ";
+                cout << static_cast<float>(var_columns.in_float[i].i_float[j]) << " ";
             }
             cout<<" size: "<<var_columns.in_float[i].i_float.size();
             cout<<endl;
@@ -666,6 +925,43 @@ public:
     }
     
     void populate_var_columns(int num_threads){
+        int threadsPerBlock = 1024;
+        int blocksPerGrid = std::ceil(num_lines/threadsPerBlock);
+
+       if(samplesON){
+            var_columns::get_vcf_line_format_kernel<<<blocksPerGrid, threadsPerBlock>>>(
+                d_filestring,
+                d_VC_var_number,
+                d_VC_pos,
+                d_VC_qual,
+                d_VC_in_float,
+                d_VC_in_flag,
+                d_VC_in_int,
+                d_new_lines_index,
+                d_SC_var_id,
+                d_SC_samp_id,
+                d_SC_samp_float,
+                d_SC_samp_flag,
+                d_SC_samp_int,
+                d_SC_sample_GT,
+                samp_columns.numSample,
+                num_lines,
+                FORMAT.numGT
+            );
+       }else{
+            var_columns::get_vcf_line_kernel<<<blocksPerGrid, threadsPerBlock>>>(
+                d_filestring,
+                d_VC_var_number,
+                d_VC_pos,
+                d_VC_qual,
+                d_VC_in_float,
+                d_VC_in_flag,
+                d_VC_in_int,
+                d_new_lines_index,
+                num_lines
+            );
+       }
+
         long batch_size = (num_lines-2+num_threads)/num_threads;
         
         alt_columns_df tmp_alt[num_threads];
@@ -698,14 +994,13 @@ public:
                 tmp_alt_format[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, 0);
                 tmp_alt_format[th_ID].alt_id.resize(batch_size*2*samp_columns.numSample, 0);
                 tmp_alt_format[th_ID].samp_id.resize(batch_size*2*samp_columns.numSample, static_cast<unsigned short>(0));
-                if(FORMAT.hasGT && FORMAT.numGT == 'A'){ //TODO
+                if(FORMAT.hasGT && FORMAT.numGT == 'A'){
                     tmp_alt_format[th_ID].sample_GT.GT.resize(batch_size*2*samp_columns.numSample, (char)0),
                     tmp_alt_format[th_ID].initMapGT();
                 }
                 
                 // For each line in the batch
                 for(long i=start; i<end && i<num_lines-1; i++){ 
-                    var_columns.var_number[i] = i;
                     var_columns.get_vcf_line_in_var_columns_format(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]), &samp_columns, &FORMAT, &(tmp_num_alt_format[th_ID]), &(tmp_alt_format[th_ID]));
                 }
                 
@@ -749,7 +1044,6 @@ public:
             }else{
                 // There aren't samples in the dataset
                 for(long i=start; i<end && i<num_lines-1; i++){
-                    var_columns.var_number[i] = i;
                     var_columns.get_vcf_line_in_var_columns(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]));
                 }
 
@@ -775,6 +1069,48 @@ public:
         }
 
     //Here finish the parallel part and we merge the threads results
+
+        cudaDeviceSynchronize();
+        cudaMemcpy(var_columns.var_number.data(), d_VC_var_number, (num_lines-1)*sizeof(unsigned int), cudaMemcpyDeviceToHost);
+        cudaMemcpy(var_columns.pos.data(), d_VC_pos, (num_lines-1)*sizeof(unsigned int), cudaMemcpyDeviceToHost);
+        cudaMemcpy(var_columns.qual.data(), d_VC_qual, (num_lines-1)*sizeof(__half), cudaMemcpyDeviceToHost);
+
+        for(int i=0; i<var_columns.in_float.size(); i++){
+            cudaMemcpy(var_columns.in_float[i].i_float.data(), &(d_VC_in_float[i].i_float[0]), (num_lines-1)*sizeof(__half), cudaMemcpyDeviceToHost);
+        }
+
+        for(int i=0; i<var_columns.in_flag.size(); i++){
+            cudaMemcpy(var_columns.in_flag[i].i_flag.data(), &(d_VC_in_flag[i].i_flag[0]), (num_lines-1)*sizeof(bool), cudaMemcpyDeviceToHost);
+        }
+
+        for(int i=0; i<var_columns.in_int.size(); i++){
+            cudaMemcpy(var_columns.in_int[i].i_int.data(), &(d_VC_in_int[i].i_int[0]), (num_lines-1)*sizeof(int), cudaMemcpyDeviceToHost);
+        }
+
+        if(samplesON){ //TODO samp det sono numlines*numsamp e non solo num lines controlla allocazione
+            cudaMemcpy(samp_columns.var_id.data(), d_SC_var_id, (num_lines-1)*sizeof(unsigned int), cudaMemcpyDeviceToHost);
+            cudaMemcpy(samp_columns.samp_id.data(), d_SC_samp_id, (num_lines-1)*sizeof(unsigned short), cudaMemcpyDeviceToHost);
+
+            for(int i=0; i<samp_columns.samp_float.size(); i++){
+                cudaMemcpy(samp_columns.samp_float[i].i_float.data(), &(d_SC_samp_float[i].i_float[0]), (num_lines-1)*sizeof(__half), cudaMemcpyDeviceToHost);
+            }
+
+            for(int i=0; i<samp_columns.samp_flag.size(); i++){
+                cudaMemcpy(samp_columns.samp_flag[i].i_flag.data(), static_cast<bool*>(d_VC_in_flag[i].i_flag), (num_lines-1)*sizeof(bool), cudaMemcpyDeviceToHost);
+            }
+
+            for(int i=0; i<samp_columns.samp_int.size(); i++){
+                cudaMemcpy(samp_columns.samp_int[i].i_int.data(), &(d_SC_samp_int[i].i_int[0]), (num_lines-1)*sizeof(int), cudaMemcpyDeviceToHost);
+            }
+
+            for(int i=0; i<samp_columns.sample_GT.size(); i++){
+                cudaMemcpy(samp_columns.sample_GT[i].GT.data(), &(d_SC_sample_GT[i].GT[0]), (num_lines-1)*sizeof(char), cudaMemcpyDeviceToHost);
+            }
+            
+        }
+
+        device_free();
+
         int totAlt = 0;
         int totSampAlt = 0;
         for(int i=0; i<num_threads; i++){
@@ -883,6 +1219,6 @@ public:
         
     }
 
-}
+};
 
 #endif
