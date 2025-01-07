@@ -9,13 +9,13 @@ using namespace std;
 
 struct info_flag
 {
-    vector<bool> i_flag;
+    vector<uint8_t> i_flag;
     string name;
 };
 
 struct info_flag_d
 {
-    bool *i_flag;
+    bool* i_flag;
     char *name;
 };
 
@@ -51,7 +51,7 @@ struct info_int_d
 
 struct samp_Flag
 {
-    vector<bool> i_flag;
+    vector<uint8_t> i_flag;
     string name;
     int numb;
 };

@@ -13,11 +13,8 @@
 #include <map>
 #include <omp.h> 
 #include "VCFparser_mt_col_struct_CU.h"
-//#include "VCF_var.h"
+#include "VCF_CUDA_implementation.cu"
 #include "VCF_var_columns_df_CU.h"
-
-#define NUM_KEYS 242
-#define MAX_KEY_LENGTH 5 
 
 using namespace std;
 
@@ -60,9 +57,6 @@ public:
     samp_Int_d *d_SC_samp_int;
     samp_GT_d *d_SC_sample_GT;
 
-    __constant__ char d_keys[NUM_KEYS][MAX_KEY_LENGTH]; // Chiavi nella constant memory
-    __constant__ char d_values[NUM_KEYS];                // Valori nella constant memory
-
     void unzip_gz_file(char* vcf_filename) {
         // Check the extension ".gz"
         if (strcmp(vcf_filename + strlen(vcf_filename) - 3, ".gz") == 0) {
@@ -93,7 +87,6 @@ public:
 
     void run(char* vcf_filename, int num_threadss){
         string filename = vcf_filename; 
-        int cont=0;
         string line;
         vcf_parsed vcf;
 
@@ -143,7 +136,6 @@ public:
             std::cerr << "Failed to query device properties: " << cudaGetErrorString(err) << std::endl;
         }
 
-        
         omp_set_num_threads(num_threadss);
 
         // Open input file, gzip -df compressed_file1.gz
@@ -173,10 +165,7 @@ public:
         // Allocating the filestring (the variations as a big char*, the dimension is: filesize - header_size)
         allocate_filestring();
         // Populate filestring and getting the number of lines (num_lines), saving the starting char index of each lines
-        // TODO - Da sostituire con il kernel GPU, alloca mem necessaria, num_lines++, bisogna caricare già tutto il file su una stringa;
         before = chrono::system_clock::now();
-        //TODO - potrebbe essere più veloce, dato che la CPU può farlo fare accesso in parallelo a file per
-        // il conteggio dei \n e poi passare tutta la stringa per l'analisi in un secondo momento
         find_new_lines_index(filename, num_threadss); 
         after = chrono::system_clock::now();
         auto find_new_lines = std::chrono::duration<double>(after - before).count();
@@ -191,6 +180,7 @@ public:
         
          /*
         TODO:
+            AAA - TODO 
             0 - capire se posso passare a python una stringa con il padding -> Va riparsato!!
             1 - allocare memoria var_column e samp_columns su GPU -> non più di 80% global, (string a 10 char + heap + atomic o mutex)
             2 - scrivere i kernel dedicati e lanciarli
@@ -199,7 +189,7 @@ public:
         */
 
        //Allocate and initialize device memory
-       device_allocation();
+        device_allocation();
 
         before = chrono::system_clock::now();
         populate_var_columns(num_threadss);
@@ -217,32 +207,47 @@ public:
     }
     
     void copyMapToConstantMemory(const std::map<std::string, char>& map) {
-        char h_keys[NUM_KEYS][MAX_KEY_LENGTH] = {0};
-        char h_values[NUM_KEYS] = {0};
+        char h_keys[NUM_KEYS_GT][MAX_KEY_LENGTH_GT] = {0};
+        char h_values[NUM_KEYS_GT] = {0};
 
         size_t index = 0;
         for (const auto& [key, value] : map) {
-            if (index >= NUM_KEYS) break;
+            if (index >= NUM_KEYS_GT) break;
 
             // Copia la chiave, con padding se necessario
-            std::strncpy(h_keys[index], key.c_str(), MAX_KEY_LENGTH - 1);
+            std::strncpy(h_keys[index], key.c_str(), MAX_KEY_LENGTH_GT - 1);
 
             // Copia il valore corrispondente
             h_values[index] = value;
 
             ++index;
         }
-        cudaMemcpyToSymbol(d_keys, h_keys, sizeof(h_keys));
-        cudaMemcpyToSymbol(d_values, h_values, sizeof(h_values));
+        cudaMemcpyToSymbol(d_keys_gt, h_keys, sizeof(h_keys));
+        cudaMemcpyToSymbol(d_values_gt, h_values, sizeof(h_values));
     }
 
-    __device__ int getValueFromKey(const char* key) {
-        for (int i = 0; i < NUM_KEYS; ++i) {
-            if (strncmp(key, d_keys[i], MAX_KEY_LENGTH) == 0) {
-                return d_values[i];
-            }
+    void initialize_map1(const std::map<std::string, int> &my_map){
+        
+        if(my_map.size() > NUM_KEYS_MAP1) {
+            std::cerr << "Too many keys." << std::endl;
+            return;
         }
-        return -1;
+
+        // Host buffers
+        char h_keys[NUM_KEYS_MAP1][MAX_KEY_LENGTH_MAP1] = {0};
+        int h_values[NUM_KEYS_MAP1] = {0};
+
+        // Copy keys and values into host buffers
+        int i = 0;
+        for (const auto& [key, value] : my_map) {
+            strncpy(h_keys[i], key.c_str(), MAX_KEY_LENGTH_MAP1 - 1);
+            h_values[i] = value;
+            ++i;
+        }
+
+        // Copy to device memory
+        cudaMemcpyToSymbol(d_keys_map1, h_keys, sizeof(h_keys));
+        cudaMemcpyToSymbol(d_values_map1, h_values, sizeof(h_values));
     }
 
     void device_allocation(){
@@ -297,9 +302,10 @@ public:
         map<string, char> GTMap;
         */
 
-       if(hasDetSamples){
+       if(hasDetSamples){ //TODO rialloca dimensione giusta
             copyMapToConstantMemory(samp_columns.GTMap);
-            cudaMalloc(&d_SC_var_id, (num_lines-1)*sizeof(unsigned int));
+            initialize_map1(var_columns.info_map1);
+            cudaMalloc(&d_SC_var_id, (num_lines-1)*samp_columns.numSample*sizeof(unsigned int));
             cudaMemset(d_SC_var_id, 0, (num_lines-1)*sizeof(unsigned int));
             cudaMalloc(&d_SC_samp_id, (num_lines-1)*sizeof(unsigned short));
             cudaMemset(d_SC_samp_id, 0, (num_lines-1)*sizeof(unsigned short));
@@ -394,19 +400,6 @@ public:
                 cudaFree(&d_SC_sample_GT[i].GT);
             }
             cudaFree(&d_SC_sample_GT);
-        }
-    }
-
-    __global__ void cu_find_new_lines_index(const char* input, unsigned int len, unsigned int* output, unsigned int len_output, unsigned int* global_count){
-        unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;  // Indice globale del thread
-
-        if (idx < len && __ldg(&input[idx]) == '\n') { //coaleasced read only
-            unsigned int pos = atomicAdd(global_count, 1); //primo spazio libero dove salvare
-            output[pos] = idx;  // Salva la posizione trovata nell'array finale == idx
-        }else if(idx == len){
-            //invece che mettere a 0 il primo valore dell'array che darebbe problemi per synch 
-            //o per offset lo metto alla fine tanto poi va ordinato
-            output[len_output-1] = 0; 
         }
     }
 
@@ -567,7 +560,7 @@ public:
         if(tmp_split.size() > 9){
             samplesON = true;
             samp_columns.numSample = tmp_split.size() - 9;
-            alt_sample.numSample = samp_columns.numSample; //TODO - controlla perchè è subito anche negli alt
+            alt_sample.numSample = samp_columns.numSample;
 
             for(int i = 0; i < samp_columns.numSample; i++){
                 samp_columns.sampNames.insert(std::make_pair(tmp_split[9+i], i));
@@ -593,7 +586,6 @@ public:
     }
 
     void create_sample_vectors(int num_threads){
-        long batch_size = (num_lines-2+num_threads)/num_threads;
         samp_Flag samp_flag_tmp;
         samp_Float samp_float_tmp;
         samp_Int samp_int_tmp;
@@ -741,7 +733,6 @@ public:
     }
     
     void create_info_vectors(int num_threads){
-        long batch_size = (num_lines-2+num_threads)/num_threads;
         info_flag info_flag_tmp;
         info_float info_float_tmp;
         info_int info_int_tmp;
@@ -929,7 +920,7 @@ public:
         int blocksPerGrid = std::ceil(num_lines/threadsPerBlock);
 
        if(samplesON){
-            var_columns::get_vcf_line_format_kernel<<<blocksPerGrid, threadsPerBlock>>>(
+            get_vcf_line_format_kernel<<<blocksPerGrid, threadsPerBlock>>>(
                 d_filestring,
                 d_VC_var_number,
                 d_VC_pos,
@@ -949,7 +940,7 @@ public:
                 FORMAT.numGT
             );
        }else{
-            var_columns::get_vcf_line_kernel<<<blocksPerGrid, threadsPerBlock>>>(
+            get_vcf_line_kernel<<<blocksPerGrid, threadsPerBlock>>>(
                 d_filestring,
                 d_VC_var_number,
                 d_VC_pos,
@@ -1088,23 +1079,23 @@ public:
         }
 
         if(samplesON){ //TODO samp det sono numlines*numsamp e non solo num lines controlla allocazione
-            cudaMemcpy(samp_columns.var_id.data(), d_SC_var_id, (num_lines-1)*sizeof(unsigned int), cudaMemcpyDeviceToHost);
-            cudaMemcpy(samp_columns.samp_id.data(), d_SC_samp_id, (num_lines-1)*sizeof(unsigned short), cudaMemcpyDeviceToHost);
+            cudaMemcpy(samp_columns.var_id.data(), d_SC_var_id, (num_lines-1)*samp_columns.numSample*sizeof(unsigned int), cudaMemcpyDeviceToHost);
+            cudaMemcpy(samp_columns.samp_id.data(), d_SC_samp_id, (num_lines-1)*samp_columns.numSample*sizeof(unsigned short), cudaMemcpyDeviceToHost);
 
             for(int i=0; i<samp_columns.samp_float.size(); i++){
-                cudaMemcpy(samp_columns.samp_float[i].i_float.data(), &(d_SC_samp_float[i].i_float[0]), (num_lines-1)*sizeof(__half), cudaMemcpyDeviceToHost);
+                cudaMemcpy(samp_columns.samp_float[i].i_float.data(), &(d_SC_samp_float[i].i_float[0]), (num_lines-1)*samp_columns.numSample*sizeof(__half), cudaMemcpyDeviceToHost);
             }
-
+            
             for(int i=0; i<samp_columns.samp_flag.size(); i++){
-                cudaMemcpy(samp_columns.samp_flag[i].i_flag.data(), static_cast<bool*>(d_VC_in_flag[i].i_flag), (num_lines-1)*sizeof(bool), cudaMemcpyDeviceToHost);
+                cudaMemcpy(samp_columns.samp_flag[i].i_flag.data(), d_VC_in_flag[i].i_flag, (num_lines - 1) * samp_columns.numSample * sizeof(bool), cudaMemcpyDeviceToHost);
             }
 
             for(int i=0; i<samp_columns.samp_int.size(); i++){
-                cudaMemcpy(samp_columns.samp_int[i].i_int.data(), &(d_SC_samp_int[i].i_int[0]), (num_lines-1)*sizeof(int), cudaMemcpyDeviceToHost);
+                cudaMemcpy(samp_columns.samp_int[i].i_int.data(), &(d_SC_samp_int[i].i_int[0]), (num_lines-1)*samp_columns.numSample*sizeof(int), cudaMemcpyDeviceToHost);
             }
 
             for(int i=0; i<samp_columns.sample_GT.size(); i++){
-                cudaMemcpy(samp_columns.sample_GT[i].GT.data(), &(d_SC_sample_GT[i].GT[0]), (num_lines-1)*sizeof(char), cudaMemcpyDeviceToHost);
+                cudaMemcpy(samp_columns.sample_GT[i].GT.data(), &(d_SC_sample_GT[i].GT[0]), (num_lines-1)*samp_columns.numSample*sizeof(char), cudaMemcpyDeviceToHost);
             }
             
         }
