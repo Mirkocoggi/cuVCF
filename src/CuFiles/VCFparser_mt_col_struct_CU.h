@@ -1,9 +1,12 @@
 #ifndef VCF_STRUCTS_H
 #define VCF_STRUCTS_H
+
 #include <chrono>
 #include <boost/algorithm/string.hpp>
 #include <cuda_runtime.h>     
 #include <cuda_fp16.h>  
+#include <iostream>
+#include <map>
 
 using namespace std;
 
@@ -16,7 +19,7 @@ struct info_flag
 struct info_flag_d
 {
     bool* i_flag;
-    char *name;
+    char* name;
 };
 
 struct info_string
@@ -57,10 +60,11 @@ struct samp_Flag
 };
 
 struct samp_Flag_d
-{
+{   
+    int *tot;
     bool *i_flag;
     char *name;
-    int numb;
+    int *numb;
 };
 
 struct samp_String
@@ -78,10 +82,11 @@ struct samp_Float
 };
 
 struct samp_Float_d
-{
+{   
+    int *tot;
     __half *i_float;
     char *name;
-    int numb;
+    int *numb;
 };
 
 struct samp_Int
@@ -93,9 +98,10 @@ struct samp_Int
 
 struct samp_Int_d
 {
+    int *tot;
     int *i_int;
     char *name;
-    int numb;
+    int *numb;
 };
 
 struct samp_GT 
@@ -107,7 +113,7 @@ struct samp_GT
 struct samp_GT_d
 {
     char *GT;
-    int numb;    
+    int *numb;    
 };
 
 struct header_element
@@ -508,5 +514,4 @@ class alt_format_df //aka df4 in progress
         }
     }
 };
-
 #endif

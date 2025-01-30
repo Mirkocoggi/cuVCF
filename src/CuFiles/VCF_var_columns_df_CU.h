@@ -1,12 +1,15 @@
 #ifndef VCF_VARCOLUMNS_CU_H
 #define VCF_VARCOLUMNS_CU_H
-#include "VCFparser_mt_col_struct_cu.h"
-#include "VCF_parsed.cu"
-#include "VCF_CUDA_implementation.cu"
+
+#include "VCFparser_mt_col_struct_CU.h"
+//#include "VCF_parsed.cu"
+//#include "VCF_CUDA_implementation.cu"
 #include <chrono>
 #include <boost/algorithm/string.hpp>
 #include <cuda_runtime.h>     
 #include <cuda_fp16.h>  
+#include <map>
+#include <iostream>
 
 using namespace std;
 
@@ -29,7 +32,7 @@ class var_columns_df
 public:
     vector<unsigned int> var_number;
     std::map<std::string, char> chrom_map;
-    vector<char> chrom; // TODO si riempie in modo sequenziale, ha gli stessi valori di var_number
+    vector<char> chrom;
     vector<unsigned int>pos;
     vector<string> id;
     vector<string> ref;

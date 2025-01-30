@@ -1,5 +1,9 @@
 #ifndef VCF_CUDA_H
 #define VCF_CUDA_H
+
+//#include "VCFparser_mt_col_struct_CU.h"
+#include "VCF_var_columns_df_CU.h"
+
 #include <cuda_runtime.h>     
 #include <cuda_fp16.h>  
 #include <thrust/device_ptr.h> 
@@ -12,16 +16,11 @@
 #include <unistd.h>
 #include <map>
 #include <omp.h> 
-#include "VCFparser_mt_col_struct_CU.h"
-//#include "VCF_var.h"
-#include "VCF_var_columns_df_CU.h"
 
-
-//TODO: se 1 unico cromosoma settalo e via
 using namespace std;
 
 //GTMap
-#define NUM_KEYS_GT 242 //TODO aggiungi 254=.|. e 255 = ./. -> esiste l'OG come GT
+#define NUM_KEYS_GT 242
 #define MAX_KEY_LENGTH_GT 5
 #define MAX_TOKENS 10 // Maximum number of tokens to split
 #define MAX_TOKEN_LEN 512 // Maximum length of each token
@@ -137,8 +136,6 @@ __device__ int getValueFromKeyGT(const char* key) {
     return -1;
 }
 
-//TODO: info_map1 -> vedi come farla con:
-
 #define NUM_KEYS_MAP1 128
 #define MAX_KEY_LENGTH_MAP1 32
 
@@ -209,7 +206,6 @@ __device__ half safeStof(const char* tmp) {
     return __float2half(value);
 }
 
-//TODO - Manca info_map1
 __global__ static void get_vcf_line_kernel(char *line, unsigned int *var_number, unsigned int *pos, __half *qual,
             info_float_d *in_float, info_flag_d *in_flag, info_int_d *in_int, unsigned int *new_lines_index, unsigned int numLines)
 {
@@ -221,8 +217,8 @@ __global__ static void get_vcf_line_kernel(char *line, unsigned int *var_number,
     bool find1 = false;
     long iter=0;
     //string tmp="\0";
-    char tmp[MAX_TOKEN_LEN]; //TODO: vedi come fare con i punti e virgola per fare for su sottostringhe
-    char tmp_split[MAX_TOKENS][MAX_TOKEN_LEN]; // TODO: valori temporanei array for storing split substrings
+    char tmp[MAX_TOKEN_LEN];
+    char tmp_split[MAX_TOKENS][MAX_TOKEN_LEN];
     //vector<string> tmp_split;
     //vector<string> tmp_format_split;
     //vector<string> tmp_subSplit;
@@ -363,7 +359,6 @@ __global__ static void get_vcf_line_kernel(char *line, unsigned int *var_number,
     }
 }
 
-//TODO - Manca info_map1, GTMap;
 __global__ static void get_vcf_line_format_kernel(char *line, unsigned int *var_number, unsigned int *pos, __half *qual,
             info_float_d *in_float, info_flag_d *in_flag, info_int_d *in_int, unsigned int *new_lines_index,
             unsigned int *samp_var_id, unsigned short *samp_id, samp_Float_d *samp_float, samp_Flag_d *samp_flag,
@@ -377,8 +372,8 @@ __global__ static void get_vcf_line_format_kernel(char *line, unsigned int *var_
     bool find1 = false;
     long iter=0;
     //string tmp="\0";
-    char tmp[MAX_TOKEN_LEN]; //TODO: vedi come fare con i punti e virgola per fare for su sottostringhe
-    char tmp_split[MAX_TOKENS][MAX_TOKEN_LEN]; // TODO: valori temporanei array for storing split substrings
+    char tmp[MAX_TOKEN_LEN]; 
+    char tmp_split[MAX_TOKENS][MAX_TOKEN_LEN];
     //vector<string> tmp_split;
     //vector<string> tmp_format_split;
     //vector<string> tmp_subSplit;
@@ -627,7 +622,7 @@ __global__ static void get_vcf_line_format_kernel(char *line, unsigned int *var_
                                 char sub_split[MAX_TOKENS][MAX_TOKEN_LEN];
                                 int num_gt_tokens = split(tmp_split[j], ',', sub_split);
 
-                                for (int k = 0; k < sample_GT[0].numb; k++) {
+                                for (int k = 0; k < sample_GT->numb[0]; k++) {
                                     sample_GT[k].GT[thID * numSample + samp] = getValueFromKeyGT(sub_split[k]);
                                 }
                             } else if (numGT == 1) {
@@ -642,13 +637,13 @@ __global__ static void get_vcf_line_format_kernel(char *line, unsigned int *var_
                             int el = 0;
                             while (!find_elem) {
                                 if (cuda_strncmp(samp_int[el].name, tmp_split[j], MAX_TOKEN_LEN) == 0) {
-                                    if (samp_int[el].numb == 1) {
+                                    if (samp_int->numb[el] == 1) {
                                         samp_int[el].i_int[thID * numSample + samp] = cuda_atoi(tmp_split[j]);
                                     } else {
                                         char sub_split[MAX_TOKENS][MAX_TOKEN_LEN];
                                         int num_int_tokens = split(tmp_split[j], ',', sub_split);
 
-                                        for (int i = 0; i < samp_int[el].numb; i++) {
+                                        for (int i = 0; i < samp_int->numb[el]; i++) {
                                             samp_int[el + i].i_int[thID * numSample + samp] = cuda_atoi(sub_split[i]);
                                         }
                                     }
@@ -664,14 +659,14 @@ __global__ static void get_vcf_line_format_kernel(char *line, unsigned int *var_
 
                             int el = 0;
                             while (!find_elem) {
-                                if (cuda_strncmp(samp_float[el].name, tmp_split[j], MAX_TOKEN_LEN) == 0) {
-                                    if (samp_float[el].numb == 1) {
+                                if (cuda_strncmp(&samp_float->name[el], tmp_split[j], MAX_TOKEN_LEN) == 0) {
+                                    if (samp_float->numb[el] == 1) {
                                         samp_float[el].i_float[thID * numSample + samp] = safeStof(tmp_split[j]);
                                     } else {
                                         char sub_split[MAX_TOKENS][MAX_TOKEN_LEN];
                                         int num_float_tokens = split(tmp_split[j], ',', sub_split);
 
-                                        for (int i = 0; i < samp_float[el].numb; i++) {
+                                        for (int i = 0; i < samp_float->numb[el]; i++) {
                                             samp_float[el + i].i_float[thID * numSample + samp] = safeStof(sub_split[i]);
                                         }
                                     }
@@ -692,5 +687,5 @@ __global__ static void get_vcf_line_format_kernel(char *line, unsigned int *var_
         }
     }
 }
-   
+
 #endif
