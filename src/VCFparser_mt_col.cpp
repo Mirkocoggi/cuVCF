@@ -12,7 +12,7 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <filesystem>
-#include <OpenEXR/half.h>
+#include <Imath/half.h>
 #include <omp.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -86,11 +86,11 @@ int main(int argc, char *argv[]){
     vcf.run(vcf_filename, num_threadss);
 
     //vcf.print_header();
-    cout << "AAAAAA 1 " << endl;
+    //cout << "AAAAAA 1 " << endl;
     //vcf.var_columns.print(10); //TODO
-    vcf.alt_columns.print(10);
-    vcf.samp_columns.print(10);
-    vcf.alt_sample.print(10); //TODO
+    //vcf.alt_columns.print(10);
+    //vcf.samp_columns.print(10);
+    //vcf.alt_sample.print(10); //TODO
     /*
 // Setting number of threads
     omp_set_num_threads(num_threadss);

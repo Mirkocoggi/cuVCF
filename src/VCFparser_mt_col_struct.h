@@ -2,7 +2,7 @@
 #define VCF_STRUCTS_H
 #include <chrono>
 #include <boost/algorithm/string.hpp>
-#include <OpenEXR/half.h>
+#include <Imath/half.h>
 
 using namespace std;
 

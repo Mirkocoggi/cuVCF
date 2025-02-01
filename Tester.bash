@@ -3,21 +3,21 @@
 #/usr/bin/time -f "Max Mem: %M KB" ./bin/VCFparser -v data/tiny2.vcf -t 1
 #
 # Define the number of times to run the C++ program
-NUM_RUNS=1
+NUM_RUNS=3
 
-NUM_TH=64
+NUM_TH=24
 
-# Loop to run the C++ program multiple times
+# Loop to run the C++ program multiple times             --------------- data/felis_catus.vcf
 for((j = 1; j <= NUM_TH; j=j*2)); do
-
-    echo "Th $j:" >> testColChr19.txt
+    echo "Th $j:"
+    echo "Th $j:" >> GenoGraMachine.txt
     for ((i = 1; i <= NUM_RUNS; i++)); do
-        #echo "Run $i:" >> results.txt   
-        ./bin/VCFparser -v data/homo_sapiens-chr19.vcf  -t $j >>  testColChr19.txt
-        echo "-----" >>  testColChr19.txt
+        echo "Run $i"   
+        /usr/bin/time -f "Time: %E | Max Mem: %M KB" ./bin/VCFparser -v data/danio_rerio.vcf -t $j >> GenoGraMachine.txt 2>&1
+        echo "-----" >>  GenoGraMachine.txt
     done
 
-    echo "===================" >>  testColChr19.txt
+    echo "===================" >>  GenoGraMachine.txt
 done
 
 #homo_sapiens-chr20.vcf

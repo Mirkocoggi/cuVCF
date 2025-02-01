@@ -5,7 +5,7 @@
 #include "VCF_var_columns_df.h"
 #include <chrono>
 #include <boost/algorithm/string.hpp>
-#include <OpenEXR/half.h>
+#include <Imath/half.h>
 
 class var
 {

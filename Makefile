@@ -1,7 +1,7 @@
 CXX = g++
 CPPFLAGS = -O3 -std=c++17
 DEBUGFLAGS = -std=c++17
-LIBS = -lz -lHalf
+LIBS = -lz -I/usr/include/Imath -lImath#-lHalf
 
 VARSTRUCT:
 	mkdir -p bin/

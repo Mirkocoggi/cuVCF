@@ -5,7 +5,7 @@
 #include "VCF_var.h"
 #include <chrono>
 #include <boost/algorithm/string.hpp>
-#include <OpenEXR/half.h>
+#include <Imath/half.h>
 
 const int FLAG = 0;
 const int INT = 1;

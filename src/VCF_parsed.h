@@ -5,7 +5,7 @@
 #include "VCF_var_columns_df.h"
 #include <chrono>
 #include <boost/algorithm/string.hpp>
-#include <OpenEXR/half.h>
+#include <Imath/half.h>
 #include <omp.h>
 #include <fstream>
 #include <filesystem>
@@ -118,12 +118,12 @@ public:
         after = chrono::system_clock::now();
         auto populate_var_columns = std::chrono::duration<double>(after - before).count();
         
-        cout << "Get file size: " << get_file_size << " s" << endl;
-        cout << "get_header: " << get_header << " s" << endl;
-        cout << "find_new_lines: " << find_new_lines << " s" << endl;
-        cout << "populate_var_struct: " << populate_var_struct << " s" << endl;
-        cout << "reserve: " << reserve_var_columns << " s" << endl;
-        cout << "populate_var_columns: " << populate_var_columns << " s" << endl;
+        //cout << "Get file size: " << get_file_size << " s" << endl;
+        //cout << "get_header: " << get_header << " s" << endl;
+        //cout << "find_new_lines: " << find_new_lines << " s" << endl;
+        //cout << "populate_var_struct: " << populate_var_struct << " s" << endl;
+        //cout << "reserve: " << reserve_var_columns << " s" << endl;
+        //cout << "populate_var_columns: " << populate_var_columns << " s" << endl;
         free(filestring);
         free(new_lines_index);
     }
@@ -219,7 +219,7 @@ public:
             samp_columns.numSample = 0;
         }
         
-        cout << "Num Samples = " << samp_columns.numSample << endl;
+        //cout << "Num Samples = " << samp_columns.numSample << endl;
 
         INFO.total_values = INFO.ID.size();
         INFO.no_alt_values = INFO.total_values - INFO.alt_values;
