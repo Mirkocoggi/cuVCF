@@ -13,6 +13,10 @@ VARCOL:
 	$(CXX) src/VCFparser_mt_col.cpp -o bin/VCFparser -fopenmp $(CPPFLAGS) $(LIBS)
 #	$(CXX) src/VCFparser_mt_col.cpp -o bin/VCFparser -fopenmp $(CPPFLAGS) $(LIBS) -g
 
+GPU:
+	mkdir -p bin/
+	nvcc -arch=sm_89 -o ./bin/VCFparser ./src/CuFiles/main.cu -Xcompiler -fopenmp
+
 #poi lancialo con gcc --args
 DEBUG:
 	$(CXX) src/VCFparser_mt_col.cpp -o bin/VCFparser -fopenmp $(DEBUGFLAGS) $(LIBS) -g

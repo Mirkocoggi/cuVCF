@@ -105,7 +105,6 @@ public:
         find_new_lines_index(filename, num_threadss);
         after = chrono::system_clock::now();
         auto find_new_lines = std::chrono::duration<double>(after - before).count();
-
         auto populate_var_struct = std::chrono::duration<double>(after - before).count();
         before = chrono::system_clock::now();
         create_info_vectors(num_threadss);
@@ -319,6 +318,8 @@ public:
 
         int numIter = FORMAT.ID.size();
 
+        if(numIter == 0 ) return; //if no sample available
+
         if(FORMAT.hasGT && FORMAT.numGT == 'A'){
             alt_sample.initMapGT();
             alt_sample.sample_GT.numb = -1;
@@ -435,15 +436,17 @@ public:
                 }
             }
         }
-                
+
         samp_columns.samp_flag.resize(FORMAT.flags);
         samp_columns.samp_int.resize(FORMAT.ints);
         samp_columns.samp_float.resize(FORMAT.floats);
         samp_columns.samp_string.resize(FORMAT.strings);
+
         if(hasDetSamples){
             samp_columns.var_id.resize((num_lines-1)*samp_columns.numSample, 0);
             samp_columns.samp_id.resize((num_lines-1)*samp_columns.numSample, static_cast<unsigned short>(0));
-        }    
+        }
+
         alt_sample.samp_flag.resize(FORMAT.flags_alt);
         alt_sample.samp_int.resize(FORMAT.ints_alt);
         alt_sample.samp_float.resize(FORMAT.floats_alt);

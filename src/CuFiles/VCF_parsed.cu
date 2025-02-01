@@ -131,17 +131,15 @@ public:
             gridDim[1] = prop.maxGridSize[1];
             gridDim[2] = prop.maxGridSize[2];
 
-            // Print the saved values
+            /*Print the saved values
             std::cout << "Device Information:" << std::endl;
             std::cout << "Global memory: " << globalMemory / (1024.0 * 1024.0) << " MB" << std::endl;
             std::cout << "Shared memory per block: " << sharedMemory / 1024.0 << " KB" << std::endl;
             std::cout << "Constant memory: " << constantMemory / 1024.0 << " KB" << std::endl;
             std::cout << "Texture alignment: " << textureAlignment << " bytes" << std::endl;
             std::cout << "Maximum threads per block: " << maxThreadsPerBlock << std::endl;
-            std::cout << "Threads per block dimensions: "
-                    << threadsDim[0] << " x " << threadsDim[1] << " x " << threadsDim[2] << std::endl;
-            std::cout << "Grid dimensions: "
-                    << gridDim[0] << " x " << gridDim[1] << " x " << gridDim[2] << std::endl;
+            std::cout << "Threads per block dimensions: " << threadsDim[0] << " x " << threadsDim[1] << " x " << threadsDim[2] << std::endl;
+            std::cout << "Grid dimensions: " << gridDim[0] << " x " << gridDim[1] << " x " << gridDim[2] << std::endl;*/
         } else {
             std::cerr << "Failed to query device properties: " << cudaGetErrorString(err) << std::endl;
         }
@@ -176,7 +174,7 @@ public:
         allocate_filestring();
         // Populate filestring and getting the number of lines (num_lines), saving the starting char index of each lines
         before = chrono::system_clock::now();
-        find_new_lines_index(filename, num_threadss); 
+        find_new_lines_index(filename, num_threadss);
         after = chrono::system_clock::now();
         auto find_new_lines = std::chrono::duration<double>(after - before).count();
 
@@ -190,18 +188,19 @@ public:
 
        //Allocate and initialize device memory
         device_allocation();
-
         before = chrono::system_clock::now();
         populate_var_columns(num_threadss);
         after = chrono::system_clock::now();
         auto populate_var_columns = std::chrono::duration<double>(after - before).count();
         
+        /*
         cout << "Get file size: " << get_file_size << " s" << endl;
         cout << "get_header: " << get_header << " s" << endl;
         cout << "find_new_lines: " << find_new_lines << " s" << endl;
         cout << "populate_var_struct: " << populate_var_struct << " s" << endl;
         cout << "reserve: " << reserve_var_columns << " s" << endl;
         cout << "populate_var_columns: " << populate_var_columns << " s" << endl;
+        */
         free(filestring);
         free(new_lines_index);
     }
@@ -306,7 +305,7 @@ public:
         map<string, char> GTMap;
         */
        
-       if (hasDetSamples) {
+        if (hasDetSamples) {
             // Copy map to constant memory
             copyMapToConstantMemory(samp_columns.GTMap);
             initialize_map1(var_columns.info_map1);
@@ -350,73 +349,45 @@ public:
 
     }
 
-    void device_free(){
-        cudaFree(&d_VC_var_number);
-        cudaFree(&d_VC_pos);
-        cudaFree(&d_VC_qual);
+    void device_free() {
+        cudaFree(d_VC_var_number);
+        cudaFree(d_VC_pos);
+        cudaFree(d_VC_qual);
+        cudaFree(d_VC_in_float->i_float);
+        cudaFree(d_VC_in_float->name);
+        cudaFree(d_VC_in_flag->i_flag);
+        cudaFree(d_VC_in_flag->name);
+        cudaFree(d_VC_in_int->i_int);
+        cudaFree(d_VC_in_int->name);
+        cudaFree(d_filestring);
+        cudaFree(d_new_lines_index);
 
-        int tmp = var_columns.in_float.size();
-        
-        for(int i=0; i < tmp; i++){
-            cudaFree(&d_VC_in_float[i].i_float);
-        }
-        cudaFree(&d_VC_in_float);
-
-        tmp = var_columns.in_flag.size();
-        for(int i=0; i < tmp; i++){
-            cudaFree(&d_VC_in_flag[i].i_flag);
-        }
-        cudaFree(&d_VC_in_flag);
-
-        tmp = var_columns.in_int.size();
-        for(int i=0; i < tmp; i++){
-            cudaFree(&d_VC_in_int[i].i_int);
-        }
-        cudaFree(&d_VC_in_int);
-
-        cudaFree(&d_filestring);
-        cudaFree(&d_new_lines_index);
-
-       if(hasDetSamples){
-            cudaFree(&d_SC_var_id);
-            cudaFree(&d_SC_samp_id);
-
-            tmp = samp_columns.samp_float.size();
-            for(int i=0; i < tmp; i++){
-                cudaFree(&d_SC_samp_float[i].i_float);
-            }
-            cudaFree(&d_SC_samp_float);
-
-            tmp = samp_columns.samp_flag.size();
-            for(int i=0; i < tmp; i++){
-                cudaFree(&d_SC_samp_flag[i].i_flag);
-            }
-            cudaFree(&d_SC_samp_flag);
-
-            tmp = samp_columns.samp_int.size();
-            for(int i=0; i < tmp; i++){
-                cudaFree(&d_SC_samp_int[i].i_int);
-            }
-            cudaFree(&d_SC_samp_int);
-
-            tmp = samp_columns.sample_GT.size();
-            for(int i=0; i < tmp; i++){
-                cudaFree(&d_SC_sample_GT[i].GT);
-            }
-            cudaFree(&d_SC_sample_GT);
+        if (hasDetSamples) {
+            cudaFree(d_SC_var_id);
+            cudaFree(d_SC_samp_id);
+            cudaFree(d_SC_samp_float->i_float);
+            cudaFree(d_SC_samp_float->name);
+            cudaFree(d_SC_samp_float->numb);
+            cudaFree(d_SC_samp_flag->i_flag);
+            cudaFree(d_SC_samp_flag->name);
+            cudaFree(d_SC_samp_flag->numb);
+            cudaFree(d_SC_samp_int->i_int);
+            cudaFree(d_SC_samp_int->numb);
+            cudaFree(d_SC_sample_GT->GT);
+            cudaFree(d_SC_sample_GT->numb);
         }
     }
+
 
     void find_new_lines_index(string w_filename, int num_threads){
         // Allocate memory for the `new_lines_index` array. The size is exaggerated (assuming every character is a new line).
         // The first element is set to 0, indicating the start of the first line.
         num_lines++; // Increment the line counter to account for the first line.
         long tmp_num_lines[num_threads]; // Temporary array to store the number of lines found by each thread.
-        
         variants_size--;
-
         auto before = chrono::system_clock::now();
-        long batch_infile = (variants_size - 1 + num_threads)/num_threads; // Number of characters each thread will process        
+        long batch_infile = (variants_size - 1 + num_threads)/num_threads; // Number of characters each thread will process  
+              
 #pragma omp parallel
         {
             int thr_ID = omp_get_thread_num();
@@ -456,32 +427,27 @@ public:
         }
         new_lines_index = (unsigned int*)malloc(sizeof(unsigned int)*(num_lines+1));
         new_lines_index[0] = 0;
-
         cudaError_t err;
         err = cudaMalloc(&d_filestring, variants_size * sizeof(char));
         if (err != cudaSuccess) {
             std::cerr << "CUDA malloc failed for d_filestring: " << cudaGetErrorString(err) << std::endl;
             return;
         }
-
         err = cudaMalloc(&d_new_lines_index, (num_lines + 1) * sizeof(unsigned int));
         if (err != cudaSuccess) {
             std::cerr << "CUDA malloc failed for d_new_lines_index: " << cudaGetErrorString(err) << std::endl;
             return;
         }
-
         err =cudaMemcpy(d_filestring, filestring, sizeof(char)*variants_size, cudaMemcpyHostToDevice);
         if (err != cudaSuccess) {
             std::cerr << "Error in cudaMemcpy (Host to Device) di d_filestring: " << cudaGetErrorString(err) << std::endl;
         }
-
         unsigned int* d_count;
         err = cudaMalloc(&d_count, sizeof(unsigned int));
         if (err != cudaSuccess) {
             std::cerr << "CUDA malloc failed for d_count: " << cudaGetErrorString(err) << std::endl;
             return;
         }
-
         cudaMemset(d_count, 0, sizeof(unsigned int));
         dim3 threads = 1024;
         dim3 blocks((variants_size + threads.x - 1) / threads.x);
@@ -501,8 +467,6 @@ public:
 
         cudaDeviceSynchronize();
 
-        
-
         //ordering with Thrust library
         thrust::device_ptr<unsigned int> d_new_lines_index_ptr(d_new_lines_index);
         if (!d_new_lines_index_ptr) {
@@ -517,17 +481,11 @@ public:
 
 
         cudaDeviceSynchronize();
-
+        
         cudaMemcpy(new_lines_index, d_new_lines_index, sizeof(unsigned int)*(num_lines+1), cudaMemcpyDeviceToHost);
-
         //da capire cosa lasciare su GPU e cosa liberare
         cudaFree(d_count);
         cudaFree(d_filestring);
-        
-        for(int i = 0; i <= num_lines; i++){
-            cout << new_lines_index[i] << " | ";
-        }
-        cout << endl;
     }
 
     void get_filename(string path_filename){
@@ -621,7 +579,7 @@ public:
             samp_columns.numSample = 0;
         }
         
-        cout << "Num Samples = " << samp_columns.numSample << endl;
+        //cout << "Num Samples = " << samp_columns.numSample << endl;
 
         INFO.total_values = INFO.ID.size();
         INFO.no_alt_values = INFO.total_values - INFO.alt_values;
@@ -646,6 +604,7 @@ public:
         samp_String samp_alt_string_tmp;
 
         int numIter = FORMAT.ID.size();
+        if(numIter == 0 ) return;
 
         if(FORMAT.hasGT && FORMAT.numGT == 'A'){
             alt_sample.initMapGT();
@@ -1117,15 +1076,15 @@ public:
         cudaMemcpy(var_columns.qual.data(), d_VC_qual, (num_lines-1)*sizeof(__half), cudaMemcpyDeviceToHost);
 
         for(int i=0; i<var_columns.in_float.size(); i++){
-            cudaMemcpy(var_columns.in_float[i].i_float.data(), &(d_VC_in_float[i].i_float[0]), (num_lines-1)*sizeof(__half), cudaMemcpyDeviceToHost);
+            cudaMemcpy(var_columns.in_float[i].i_float.data(), d_VC_in_float->i_float + i * (num_lines - 1), (num_lines-1)*sizeof(__half), cudaMemcpyDeviceToHost);
         }
 
         for(int i=0; i<var_columns.in_flag.size(); i++){
-            cudaMemcpy(var_columns.in_flag[i].i_flag.data(), &(d_VC_in_flag[i].i_flag[0]), (num_lines-1)*sizeof(bool), cudaMemcpyDeviceToHost);
+            cudaMemcpy(var_columns.in_flag[i].i_flag.data(), d_VC_in_flag->i_flag + i * (num_lines - 1), (num_lines-1)*sizeof(bool), cudaMemcpyDeviceToHost);
         }
 
         for(int i=0; i<var_columns.in_int.size(); i++){
-            cudaMemcpy(var_columns.in_int[i].i_int.data(), &(d_VC_in_int[i].i_int[0]), (num_lines-1)*sizeof(int), cudaMemcpyDeviceToHost);
+            cudaMemcpy(var_columns.in_int[i].i_int.data(), d_VC_in_int->i_int + i * (num_lines - 1), (num_lines - 1) * sizeof(int), cudaMemcpyDeviceToHost);
         }
 
         if(samplesON){
@@ -1133,19 +1092,19 @@ public:
             cudaMemcpy(samp_columns.samp_id.data(), d_SC_samp_id, (num_lines-1)*samp_columns.numSample*sizeof(unsigned short), cudaMemcpyDeviceToHost);
 
             for(int i=0; i<samp_columns.samp_float.size(); i++){
-                cudaMemcpy(samp_columns.samp_float[i].i_float.data(), &(d_SC_samp_float[i].i_float[0]), (num_lines-1)*samp_columns.numSample*sizeof(__half), cudaMemcpyDeviceToHost);
+                cudaMemcpy(samp_columns.samp_float[i].i_float.data(), d_SC_samp_float->i_float + i * ((num_lines - 1) * samp_columns.numSample), (num_lines-1)*samp_columns.numSample*sizeof(__half), cudaMemcpyDeviceToHost);
             }
             
             for(int i=0; i<samp_columns.samp_flag.size(); i++){
-                cudaMemcpy(samp_columns.samp_flag[i].i_flag.data(), d_VC_in_flag[i].i_flag, (num_lines - 1) * samp_columns.numSample * sizeof(bool), cudaMemcpyDeviceToHost);
+                cudaMemcpy(samp_columns.samp_flag[i].i_flag.data(), d_SC_samp_flag->i_flag + i * ((num_lines - 1) * samp_columns.numSample), (num_lines - 1) * samp_columns.numSample * sizeof(bool), cudaMemcpyDeviceToHost);
             }
 
             for(int i=0; i<samp_columns.samp_int.size(); i++){
-                cudaMemcpy(samp_columns.samp_int[i].i_int.data(), &(d_SC_samp_int[i].i_int[0]), (num_lines-1)*samp_columns.numSample*sizeof(int), cudaMemcpyDeviceToHost);
+                cudaMemcpy(samp_columns.samp_int[i].i_int.data(), d_SC_samp_int->i_int + i * ((num_lines - 1) * samp_columns.numSample), (num_lines-1)*samp_columns.numSample*sizeof(int), cudaMemcpyDeviceToHost);
             }
 
             for(int i=0; i<samp_columns.sample_GT.size(); i++){
-                cudaMemcpy(samp_columns.sample_GT[i].GT.data(), &(d_SC_sample_GT[i].GT[0]), (num_lines-1)*samp_columns.numSample*sizeof(char), cudaMemcpyDeviceToHost);
+                cudaMemcpy(samp_columns.sample_GT[i].GT.data(), &d_SC_sample_GT->GT + i * ((num_lines - 1) * samp_columns.numSample), (num_lines-1)*samp_columns.numSample*sizeof(char), cudaMemcpyDeviceToHost);
             }
             
         }

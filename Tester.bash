@@ -3,18 +3,18 @@
 #/usr/bin/time -f "Max Mem: %M KB" ./bin/VCFparser -v data/tiny2.vcf -t 1
 #
 # Define the number of times to run the C++ program
-NUM_RUNS=3
+NUM_RUNS=1 #3
 
-NUM_TH=24
+NUM_TH=1 #24
 
-# Loop to run the C++ program multiple times             --------------- data/felis_catus.vcf
+# Loop to run the C++ program multiple times
 for((j = 1; j <= NUM_TH; j=j*2)); do
     echo "Th $j:"
     echo "Th $j:" >> GenoGraMachine.txt
     for ((i = 1; i <= NUM_RUNS; i++)); do
         echo "Run $i"   
-        /usr/bin/time -f "Time: %E | Max Mem: %M KB" ./bin/VCFparser -v data/danio_rerio.vcf -t $j >> GenoGraMachine.txt 2>&1
-        echo "-----" >>  GenoGraMachine.txt
+        /usr/bin/time -f "Time: %E | Max Mem: %M KB" ./bin/VCFparser -v data/felis_catus.vcf -t $j >> GenoGraMachine.txt 2>&1
+        #echo "-----" >>  GenoGraMachine.txt
     done
 
     echo "===================" >>  GenoGraMachine.txt

@@ -81,13 +81,9 @@ int main(int argc, char *argv[]){
     vcf.run(vcf_filename, num_threadss);
 
     //vcf.print_header();
-    cout << "AAAAAA 1 " << endl;
     vcf.alt_columns.print(10);
-    cout << "AAAAAA 2 " << endl;
     vcf.samp_columns.print(10); //TOTO: controlla come riprendi i dati da GPU
-    cout << "AAAAAA 3 " << endl;
     vcf.alt_sample.print(10);
-    cout << "AAAAAA 4 " << endl;
 
     return 0;
 }
