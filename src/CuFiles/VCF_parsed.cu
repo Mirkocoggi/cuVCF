@@ -1,7 +1,7 @@
 #ifndef VCF_PARCED_CU_H
 #define VCF_PARCED_CU_H
 
-//#include "VCFparser_mt_col_struct_CU.h"
+#include "VCFparser_mt_col_struct_CU.h"
 #include "VCF_CUDA_implementation.cu"
 //#include "VCF_var_columns_df_CU.h"
 
@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <map>
 #include <omp.h> 
+#include <thread>
 
 using namespace std;
 
@@ -32,6 +33,7 @@ public:
     header_element FORMAT;
     char *filestring;
     char *d_filestring; 
+    unsigned int *d_count;
     int header_size=0;
     long filesize;
     long variants_size;
@@ -44,6 +46,8 @@ public:
     alt_columns_df alt_columns;
     sample_columns_df samp_columns;
     alt_format_df alt_sample;
+    KernelParams h_params;
+    KernelParams *d_params;
 
     unsigned int *d_VC_var_number;
     unsigned int *d_VC_pos;
@@ -159,40 +163,25 @@ public:
         get_filename(filename);
         
         // Getting filesize (number of char in the file)
-        auto before = chrono::system_clock::now();
         get_file_size(filename);
-        auto after = chrono::system_clock::now();
-        auto get_file_size = std::chrono::duration<double>(after - before).count();
         // Getting the header (Saving the header into a string and storing the header size )
-        before = chrono::system_clock::now();
+
         get_and_parse_header(&inFile); //serve per separare l'header dal resto del file
         //vcf.print_header();
-        after = chrono::system_clock::now();
-        auto get_header = std::chrono::duration<double>(after - before).count();
         inFile.close();
         // Allocating the filestring (the variations as a big char*, the dimension is: filesize - header_size)
         allocate_filestring();
         // Populate filestring and getting the number of lines (num_lines), saving the starting char index of each lines
-        before = chrono::system_clock::now();
         find_new_lines_index(filename, num_threadss);
-        after = chrono::system_clock::now();
-        auto find_new_lines = std::chrono::duration<double>(after - before).count();
-
-        auto populate_var_struct = std::chrono::duration<double>(after - before).count();
-        before = chrono::system_clock::now();
         create_info_vectors(num_threadss);
         reserve_var_columns();
         create_sample_vectors(num_threadss);
-        after = chrono::system_clock::now();
-        auto reserve_var_columns = std::chrono::duration<double>(after - before).count();
 
-       //Allocate and initialize device memory
+        //Allocate and initialize device memory
         device_allocation();
-        before = chrono::system_clock::now();
         populate_var_columns(num_threadss);
-        after = chrono::system_clock::now();
-        auto populate_var_columns = std::chrono::duration<double>(after - before).count();
-        
+
+        device_free();
         /*
         cout << "Get file size: " << get_file_size << " s" << endl;
         cout << "get_header: " << get_header << " s" << endl;
@@ -201,8 +190,7 @@ public:
         cout << "reserve: " << reserve_var_columns << " s" << endl;
         cout << "populate_var_columns: " << populate_var_columns << " s" << endl;
         */
-        free(filestring);
-        free(new_lines_index);
+
     }
     
     void copyMapToConstantMemory(const std::map<std::string, char>& map) {
@@ -361,6 +349,7 @@ public:
         cudaFree(d_VC_in_int->name);
         cudaFree(d_filestring);
         cudaFree(d_new_lines_index);
+        cudaFree(d_count);
 
         if (hasDetSamples) {
             cudaFree(d_SC_var_id);
@@ -375,9 +364,9 @@ public:
             cudaFree(d_SC_samp_int->numb);
             cudaFree(d_SC_sample_GT->GT);
             cudaFree(d_SC_sample_GT->numb);
+            cudaFree(d_params);
         }
     }
-
 
     void find_new_lines_index(string w_filename, int num_threads){
         // Allocate memory for the `new_lines_index` array. The size is exaggerated (assuming every character is a new line).
@@ -416,10 +405,6 @@ public:
 
         filestring[variants_size] = '\n';
         variants_size++;
-
-        auto after = chrono::system_clock::now();
-        auto filestring_time = std::chrono::duration<double>(after - before).count();
-        
         before = chrono::system_clock::now();
         num_lines = tmp_num_lines[0];
         for(int i=1; i<num_threads; i++){
@@ -427,28 +412,12 @@ public:
         }
         new_lines_index = (unsigned int*)malloc(sizeof(unsigned int)*(num_lines+1));
         new_lines_index[0] = 0;
-        cudaError_t err;
-        err = cudaMalloc(&d_filestring, variants_size * sizeof(char));
-        if (err != cudaSuccess) {
-            std::cerr << "CUDA malloc failed for d_filestring: " << cudaGetErrorString(err) << std::endl;
-            return;
-        }
-        err = cudaMalloc(&d_new_lines_index, (num_lines + 1) * sizeof(unsigned int));
-        if (err != cudaSuccess) {
-            std::cerr << "CUDA malloc failed for d_new_lines_index: " << cudaGetErrorString(err) << std::endl;
-            return;
-        }
-        err =cudaMemcpy(d_filestring, filestring, sizeof(char)*variants_size, cudaMemcpyHostToDevice);
-        if (err != cudaSuccess) {
-            std::cerr << "Error in cudaMemcpy (Host to Device) di d_filestring: " << cudaGetErrorString(err) << std::endl;
-        }
-        unsigned int* d_count;
-        err = cudaMalloc(&d_count, sizeof(unsigned int));
-        if (err != cudaSuccess) {
-            std::cerr << "CUDA malloc failed for d_count: " << cudaGetErrorString(err) << std::endl;
-            return;
-        }
+        cudaMalloc(&d_filestring, (variants_size + 8)* sizeof(char));
+        cudaMalloc(&d_new_lines_index, (num_lines + 1) * sizeof(unsigned int));
+        cudaMemcpy(d_filestring, filestring, sizeof(char)*variants_size, cudaMemcpyHostToDevice);
+        cudaMalloc(&d_count, sizeof(unsigned int));
         cudaMemset(d_count, 0, sizeof(unsigned int));
+        
         dim3 threads = 1024;
         dim3 blocks((variants_size + threads.x - 1) / threads.x);
         cu_find_new_lines_index<<<blocks, threads>>>(
@@ -483,9 +452,6 @@ public:
         cudaDeviceSynchronize();
         
         cudaMemcpy(new_lines_index, d_new_lines_index, sizeof(unsigned int)*(num_lines+1), cudaMemcpyDeviceToHost);
-        //da capire cosa lasciare su GPU e cosa liberare
-        cudaFree(d_count);
-        cudaFree(d_filestring);
     }
 
     void get_filename(string path_filename){
@@ -590,7 +556,8 @@ public:
     }   
     
     void allocate_filestring(){
-        filestring = (char*)malloc(variants_size);
+        filestring = (char*)malloc(variants_size + 8);
+        memset(filestring, '\0', variants_size + 8);
     }
 
     void create_sample_vectors(int num_threads){
@@ -776,6 +743,7 @@ public:
                     alt_columns.alt_string.push_back(alt_string_tmp);
                     info_map[INFO.ID[i]] = 6;
                     var_columns.info_map1[INFO.ID[i]] = 6;
+                    
                 }
                 if(strcmp(&INFO.Type[i][0], "Flag")==0){ //Per ora non gestito
                     INFO.flags_alt++;
@@ -798,12 +766,22 @@ public:
                     info_map[INFO.ID[i]] = 2;
                     var_columns.info_map1[INFO.ID[i]] = 2;
                 } else if(strcmp(&INFO.Type[i][0], "String")==0){
-                    INFO.strings++;
-                    info_string_tmp.name = INFO.ID[i];
-                    info_string_tmp.i_string.resize(num_lines-1, "\0");
-                    var_columns.in_string.push_back(info_string_tmp);
-                    info_map[INFO.ID[i]] = 3;
-                    var_columns.info_map1[INFO.ID[i]] = 3;
+                    //TODO - implementazione temporanea start - TSA - per provare la metto negli int deterministici
+                    if(strcmp(INFO.ID[i].c_str(), "TSA")==0){
+                        INFO.ints++;
+                        info_int_tmp.name = INFO.ID[i];
+                        info_int_tmp.i_int.resize(num_lines-1, 0);
+                        var_columns.in_int.push_back(info_int_tmp);
+                        info_map[INFO.ID[i]] = 1;
+                        var_columns.info_map1[INFO.ID[i]] = 1;
+                    }else{ //TODO - implementazione temporanea end
+                        INFO.strings++;
+                        info_string_tmp.name = INFO.ID[i];
+                        info_string_tmp.i_string.resize(num_lines-1, "\0");
+                        var_columns.in_string.push_back(info_string_tmp);
+                        info_map[INFO.ID[i]] = 3;
+                        var_columns.info_map1[INFO.ID[i]] = 3;
+                    }
                 } else if(strcmp(&INFO.Type[i][0], "Flag")==0){
                     INFO.flags++;
                     info_flag_tmp.name = INFO.ID[i];
@@ -923,44 +901,146 @@ public:
         var_columns.qual.resize(num_lines-1);
         var_columns.filter.resize(num_lines-1);
     }
-    
-    void populate_var_columns(int num_threads){
+
+    void allocParamPointers(KernelParams **d_params, KernelParams *h_params) {
+        // Allocate memory for KernelParams on GPU
+        cudaMalloc((void**)d_params, sizeof(KernelParams));
+
+        // Copy the structure from host to device
+        cudaMemcpy(*d_params, h_params, sizeof(KernelParams), cudaMemcpyHostToDevice);
+    }
+
+    void populate_runner(){
         int threadsPerBlock = 1024;
         int blocksPerGrid = std::ceil(num_lines/threadsPerBlock);
+        cudaEvent_t kernel_done;
+        cudaEventCreate(&kernel_done);
+        //int threadsPerBlock = 1;
+        //int blocksPerGrid = 1;
+        auto start = chrono::system_clock::now();
+        cudaStream_t stream1, stream2;
+        cudaStreamCreate(&stream1);
+        cudaStreamCreate(&stream2);
+        if(samplesON){            
+            // Pass existing device pointers to h_params
+            h_params.line = d_filestring;
+            h_params.var_number = d_VC_var_number;
+            h_params.pos = d_VC_pos;
+            h_params.qual = d_VC_qual;
+            h_params.in_float = d_VC_in_float->i_float;
+            h_params.in_flag = d_VC_in_flag->i_flag;
+            h_params.in_int = d_VC_in_int->i_int;
+            h_params.float_name = d_VC_in_float->name;
+            h_params.flag_name = d_VC_in_flag->name;
+            h_params.int_name = d_VC_in_int->name;
+            h_params.new_lines_index = d_new_lines_index;
+            h_params.samp_var_id = d_SC_var_id;
+            h_params.samp_id = d_SC_samp_id;
+            h_params.samp_float = d_SC_samp_float->i_float;
+            h_params.samp_flag = d_SC_samp_flag->i_flag;
+            h_params.samp_int = d_SC_samp_int->i_int;
+            h_params.samp_float_name = d_SC_samp_float->name;
+            h_params.samp_flag_name = d_SC_samp_flag->name;
+            h_params.samp_int_name = d_SC_samp_int->name;
+            h_params.samp_float_numb = d_SC_samp_float->numb;
+            h_params.samp_flag_numb = d_SC_samp_flag->numb;
+            h_params.samp_int_numb = d_SC_samp_int->numb;
+            h_params.sample_GT = d_SC_sample_GT->GT;
+            h_params.numSample = samp_columns.numSample;
+            h_params.numLines = num_lines;
+            h_params.numGT = FORMAT.numGT;
 
-       if(samplesON){
-            get_vcf_line_format_kernel<<<blocksPerGrid, threadsPerBlock>>>(
-                d_filestring,
-                d_VC_var_number,
-                d_VC_pos,
-                d_VC_qual,
-                d_VC_in_float,
-                d_VC_in_flag,
-                d_VC_in_int,
-                d_new_lines_index,
-                d_SC_var_id,
-                d_SC_samp_id,
-                d_SC_samp_float,
-                d_SC_samp_flag,
-                d_SC_samp_int,
-                d_SC_sample_GT,
-                samp_columns.numSample,
-                num_lines,
-                FORMAT.numGT
-            );
-       }else{
+            // Allocate d_params and copy h_params to GPU
+            allocParamPointers(&d_params, &h_params);
+
+            // Launch kernel
+            get_vcf_line_format_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_params);
+            cudaEventRecord(kernel_done, stream1);
+            // Check for errors
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                fprintf(stderr, "CUDA error in kernel launch: %s\n", cudaGetErrorString(err));
+                exit(EXIT_FAILURE);
+            }
+        }else{
             get_vcf_line_kernel<<<blocksPerGrid, threadsPerBlock>>>(
                 d_filestring,
                 d_VC_var_number,
                 d_VC_pos,
                 d_VC_qual,
-                d_VC_in_float,
-                d_VC_in_flag,
-                d_VC_in_int,
+                d_VC_in_float->i_float,
+                d_VC_in_flag->i_flag,
+                d_VC_in_int->i_int,
+                d_VC_in_float->name,
+                d_VC_in_flag->name,
+                d_VC_in_int->name,
                 d_new_lines_index,
                 num_lines
             );
-       }
+            cudaEventRecord(kernel_done, stream1);
+            
+            // Controllo errori di lancio del kernel
+            cudaError_t err = cudaGetLastError();
+            if(err != cudaSuccess) {
+                fprintf(stderr, "Errore nel lancio di get_vcf_line_kernel: %s\n", cudaGetErrorString(err));
+                exit(EXIT_FAILURE);
+            }
+            
+        }
+        
+        cudaStreamWaitEvent(stream2, kernel_done, 0);
+        cudaMemcpyAsync(var_columns.var_number.data(), d_VC_var_number, (num_lines-1) * sizeof(unsigned int), cudaMemcpyDeviceToHost, stream2);
+        cudaMemcpyAsync(var_columns.pos.data(), d_VC_pos, (num_lines-1) * sizeof(unsigned int), cudaMemcpyDeviceToHost, stream2);
+        cudaMemcpyAsync(var_columns.qual.data(), d_VC_qual, (num_lines-1) * sizeof(__half), cudaMemcpyDeviceToHost, stream2);
+
+        for(int i=0; i<var_columns.in_float.size(); i++){
+            cudaMemcpyAsync(var_columns.in_float[i].i_float.data(), d_VC_in_float->i_float + i * (num_lines - 1), (num_lines-1)*sizeof(__half), cudaMemcpyDeviceToHost, stream2);
+        }
+
+        for(int i=0; i<var_columns.in_flag.size(); i++){
+            cudaMemcpyAsync(var_columns.in_flag[i].i_flag.data(), d_VC_in_flag->i_flag + i * (num_lines - 1), (num_lines-1)*sizeof(bool), cudaMemcpyDeviceToHost, stream2);
+        }
+
+        for(int i=0; i<var_columns.in_int.size(); i++){
+            cudaMemcpyAsync(var_columns.in_int[i].i_int.data(), d_VC_in_int->i_int + i * (num_lines - 1), (num_lines - 1) * sizeof(int), cudaMemcpyDeviceToHost, stream2);
+        }
+
+        if(samplesON){
+            cudaMemcpyAsync(samp_columns.var_id.data(), d_SC_var_id, (num_lines-1) * samp_columns.numSample * sizeof(unsigned int), cudaMemcpyDeviceToHost, stream2);
+            cudaMemcpyAsync(samp_columns.samp_id.data(), d_SC_samp_id, (num_lines-1) * samp_columns.numSample * sizeof(unsigned short), cudaMemcpyDeviceToHost, stream2);
+
+            for (int i = 0; i < samp_columns.samp_float.size(); i++) {
+                cudaMemcpyAsync(samp_columns.samp_float[i].i_float.data(), d_SC_samp_float->i_float + i * ((num_lines - 1) * samp_columns.numSample), 
+                    (num_lines-1) * samp_columns.numSample * sizeof(__half), cudaMemcpyDeviceToHost, stream2);
+            }
+
+            for (int i = 0; i < samp_columns.samp_flag.size(); i++) {
+                cudaMemcpyAsync(samp_columns.samp_flag[i].i_flag.data(), d_SC_samp_flag->i_flag + i * ((num_lines - 1) * samp_columns.numSample), 
+                    (num_lines-1) * samp_columns.numSample * sizeof(bool), cudaMemcpyDeviceToHost, stream2);
+            }
+
+            for (int i = 0; i < samp_columns.samp_int.size(); i++) {
+                cudaMemcpyAsync(samp_columns.samp_int[i].i_int.data(), d_SC_samp_int->i_int + i * ((num_lines - 1) * samp_columns.numSample), 
+                    (num_lines-1) * samp_columns.numSample * sizeof(int), cudaMemcpyDeviceToHost, stream2);
+            }   
+
+            for(int i=0; i<samp_columns.sample_GT.size(); i++){
+                cudaMemcpyAsync(samp_columns.sample_GT[i].GT.data(), &d_SC_sample_GT->GT + i * ((num_lines - 1) * samp_columns.numSample), 
+                    (num_lines-1)*samp_columns.numSample*sizeof(char), cudaMemcpyDeviceToHost, stream2);
+            } 
+        }
+        cudaStreamSynchronize(stream2);
+
+        // Cleanup
+        cudaEventDestroy(kernel_done);
+        cudaStreamDestroy(stream1);
+        cudaStreamDestroy(stream2);
+
+    }
+
+    void populate_var_columns(int num_threads){
+
+        std::thread worker_thread(&vcf_parsed::populate_runner, this);
 
         long batch_size = (num_lines-2+num_threads)/num_threads;
         
@@ -969,8 +1049,13 @@ public:
         
         alt_format_df tmp_alt_format[num_threads];
         int tmp_num_alt_format[num_threads];
+
         
-#pragma omp parallel
+        int totAlt = 0;
+        int totSampAlt = 0;
+
+
+#pragma omp parallel //TODO lentissimo
         {
             long start, end;
             int th_ID = omp_get_thread_num();
@@ -1065,159 +1150,178 @@ public:
                 }
 
                 tmp_alt[th_ID].numAlt = tmp_num_alt[th_ID];
-            }         
-        }
+            }
 
+            // Merge results in parallel
+            #pragma omp parallel for schedule(static) reduction(+:totAlt)
+            for (int i = 0; i < num_threads; i++) {
+                alt_columns.var_id.insert(
+                    alt_columns.var_id.end(),
+                    std::make_move_iterator(tmp_alt[i].var_id.begin()),
+                    std::make_move_iterator(tmp_alt[i].var_id.end())
+                );
+                alt_columns.alt_id.insert(
+                    alt_columns.alt_id.end(),
+                    std::make_move_iterator(tmp_alt[i].alt_id.begin()),
+                    std::make_move_iterator(tmp_alt[i].alt_id.end())
+                );
+                alt_columns.alt.insert(
+                    alt_columns.alt.end(),
+                    std::make_move_iterator(tmp_alt[i].alt.begin()),
+                    std::make_move_iterator(tmp_alt[i].alt.end())
+                );
+
+                for (int j = 0; j < INFO.ints_alt; j++) {
+                    alt_columns.alt_int[j].i_int.insert(
+                        alt_columns.alt_int[j].i_int.end(),
+                        std::make_move_iterator(tmp_alt[i].alt_int[j].i_int.begin()),
+                        std::make_move_iterator(tmp_alt[i].alt_int[j].i_int.end())
+                    );
+                }
+                for (int j = 0; j < INFO.floats_alt; j++) {
+                    alt_columns.alt_float[j].i_float.insert(
+                        alt_columns.alt_float[j].i_float.end(),
+                        std::make_move_iterator(tmp_alt[i].alt_float[j].i_float.begin()),
+                        std::make_move_iterator(tmp_alt[i].alt_float[j].i_float.end())
+                    );
+                }
+                for (int j = 0; j < INFO.strings_alt; j++) {
+                    alt_columns.alt_string[j].i_string.insert(
+                        alt_columns.alt_string[j].i_string.end(),
+                        std::make_move_iterator(tmp_alt[i].alt_string[j].i_string.begin()),
+                        std::make_move_iterator(tmp_alt[i].alt_string[j].i_string.end())
+                    );
+                }
+
+                #pragma omp atomic
+                totAlt += tmp_num_alt[i];
+            }
+
+            // Se ci sono campioni, parallelizziamo anche l'inserimento in alt_sample
+            if (samplesON) {
+                #pragma omp parallel for schedule(static) reduction(+:totSampAlt)
+                for (int i = 0; i < num_threads; i++) {
+                    alt_sample.var_id.insert(
+                        alt_sample.var_id.end(),
+                        std::make_move_iterator(tmp_alt_format[i].var_id.begin()),
+                        std::make_move_iterator(tmp_alt_format[i].var_id.end())
+                    );
+                    alt_sample.alt_id.insert(
+                        alt_sample.alt_id.end(),
+                        std::make_move_iterator(tmp_alt_format[i].alt_id.begin()),
+                        std::make_move_iterator(tmp_alt_format[i].alt_id.end())
+                    );
+                    alt_sample.samp_id.insert(
+                        alt_sample.samp_id.end(),
+                        std::make_move_iterator(tmp_alt_format[i].samp_id.begin()),
+                        std::make_move_iterator(tmp_alt_format[i].samp_id.end())
+                    );
+
+                    for (int j = 0; j < FORMAT.ints_alt; j++) {
+                        alt_sample.samp_int[j].i_int.insert(
+                            alt_sample.samp_int[j].i_int.end(),
+                            std::make_move_iterator(tmp_alt_format[i].samp_int[j].i_int.begin()),
+                            std::make_move_iterator(tmp_alt_format[i].samp_int[j].i_int.end())
+                        );
+                    }
+                    for (int j = 0; j < FORMAT.floats_alt; j++) {
+                        alt_sample.samp_float[j].i_float.insert(
+                            alt_sample.samp_float[j].i_float.end(),
+                            std::make_move_iterator(tmp_alt_format[i].samp_float[j].i_float.begin()),
+                            std::make_move_iterator(tmp_alt_format[i].samp_float[j].i_float.end())
+                        );
+                    }
+                    for (int j = 0; j < FORMAT.strings_alt; j++) {
+                        alt_sample.samp_string[j].i_string.insert(
+                            alt_sample.samp_string[j].i_string.end(),
+                            std::make_move_iterator(tmp_alt_format[i].samp_string[j].i_string.begin()),
+                            std::make_move_iterator(tmp_alt_format[i].samp_string[j].i_string.end())
+                        );
+                    }
+
+                    #pragma omp atomic
+                    totSampAlt += tmp_num_alt_format[i];
+                }
+            }
+        }
     //Here finish the parallel part and we merge the threads results
 
-        cudaDeviceSynchronize();
-        cudaMemcpy(var_columns.var_number.data(), d_VC_var_number, (num_lines-1)*sizeof(unsigned int), cudaMemcpyDeviceToHost);
-        cudaMemcpy(var_columns.pos.data(), d_VC_pos, (num_lines-1)*sizeof(unsigned int), cudaMemcpyDeviceToHost);
-        cudaMemcpy(var_columns.qual.data(), d_VC_qual, (num_lines-1)*sizeof(__half), cudaMemcpyDeviceToHost);
+        alt_columns.numAlt = totAlt;
+        alt_sample.numSample = totSampAlt;
 
-        for(int i=0; i<var_columns.in_float.size(); i++){
-            cudaMemcpy(var_columns.in_float[i].i_float.data(), d_VC_in_float->i_float + i * (num_lines - 1), (num_lines-1)*sizeof(__half), cudaMemcpyDeviceToHost);
-        }
-
-        for(int i=0; i<var_columns.in_flag.size(); i++){
-            cudaMemcpy(var_columns.in_flag[i].i_flag.data(), d_VC_in_flag->i_flag + i * (num_lines - 1), (num_lines-1)*sizeof(bool), cudaMemcpyDeviceToHost);
-        }
-
-        for(int i=0; i<var_columns.in_int.size(); i++){
-            cudaMemcpy(var_columns.in_int[i].i_int.data(), d_VC_in_int->i_int + i * (num_lines - 1), (num_lines - 1) * sizeof(int), cudaMemcpyDeviceToHost);
-        }
-
-        if(samplesON){
-            cudaMemcpy(samp_columns.var_id.data(), d_SC_var_id, (num_lines-1)*samp_columns.numSample*sizeof(unsigned int), cudaMemcpyDeviceToHost);
-            cudaMemcpy(samp_columns.samp_id.data(), d_SC_samp_id, (num_lines-1)*samp_columns.numSample*sizeof(unsigned short), cudaMemcpyDeviceToHost);
-
-            for(int i=0; i<samp_columns.samp_float.size(); i++){
-                cudaMemcpy(samp_columns.samp_float[i].i_float.data(), d_SC_samp_float->i_float + i * ((num_lines - 1) * samp_columns.numSample), (num_lines-1)*samp_columns.numSample*sizeof(__half), cudaMemcpyDeviceToHost);
-            }
-            
-            for(int i=0; i<samp_columns.samp_flag.size(); i++){
-                cudaMemcpy(samp_columns.samp_flag[i].i_flag.data(), d_SC_samp_flag->i_flag + i * ((num_lines - 1) * samp_columns.numSample), (num_lines - 1) * samp_columns.numSample * sizeof(bool), cudaMemcpyDeviceToHost);
-            }
-
-            for(int i=0; i<samp_columns.samp_int.size(); i++){
-                cudaMemcpy(samp_columns.samp_int[i].i_int.data(), d_SC_samp_int->i_int + i * ((num_lines - 1) * samp_columns.numSample), (num_lines-1)*samp_columns.numSample*sizeof(int), cudaMemcpyDeviceToHost);
-            }
-
-            for(int i=0; i<samp_columns.sample_GT.size(); i++){
-                cudaMemcpy(samp_columns.sample_GT[i].GT.data(), &d_SC_sample_GT->GT + i * ((num_lines - 1) * samp_columns.numSample), (num_lines-1)*samp_columns.numSample*sizeof(char), cudaMemcpyDeviceToHost);
-            }
-            
-        }
-
-        device_free();
-
-        int totAlt = 0;
-        int totSampAlt = 0;
-        for(int i=0; i<num_threads; i++){
-            alt_columns.var_id.insert(
-                alt_columns.var_id.end(),
-                std::make_move_iterator(tmp_alt[i].var_id.begin()),
-                std::make_move_iterator(tmp_alt[i].var_id.end())
-            );
-            alt_columns.alt_id.insert(
-                alt_columns.alt_id.end(),
-                std::make_move_iterator(tmp_alt[i].alt_id.begin()),
-                std::make_move_iterator(tmp_alt[i].alt_id.end())
-            );
-            alt_columns.alt.insert(
-                alt_columns.alt.end(),
-                std::make_move_iterator(tmp_alt[i].alt.begin()),
-                std::make_move_iterator(tmp_alt[i].alt.end())
-            );
-            for(int j=0; j<INFO.ints_alt; j++){
-                alt_columns.alt_int[j].i_int.insert(
-                    alt_columns.alt_int[j].i_int.end(), 
-                    std::make_move_iterator(tmp_alt[i].alt_int[j].i_int.begin()), 
-                    std::make_move_iterator(tmp_alt[i].alt_int[j].i_int.end()));
-            }
-            for(int j=0; j<INFO.floats_alt; j++){
-                alt_columns.alt_float[j].i_float.insert(
-                    alt_columns.alt_float[j].i_float.end(), 
-                    std::make_move_iterator(tmp_alt[i].alt_float[j].i_float.begin()), 
-                    std::make_move_iterator(tmp_alt[i].alt_float[j].i_float.end()));
-            }
-            for(int j=0; j<INFO.strings_alt; j++){
-                alt_columns.alt_string[j].i_string.insert(
-                    alt_columns.alt_string[j].i_string.end(), 
-                    std::make_move_iterator(tmp_alt[i].alt_string[j].i_string.begin()), 
-                    std::make_move_iterator(tmp_alt[i].alt_string[j].i_string.end()));
-            }
-            totAlt+=tmp_num_alt[i];
-        }
-        
-        if(samplesON){
-            for(int i=0; i<num_threads; i++){
-                alt_sample.var_id.insert(
-                    alt_sample.var_id.end(),
-                    std::make_move_iterator(tmp_alt_format[i].var_id.begin()),
-                    std::make_move_iterator(tmp_alt_format[i].var_id.end())
-                );
-                alt_sample.alt_id.insert(
-                    alt_sample.alt_id.end(),
-                    std::make_move_iterator(tmp_alt_format[i].alt_id.begin()),
-                    std::make_move_iterator(tmp_alt_format[i].alt_id.end())
-                );
-                alt_sample.samp_id.insert(
-                    alt_sample.samp_id.end(),
-                    std::make_move_iterator(tmp_alt_format[i].samp_id.begin()),
-                    std::make_move_iterator(tmp_alt_format[i].samp_id.end())
-                );
-                for(int j=0; j<FORMAT.ints_alt; j++){
-                    alt_sample.samp_int[j].i_int.insert(
-                        alt_sample.samp_int[j].i_int.end(), 
-                        std::make_move_iterator(tmp_alt_format[i].samp_int[j].i_int.begin()), 
-                        std::make_move_iterator(tmp_alt_format[i].samp_int[j].i_int.end()));
+        #pragma omp parallel
+        {
+            #pragma omp sections
+            {
+                #pragma omp section
+                {
+                    alt_columns.var_id.resize(totAlt);
+                    alt_columns.alt_id.resize(totAlt);
+                    alt_columns.alt.resize(totAlt);
                 }
-                for(int j=0; j<FORMAT.floats_alt; j++){
-                    alt_sample.samp_float[j].i_float.insert(
-                        alt_sample.samp_float[j].i_float.end(), 
-                        std::make_move_iterator(tmp_alt_format[i].samp_float[j].i_float.begin()), 
-                        std::make_move_iterator(tmp_alt_format[i].samp_float[j].i_float.end()));
-                }
-                for(int j=0; j<FORMAT.strings_alt; j++){
-                    alt_sample.samp_string[j].i_string.insert(
-                        alt_sample.samp_string[j].i_string.end(), 
-                        std::make_move_iterator(tmp_alt_format[i].samp_string[j].i_string.begin()), 
-                        std::make_move_iterator(tmp_alt_format[i].samp_string[j].i_string.end()));
-                }
-                totSampAlt+=tmp_num_alt_format[i];
-            }
 
-            alt_columns.numAlt = totAlt;
-            alt_columns.var_id.resize(totAlt);
-            alt_columns.alt_id.resize(totAlt);
-            alt_columns.alt.resize(totAlt);
-            for(int j=0; j<INFO.ints_alt; j++){
-                alt_columns.alt_int[j].i_int.resize(totAlt);
-            }
-            for(int j=0; j<INFO.floats_alt; j++){
-                alt_columns.alt_float[j].i_float.resize(totAlt);
-            }
-            for(int j=0; j<INFO.strings_alt; j++){
-                alt_columns.alt_string[j].i_string.resize(totAlt);
-            }
+                #pragma omp section
+                {
+                    for (int j = 0; j < INFO.ints_alt; j++) {
+                        alt_columns.alt_int[j].i_int.resize(totAlt);
+                    }
+                }
 
-            alt_sample.numSample = totSampAlt;
-            alt_sample.var_id.resize(totSampAlt);
-            alt_sample.samp_id.resize(totSampAlt);
-            alt_sample.alt_id.resize(totSampAlt);
-            for(int j=0; j<FORMAT.ints_alt; j++){
-                alt_sample.samp_int[j].i_int.resize(totSampAlt);
-            }
-            for(int j=0; j<FORMAT.floats_alt; j++){
-                alt_sample.samp_float[j].i_float.resize(totSampAlt);
-            }
-            for(int j=0; j<FORMAT.strings_alt; j++){
-                alt_sample.samp_string[j].i_string.resize(totSampAlt);
+                #pragma omp section
+                {
+                    for (int j = 0; j < INFO.floats_alt; j++) {
+                        alt_columns.alt_float[j].i_float.resize(totAlt);
+                    }
+                }
+
+                #pragma omp section
+                {
+                    for (int j = 0; j < INFO.strings_alt; j++) {
+                        alt_columns.alt_string[j].i_string.resize(totAlt);
+                    }
+                }
             }
         }
-        
+
+        if (samplesON) {
+            #pragma omp parallel
+            {
+                #pragma omp sections
+                {
+                    #pragma omp section
+                    {
+                        alt_sample.var_id.resize(totSampAlt);
+                        alt_sample.samp_id.resize(totSampAlt);
+                        alt_sample.alt_id.resize(totSampAlt);
+                    }
+
+                    #pragma omp section
+                    {
+                        for (int j = 0; j < FORMAT.ints_alt; j++) {
+                            alt_sample.samp_int[j].i_int.resize(totSampAlt);
+                        }
+                    }
+
+                    #pragma omp section
+                    {
+                        for (int j = 0; j < FORMAT.floats_alt; j++) {
+                            alt_sample.samp_float[j].i_float.resize(totSampAlt);
+                        }
+                    }
+
+                    #pragma omp section
+                    {
+                        for (int j = 0; j < FORMAT.strings_alt; j++) {
+                            alt_sample.samp_string[j].i_string.resize(totSampAlt);
+                        }
+                    }
+                }
+            }
+        }
+
+        worker_thread.join();    
     }
+    
 
 };
 

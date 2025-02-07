@@ -31,7 +31,7 @@ class var_columns_df
 {
 public:
     vector<unsigned int> var_number;
-    std::map<std::string, char> chrom_map;
+    std::map<std::string, unsigned char> chrom_map;
     vector<char> chrom;
     vector<unsigned int>pos;
     vector<string> id;
@@ -60,7 +60,7 @@ public:
                 find1 = true;
                 iter++;
                 if(chrom_map.find(tmp) == chrom_map.end()){
-                    chrom_map.insert(std::make_pair(tmp, (char)chrom_map.size()));
+                    chrom_map.insert(std::make_pair(tmp, (unsigned char)chrom_map.size()));
                 }
                 chrom[i] = chrom_map[tmp];
             }else{
@@ -251,7 +251,7 @@ public:
                 find1 = true;
                 iter++;
                 if(chrom_map.find(tmp) == chrom_map.end()){
-                    chrom_map.insert(std::make_pair(tmp, (char)chrom_map.size()));
+                    chrom_map.insert(std::make_pair(tmp, (unsigned char)chrom_map.size()));
                 }
                 chrom[i] = chrom_map[tmp];
             }else{
@@ -580,34 +580,103 @@ public:
         
     }
 
- void print(long num_lines){
-        int iter = (num_lines>var_number.size()) ? var_number.size() : num_lines;
-        for(long i=0; i<num_lines; i++){
-            cout << "Var" << var_number[i] << ":\t";
-            cout << chrom_map.find(std::string(1, chrom[i]))->first << "\t";
-            cout << to_string(pos[i]) << "\t";
-            cout << id[i] << "\t";
-            cout << ref[i] << "\t";
-            cout << filter_map.find(std::string(1, filter[i]))->first << "\t";
-
-            cout << "AAAAAAAA 1.1" << endl;
-
-            for(int j=0; j<in_flag.size(); j++){
-                cout<<in_flag[j].name<<": "<<in_flag[j].i_flag[i]<<", ";
+    void print(long num_lines) {
+        std::cout << "VarID\tChrom\tPos\tID\tRef\tFilter\tFlag\t\tInt\t\tFloat\t\tString" << std::endl;
+        long iter = (num_lines > static_cast<long>(id.size())) ? id.size() : num_lines;
+        
+        for (long i = 0; i < iter; i++) {
+            // Stampa VarID (presumibilmente var_number)
+            if (i < static_cast<long>(var_number.size()))
+                std::cout << var_number[i] << "\t";
+            else
+                std::cout << "nan\t";
+            
+            // Stampa Chrom: costruiamo la chiave da un singolo carattere
+            if (i < static_cast<long>(chrom.size())) {
+                std::string chromKey(1, chrom[i]);
+                auto itChrom = chrom_map.find(chromKey);
+                if (itChrom != chrom_map.end()) {
+                    std::cout << itChrom->first << "\t";
+                } else {
+                    std::cout << "nan\t";
+                }
+            } else {
+                std::cout << "nan\t";
             }
-            for(int j=0; j<in_int.size(); j++){
-                cout<<in_int[j].name<<": "<<in_int[j].i_int[i]<<", ";
+            
+            // Stampa Pos
+            if (i < static_cast<long>(pos.size()))
+                std::cout << pos[i] << "\t";
+            else
+                std::cout << "nan\t";
+            
+            // Stampa ID
+            if (i < static_cast<long>(id.size()))
+                std::cout << id[i] << "\t";
+            else
+                std::cout << "nan\t";
+            
+            // Stampa Ref
+            if (i < static_cast<long>(ref.size()))
+                std::cout << ref[i] << "\t";
+            else
+                std::cout << "nan\t";
+            
+            // Stampa Filter: costruiamo la chiave dal carattere in filter
+            if (i < static_cast<long>(filter.size())) {
+                std::string filterKey(1, filter[i]);
+                auto itFilter = filter_map.find(filterKey);
+                if (itFilter != filter_map.end()) {
+                    std::cout << itFilter->first << "\t";
+                } else {
+                    std::cout << "nan\t";
+                }
+            } else {
+                std::cout << "nan\t";
             }
-            for(int j=0; j<in_float.size(); j++){
-                cout<<in_float[j].name<<": "<< static_cast<float>(in_float[j].i_float[i])<<", ";
+            
+            /* Stampa i campi dei vettori info: Flag, Int, Float e String
+            // Si assume che ogni vettore info_xxx abbia la stessa dimensione (almeno per indice i)
+            // e che il campo 'name' contenga il nome della colonna.
+            
+            // Flag
+            for (size_t j = 0; j < in_flag.size(); j++) {
+                if (i < static_cast<long>(in_flag[j].i_flag.size()))
+                    std::cout << in_flag[j].name << ": " << in_flag[j].i_flag[i] << " ";
+                else
+                    std::cout << in_flag[j].name << ": nan ";
             }
-            for(int j=0; j<in_string.size(); j++){
-                cout<<in_string[j].name<<": "<<in_string[j].i_string[i]<<", ";
+            std::cout << "\t";
+            
+            // Int
+            for (size_t j = 0; j < in_int.size(); j++) {
+                if (i < static_cast<long>(in_int[j].i_int.size()))
+                    std::cout << in_int[j].name << ": " << in_int[j].i_int[i] << " ";
+                else
+                    std::cout << in_int[j].name << ": nan ";
             }
-            cout<<endl;
-
+            std::cout << "\t";
+            
+            // Float
+            for (size_t j = 0; j < in_float.size(); j++) {
+                if (i < static_cast<long>(in_float[j].i_float.size()))
+                    std::cout << in_float[j].name << ": " << static_cast<float>(in_float[j].i_float[i]) << " ";
+                else
+                    std::cout << in_float[j].name << ": nan ";
+            }
+            std::cout << "\t";
+            
+            // String
+            for (size_t j = 0; j < in_string.size(); j++) {
+                if (i < static_cast<long>(in_string[j].i_string.size()))
+                    std::cout << in_string[j].name << ": " << in_string[j].i_string[i] << " ";
+                else
+                    std::cout << in_string[j].name << ": nan ";
+            }
+            */
+            std::cout << std::endl;
         }
-    }    
+    }
 };
 
 #endif

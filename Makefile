@@ -15,7 +15,7 @@ VARCOL:
 
 GPU:
 	mkdir -p bin/
-	nvcc -arch=sm_89 -o ./bin/VCFparser ./src/CuFiles/main.cu -Xcompiler -fopenmp
+	nvcc -O3 -std=c++17 -arch=sm_89 -o ./bin/VCFparser ./src/CuFiles/main.cu -Xcompiler -fopenmp
 
 #poi lancialo con gcc --args
 DEBUG:

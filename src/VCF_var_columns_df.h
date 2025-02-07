@@ -70,7 +70,16 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
-                pos[i] = stoul(tmp);
+                try{
+                    pos[i] = stoul(tmp);
+                }catch(const std::exception& e){
+                    cout << "Stoul error: " << tmp << " iterazione: " << i << " Iter " <<iter << " What: "<< e.what() <<endl;
+                    for(int k = start; k < end; k++){
+                        cout << line[k];
+                    }
+                    cout << endl;
+                }
+                
             }else{
                 tmp += line[start+iter];
                 iter++;

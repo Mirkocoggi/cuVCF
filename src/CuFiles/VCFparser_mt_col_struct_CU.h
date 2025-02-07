@@ -10,6 +10,35 @@
 
 using namespace std;
 
+struct KernelParams {
+    char *line;
+    unsigned int *var_number;
+    unsigned int *pos;
+    __half *qual;
+    __half *in_float;
+    bool *in_flag;
+    int *in_int;
+    char* float_name;
+    char* flag_name;
+    char* int_name;
+    unsigned int *new_lines_index;
+    unsigned int *samp_var_id;
+    unsigned short *samp_id;
+    __half *samp_float;
+    bool *samp_flag;
+    int *samp_int;
+    char* samp_float_name;
+    char* samp_flag_name;
+    char* samp_int_name;
+    int* samp_float_numb;
+    int* samp_flag_numb;
+    int* samp_int_numb;
+    char *sample_GT;
+    int numSample;
+    unsigned int numLines;
+    int numGT;
+};
+
 struct info_flag
 {
     vector<uint8_t> i_flag;

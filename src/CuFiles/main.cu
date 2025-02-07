@@ -81,9 +81,11 @@ int main(int argc, char *argv[]){
     vcf.run(vcf_filename, num_threadss);
 
     //vcf.print_header();
-    vcf.alt_columns.print(10);
-    vcf.samp_columns.print(10); //TOTO: controlla come riprendi i dati da GPU
-    vcf.alt_sample.print(10);
+    //cout << "Start printing:" << endl;
+    //vcf.var_columns.print(10);
+    //vcf.alt_columns.print(10);
+    //vcf.samp_columns.print(10); //TOTO: controlla come riprendi i dati da GPU
+    //vcf.alt_sample.print(10);
 
     return 0;
 }

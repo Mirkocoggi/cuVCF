@@ -531,6 +531,8 @@ public:
             }else if(/*fai il punto*/ false){
                 
             }else{
+                
+
                 //in progress, se num > 1 TODO
                 // Può avere solo come valori: 0, 1, R, A, G, .
             }

@@ -206,8 +206,9 @@ __device__ half safeStof(const char* tmp) {
     return __float2half(value);
 }
 
+
 __global__ static void get_vcf_line_kernel(char *line, unsigned int *var_number, unsigned int *pos, __half *qual,
-            info_float_d *in_float, info_flag_d *in_flag, info_int_d *in_int, unsigned int *new_lines_index, unsigned int numLines)
+            __half *in_float, bool *in_flag, int *in_int, char* float_name, char* flag_name, char* int_name, unsigned int *new_lines_index, unsigned int numLines)
 {
     long thID =  threadIdx.x + blockIdx.x * blockDim.x;
     if(thID>=numLines){
@@ -241,29 +242,29 @@ __global__ static void get_vcf_line_kernel(char *line, unsigned int *var_number,
     var_number[thID] = thID;
 
     //Chromosome - CPU
-    while (line[start + iter] != '\t' && line[start + iter] != ' ') {
+    while (__ldg(&line[start + iter]) != '\t' && __ldg(&line[start + iter]) != ' ') {
         iter++;
     }
     iter++;
 
     //Position
     reset_tmp();
-    while (line[start + iter] != '\t' && line[start + iter] != ' ') {
-        append_tmp(line[start + iter]);
+    while (__ldg(&line[start + iter]) != '\t' && __ldg(&line[start + iter]) != ' ') {
+        append_tmp(__ldg(&line[start + iter]));
         iter++;
     }
     iter++;
     pos[thID] = cuda_atol(tmp);
-
+    
     reset_tmp();
     find1=false;
     while(!find1){
-        if(line[start+iter]=='\t'||line[start+iter]==' '){
+        if(__ldg(&line[start+iter])=='\t'||__ldg(&line[start+iter])==' '){
             find1 = true;
             iter++;
             pos[thID] = cuda_stoul(tmp);
         }else{
-            append_tmp(line[start+iter]);
+            append_tmp(__ldg(&line[start+iter]));
             iter++;
         }
     }
@@ -271,7 +272,7 @@ __global__ static void get_vcf_line_kernel(char *line, unsigned int *var_number,
     //ID - CPU
     reset_tmp();
     find1=false;
-    while (line[start + iter] != '\t' && line[start + iter] != ' ') {
+    while (__ldg(&line[start + iter]) != '\t' && __ldg(&line[start + iter]) != ' ') {
         iter++;
     }
     iter++;
@@ -279,7 +280,7 @@ __global__ static void get_vcf_line_kernel(char *line, unsigned int *var_number,
     //Reference - CPU
     reset_tmp();
     find1=false;
-    while (line[start + iter] != '\t' && line[start + iter] != ' ') {
+    while (__ldg(&line[start + iter]) != '\t' && __ldg(&line[start + iter]) != ' ') {
         iter++;
     }
     iter++;
@@ -287,15 +288,15 @@ __global__ static void get_vcf_line_kernel(char *line, unsigned int *var_number,
     //Alternative - CPU
     reset_tmp();
     find1=false;
-    while (line[start + iter] != '\t' && line[start + iter] != ' ') {
+    while (__ldg(&line[start + iter]) != '\t' && __ldg(&line[start + iter]) != ' ') {
         iter++;
     }
     iter++;
 
     //Quality
     reset_tmp();
-    while (line[start + iter] != '\t' && line[start + iter] != ' ' && line[start + iter] != '\n') {
-        append_tmp(line[start + iter]);
+    while (__ldg(&line[start + iter]) != '\t' && __ldg(&line[start + iter]) != ' ' && __ldg(&line[start + iter]) != '\n') {
+        append_tmp(__ldg(&line[start + iter]));
         ++iter;
     }
     ++iter;
@@ -304,15 +305,15 @@ __global__ static void get_vcf_line_kernel(char *line, unsigned int *var_number,
     //Filter
     reset_tmp();
     find1=false;
-    while (line[start + iter] != '\t' && line[start + iter] != ' ') {
+    while (__ldg(&line[start + iter]) != '\t' && __ldg(&line[start + iter]) != ' ') {
         iter++;
     }
     iter++;
 
     // Info field (semicolon-separated key-value pairs)
     reset_tmp();
-    while (line[start + iter] != '\t' && line[start + iter] != '\n') {
-        append_tmp(line[start + iter]);
+    while (__ldg(&line[start + iter]) != '\t' && __ldg(&line[start + iter]) != '\n') {
+        append_tmp(__ldg(&line[start + iter]));
         ++iter;
     }
     ++iter;
@@ -337,35 +338,46 @@ __global__ static void get_vcf_line_kernel(char *line, unsigned int *var_number,
         if (type == INT) {
             // Process INT type
             int el = 0;
-            while (cuda_strcmp(in_int[el].name, key) != 0 && el < NUM_KEYS_MAP1) ++el;
+            while (cuda_strcmp(&int_name[el*16], key) != 0 && el < NUM_KEYS_MAP1) ++el;
             if (el < NUM_KEYS_MAP1) {
-                in_int[el].i_int[thID] = cuda_atoi(value);
+                if(cuda_strcmp(&int_name[el*16], "TSA")){ //TODO tmp implementation per TSA
+                    if(!cuda_strcmp(value, "SNV")){
+                        in_int[el*numLines+thID] = 0;
+                    }else if(!cuda_strcmp(value, "INS") || !cuda_strcmp(value, "insertion")){
+                        in_int[el*numLines+thID] = 1;
+                    }else if(!cuda_strcmp(value, "DEL") || !cuda_strcmp(value, "deletion")){
+                        in_int[el*numLines+thID] = 2;
+                    }else if(!cuda_strcmp(value, "INV") || !cuda_strcmp(value, "inversion")){
+                        in_int[el*numLines+thID] = 3;
+                    }else{
+                        in_int[el*numLines+thID] = 4;
+                    }
+                }else{
+                    in_int[el*numLines+thID] = cuda_atoi(value);
+                }                
             }
         } else if (type == FLOAT) {
             // Process FLOAT type
             int el = 0;
-            while (cuda_strcmp(in_float[el].name, key) != 0 && el < NUM_KEYS_MAP1) ++el;
+            while (cuda_strcmp(&float_name[el*16], key) != 0 && el < NUM_KEYS_MAP1) ++el;
             if (el < NUM_KEYS_MAP1) {
-                in_float[el].i_float[thID] = safeStof(value);
+                in_float[el*numLines+thID] = safeStof(value);
             }
         } else if (type == FLAG) {
             // Process FLAG type
             int el = 0;
-            while (cuda_strcmp(in_flag[el].name, key) != 0 && el < NUM_KEYS_MAP1) ++el;
+            while (cuda_strcmp(&flag_name[el*16], key) != 0 && el < NUM_KEYS_MAP1) ++el;
             if (el < NUM_KEYS_MAP1) {
-                in_flag[el].i_flag[thID] = 1;
+                in_flag[el*numLines+thID] = 1;
             }
         }
     }
 }
 
-__global__ static void get_vcf_line_format_kernel(char *line, unsigned int *var_number, unsigned int *pos, __half *qual,
-            info_float_d *in_float, info_flag_d *in_flag, info_int_d *in_int, unsigned int *new_lines_index,
-            unsigned int *samp_var_id, unsigned short *samp_id, samp_Float_d *samp_float, samp_Flag_d *samp_flag,
-            samp_Int_d *samp_int, samp_GT_d *sample_GT, int numSample, unsigned int numLines, int numGT /*FORMAT.numGT*/)
+__global__ static void get_vcf_line_format_kernel(KernelParams* params)
 {
     long thID =  threadIdx.x + blockIdx.x * blockDim.x;
-    if(thID>=numLines){
+    if(thID>=params->numLines){
         return;
     }
 
@@ -377,7 +389,7 @@ __global__ static void get_vcf_line_format_kernel(char *line, unsigned int *var_
     //vector<string> tmp_split;
     //vector<string> tmp_format_split;
     //vector<string> tmp_subSplit;
-    long start = new_lines_index[thID];
+    long start = params->new_lines_index[thID];
     int tmp_idx;
 
     // Reset temp string
@@ -393,32 +405,32 @@ __global__ static void get_vcf_line_format_kernel(char *line, unsigned int *var_
     };
     
     //Var Number
-    var_number[thID] = thID;
+    params->var_number[thID] = thID;
 
     //Chromosome - CPU
-    while (line[start + iter] != '\t' && line[start + iter] != ' ') {
+    while (params->line[start + iter] != '\t' && params->line[start + iter] != ' ') {
         iter++;
     }
     iter++;
-
+    printf("AAAAAAAAAAAAAAA 1\n");
     //Position
     reset_tmp();
-    while (line[start + iter] != '\t' && line[start + iter] != ' ') {
-        append_tmp(line[start + iter]);
+    while (params->line[start + iter] != '\t' && params->line[start + iter] != ' ') {
+        append_tmp(params->line[start + iter]);
         iter++;
     }
     iter++;
-    pos[thID] = cuda_atol(tmp);
+    params->pos[thID] = cuda_atol(tmp);
 
     reset_tmp();
     find1=false;
     while(!find1){
-        if(line[start+iter]=='\t'||line[start+iter]==' '){
+        if(params->line[start+iter]=='\t'||params->line[start+iter]==' '){
             find1 = true;
             iter++;
-            pos[thID] = cuda_stoul(tmp);
+            params->pos[thID] = cuda_stoul(tmp);
         }else{
-            append_tmp(line[start+iter]);
+            append_tmp(params->line[start+iter]);
             iter++;
         }
     }
@@ -426,7 +438,7 @@ __global__ static void get_vcf_line_format_kernel(char *line, unsigned int *var_
     //ID - CPU
     reset_tmp();
     find1=false;
-    while (line[start + iter] != '\t' && line[start + iter] != ' ') {
+    while (params->line[start + iter] != '\t' && params->line[start + iter] != ' ') {
         iter++;
     }
     iter++;
@@ -434,7 +446,7 @@ __global__ static void get_vcf_line_format_kernel(char *line, unsigned int *var_
     //Reference - CPU
     reset_tmp();
     find1=false;
-    while (line[start + iter] != '\t' && line[start + iter] != ' ') {
+    while (params->line[start + iter] != '\t' && params->line[start + iter] != ' ') {
         iter++;
     }
     iter++;
@@ -442,32 +454,32 @@ __global__ static void get_vcf_line_format_kernel(char *line, unsigned int *var_
     //Alternative - CPU
     reset_tmp();
     find1=false;
-    while (line[start + iter] != '\t' && line[start + iter] != ' ') {
+    while (params->line[start + iter] != '\t' && params->line[start + iter] != ' ') {
         iter++;
     }
     iter++;
 
     //Quality
     reset_tmp();
-    while (line[start + iter] != '\t' && line[start + iter] != ' ' && line[start + iter] != '\n') {
-        append_tmp(line[start + iter]);
+    while (params->line[start + iter] != '\t' && params->line[start + iter] != ' ' && params->line[start + iter] != '\n') {
+        append_tmp(params->line[start + iter]);
         ++iter;
     }
     ++iter;
-    qual[thID] = (cuda_strcmp(tmp, ".") == 0) ? __float2half(0.0f) : safeStof(tmp);
+    params->qual[thID] = (cuda_strcmp(tmp, ".") == 0) ? __float2half(0.0f) : safeStof(tmp);
     
     //Filter
     reset_tmp();
     find1=false;
-    while (line[start + iter] != '\t' && line[start + iter] != ' ') {
+    while (params->line[start + iter] != '\t' && params->line[start + iter] != ' ') {
         iter++;
     }
     iter++;
 
     // Info field (semicolon-separated key-value pairs)
     reset_tmp();
-    while (line[start + iter] != '\t' && line[start + iter] != '\n') {
-        append_tmp(line[start + iter]);
+    while (params->line[start + iter] != '\t' && params->line[start + iter] != '\n') {
+        append_tmp(params->line[start + iter]);
         ++iter;
     }
     ++iter;
@@ -492,23 +504,23 @@ __global__ static void get_vcf_line_format_kernel(char *line, unsigned int *var_
         if (type == INT) {
             // Process INT type
             int el = 0;
-            while (cuda_strcmp(in_int[el].name, key) != 0 && el < NUM_KEYS_MAP1) ++el;
+            while (cuda_strcmp(&(params->int_name[el*16]), key) != 0 && el < NUM_KEYS_MAP1) ++el;
             if (el < NUM_KEYS_MAP1) {
-                in_int[el].i_int[thID] = cuda_atoi(value);
+                params->in_int[el*params->numLines+thID] = cuda_atoi(value);
             }
         } else if (type == FLOAT) {
             // Process FLOAT type
             int el = 0;
-            while (cuda_strcmp(in_float[el].name, key) != 0 && el < NUM_KEYS_MAP1) ++el;
+            while (cuda_strcmp(&(params->float_name[el*16]), key) != 0 && el < NUM_KEYS_MAP1) ++el;
             if (el < NUM_KEYS_MAP1) {
-                in_float[el].i_float[thID] = safeStof(value);
+                params->in_float[el*params->numLines+thID] = safeStof(value);
             }
         } else if (type == FLAG) {
             // Process FLAG type
             int el = 0;
-            while (cuda_strcmp(in_flag[el].name, key) != 0 && el < NUM_KEYS_MAP1) ++el;
+            while (cuda_strcmp(&(params->flag_name[el*16]), key) != 0 && el < NUM_KEYS_MAP1) ++el;
             if (el < NUM_KEYS_MAP1) {
-                in_flag[el].i_flag[thID] = 1;
+                params->in_flag[el*params->numLines+thID] = 1;
             }
         }
     }
@@ -585,24 +597,24 @@ __global__ static void get_vcf_line_format_kernel(char *line, unsigned int *var_
 
     // Parse Format's template
     while (!find1) {
-        if (line[start + iter] == '\t' || line[start + iter] == ' ') {
+        if (params->line[start + iter] == '\t' || params->line[start + iter] == ' ') {
             find1 = true;
             iter++;
             // Split the `tmp` buffer into format tokens using ':' as delimiter
             split(tmp, ':', tmp_split); // `split` populates `tmp_split` and updates `token_count`
         } else {
-            append_tmp(line[start + iter]);
+            append_tmp(params->line[start + iter]);
             iter++;
         }
     }
 
     // Process each sample
-    for (int samp = 0; samp < numSample; samp++) {
+    for (int samp = 0; samp < params->numSample; samp++) {
         reset_tmp();
         find1 = false;
 
         while (!find1) {
-            if (line[start + iter] == '\t' || line[start + iter] == ' ' || line[start + iter] == '\n') {
+            if (params->line[start + iter] == '\t' || params->line[start + iter] == ' ' || params->line[start + iter] == '\n') {
                 find1 = true;
                 iter++;
                 // Split the tmp buffer into sample tokens
@@ -615,36 +627,36 @@ __global__ static void get_vcf_line_format_kernel(char *line, unsigned int *var_
                     while (!find_type) {
                         if (cuda_strcmp(tmp_split[j], "GT") == 0) {
                             // Process GT (Genotype)
-                            samp_var_id[thID * numSample + samp] = var_number[thID];
-                            samp_id[thID * numSample + samp] = static_cast<unsigned short>(samp);
+                            params->samp_var_id[thID * params->numSample + samp] = params->var_number[thID];
+                            params->samp_id[thID * params->numSample + samp] = static_cast<unsigned short>(samp);
 
-                            if (numGT > 1) {
+                            if (params->numGT > 1) {
                                 char sub_split[MAX_TOKENS][MAX_TOKEN_LEN];
                                 int num_gt_tokens = split(tmp_split[j], ',', sub_split);
 
-                                for (int k = 0; k < sample_GT->numb[0]; k++) {
-                                    sample_GT[k].GT[thID * numSample + samp] = getValueFromKeyGT(sub_split[k]);
+                                for (int k = 0; k < params->numGT; k++) {
+                                    params->sample_GT[(k*params->numLines)+(thID*params->numSample)+samp] = getValueFromKeyGT(sub_split[k]);
                                 }
-                            } else if (numGT == 1) {
-                                sample_GT[0].GT[thID * numSample + samp] = getValueFromKeyGT(tmp_split[j]);
+                            } else if (params->numGT == 1) {
+                                params->sample_GT[thID * params->numSample + samp] = getValueFromKeyGT(tmp_split[j]);
                             }
                             find_type = true;
                         } else if (getValueFromKeyMap1(tmp_split[j]) == INT_FORMAT) {
                             // Process INT format
-                            samp_var_id[thID * numSample + samp] = var_number[thID];
-                            samp_id[thID * numSample + samp] = samp;
+                            params->samp_var_id[thID * params->numSample + samp] = params->var_number[thID];
+                            params->samp_id[thID * params->numSample + samp] = samp;
 
                             int el = 0;
                             while (!find_elem) {
-                                if (cuda_strncmp(samp_int[el].name, tmp_split[j], MAX_TOKEN_LEN) == 0) {
-                                    if (samp_int->numb[el] == 1) {
-                                        samp_int[el].i_int[thID * numSample + samp] = cuda_atoi(tmp_split[j]);
+                                if (cuda_strncmp(&(params->samp_int_name[el*16]), tmp_split[j], MAX_TOKEN_LEN) == 0) {
+                                    if (params->samp_int_numb[el] == 1) {
+                                        params->samp_int[(el*params->numLines)+(thID*params->numSample)+samp] = cuda_atoi(tmp_split[j]);
                                     } else {
                                         char sub_split[MAX_TOKENS][MAX_TOKEN_LEN];
                                         int num_int_tokens = split(tmp_split[j], ',', sub_split);
 
-                                        for (int i = 0; i < samp_int->numb[el]; i++) {
-                                            samp_int[el + i].i_int[thID * numSample + samp] = cuda_atoi(sub_split[i]);
+                                        for (int i = 0; i < params->samp_int_numb[el]; i++) {
+                                            params->samp_int[((el+i)*params->numLines) + ((thID*params->numSample)+samp)]= cuda_atoi(sub_split[i]);
                                         }
                                     }
                                     find_elem = true;
@@ -654,20 +666,20 @@ __global__ static void get_vcf_line_format_kernel(char *line, unsigned int *var_
                             find_type = true;
                         } else if (getValueFromKeyMap1(tmp_split[j]) == FLOAT_FORMAT) {
                             // Process FLOAT format
-                            samp_var_id[thID * numSample + samp] = var_number[thID];
-                            samp_id[thID * numSample + samp] = samp;
+                            params->samp_var_id[thID * params->numSample + samp] = params->var_number[thID];
+                            params->samp_id[thID * params->numSample + samp] = samp;
 
                             int el = 0;
                             while (!find_elem) {
-                                if (cuda_strncmp(&samp_float->name[el], tmp_split[j], MAX_TOKEN_LEN) == 0) {
-                                    if (samp_float->numb[el] == 1) {
-                                        samp_float[el].i_float[thID * numSample + samp] = safeStof(tmp_split[j]);
+                                if (cuda_strncmp(&(params->samp_float_name[el*16]), tmp_split[j], MAX_TOKEN_LEN) == 0) {
+                                    if (params->samp_float_numb[el] == 1) {
+                                        params->samp_float[(el*params->numLines)+(thID*params->numSample)+samp] = safeStof(tmp_split[j]);
                                     } else {
                                         char sub_split[MAX_TOKENS][MAX_TOKEN_LEN];
                                         int num_float_tokens = split(tmp_split[j], ',', sub_split);
 
-                                        for (int i = 0; i < samp_float->numb[el]; i++) {
-                                            samp_float[el + i].i_float[thID * numSample + samp] = safeStof(sub_split[i]);
+                                        for (int i = 0; i < params->samp_float_numb[el]; i++) {
+                                            params->samp_float[((el+i)*params->numLines) + ((thID*params->numSample)+samp)] = safeStof(sub_split[i]);
                                         }
                                     }
                                     find_elem = true;
@@ -681,7 +693,7 @@ __global__ static void get_vcf_line_format_kernel(char *line, unsigned int *var_
                     }
                 }
             } else {
-                append_tmp(line[start + iter]);
+                append_tmp(params->line[start + iter]);
                 iter++;
             }
         }
