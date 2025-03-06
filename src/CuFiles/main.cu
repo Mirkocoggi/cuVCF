@@ -1,8 +1,4 @@
-//#include "VCFparser_mt_col_struct_CU.h"
-//#include "VCF_CUDA_implementation.cu"
-#include "VCF_parsed.cu"
-//#include "VCF_var_columns_df_CU.h"
-
+#include "Parser.cu"
 #include <cuda_runtime.h>     
 #include <cuda_fp16.h>  
 #include <thrust/device_ptr.h> 
@@ -15,35 +11,6 @@
 #include <unistd.h>
 #include <map>
 #include <omp.h> 
-
-//Securely unzip the file
-void unzip_gz_file(char* vcf_filename) {
-    // Check the extension ".gz"
-    if (strcmp(vcf_filename + strlen(vcf_filename) - 3, ".gz") == 0) {
-        pid_t pid = fork();
-        if (pid == 0) {
-            // Child proces
-            execlp("gzip", "gzip", "-df", vcf_filename, nullptr);
-            // If execlp fails
-            cout<< "ERROR: Failed to execute gzip command" << std::endl;
-            exit(EXIT_FAILURE);
-        } else if (pid > 0) {
-            // Parent proces waits for the child proces
-            int status;
-            waitpid(pid, &status, 0);
-            if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-                // Remove ".gz" from the filename
-                char* mutable_vcf_filename = const_cast<char*>(vcf_filename);
-                mutable_vcf_filename[strlen(vcf_filename) - 3] = '\0';
-            } else {
-                cout<< "ERROR: cannot unzip file" << std::endl;
-            }
-        } else {
-            // Error in the fork() call
-            cout<< "ERROR: Failed to fork process" << std::endl;
-        }
-    }
-}
 
 
 int main(int argc, char *argv[]){
@@ -81,11 +48,11 @@ int main(int argc, char *argv[]){
     vcf.run(vcf_filename, num_threadss);
 
     //vcf.print_header();
-    //cout << "Start printing:" << endl;
-    //vcf.var_columns.print(10);
-    //vcf.alt_columns.print(10);
-    //vcf.samp_columns.print(10); //TOTO: controlla come riprendi i dati da GPU
-    //vcf.alt_sample.print(10);
+    cout << "Start printing:" << endl;
+    vcf.var_columns.print(10);
+    vcf.alt_columns.print(10);
+    vcf.samp_columns.print(10); //TOTO: controlla come riprendi i dati da GPU
+    vcf.alt_sample.print(10);
 
     return 0;
 }

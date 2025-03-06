@@ -1,19 +1,18 @@
-#ifndef VCF_PARCED_CU_H
-#define VCF_PARCED_CU_H
+#ifndef Parser_H
+#define Parser_H
 
-#include "VCFparser_mt_col_struct_CU.h"
-#include "VCF_CUDA_implementation.cu"
-//#include "VCF_var_columns_df_CU.h"
+#include "DataStructures.h"
+#include "Kernels.cu"
+#include "Utils.h"
+#include "DataFrames.h"
 
-#include <cuda_runtime.h>     
+#include <cuda_runtime.h>
 #include <cuda_fp16.h>  
 #include <thrust/device_ptr.h> 
 #include <thrust/sort.h>
 #include <boost/algorithm/string.hpp>
 #include <chrono>
 #include <fstream>
-#include <filesystem>
-#include <sys/wait.h>
 #include <unistd.h>
 #include <map>
 #include <omp.h> 
@@ -63,34 +62,6 @@ public:
     samp_Int_d *d_SC_samp_int = (samp_Int_d*)malloc(sizeof(samp_Int_d));
     samp_GT_d *d_SC_sample_GT = (samp_GT_d*)malloc(sizeof(samp_GT_d));
 
-    void unzip_gz_file(char* vcf_filename) {
-        // Check the extension ".gz"
-        if (strcmp(vcf_filename + strlen(vcf_filename) - 3, ".gz") == 0) {
-            pid_t pid = fork();
-            if (pid == 0) {
-                // Child proces
-                execlp("gzip", "gzip", "-df", vcf_filename, nullptr);
-                // If execlp fails
-                cout<< "ERROR: Failed to execute gzip command" << std::endl;
-                exit(EXIT_FAILURE);
-            } else if (pid > 0) {
-                // Parent proces waits for the child proces
-                int status;
-                waitpid(pid, &status, 0);
-                if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-                    // Remove ".gz" from the filename
-                    char* mutable_vcf_filename = const_cast<char*>(vcf_filename);
-                    mutable_vcf_filename[strlen(vcf_filename) - 3] = '\0';
-                } else {
-                    cout<< "ERROR: cannot unzip file" << std::endl;
-                }
-            } else {
-                // Error in the fork() call
-                cout<< "ERROR: Failed to fork process" << std::endl;
-            }
-        }
-    }
-
     void run(char* vcf_filename, int num_threadss){
         string filename = vcf_filename; 
         string line;
@@ -135,7 +106,7 @@ public:
             gridDim[1] = prop.maxGridSize[1];
             gridDim[2] = prop.maxGridSize[2];
 
-            /*Print the saved values
+            //Print the saved values
             std::cout << "Device Information:" << std::endl;
             std::cout << "Global memory: " << globalMemory / (1024.0 * 1024.0) << " MB" << std::endl;
             std::cout << "Shared memory per block: " << sharedMemory / 1024.0 << " KB" << std::endl;
@@ -143,7 +114,7 @@ public:
             std::cout << "Texture alignment: " << textureAlignment << " bytes" << std::endl;
             std::cout << "Maximum threads per block: " << maxThreadsPerBlock << std::endl;
             std::cout << "Threads per block dimensions: " << threadsDim[0] << " x " << threadsDim[1] << " x " << threadsDim[2] << std::endl;
-            std::cout << "Grid dimensions: " << gridDim[0] << " x " << gridDim[1] << " x " << gridDim[2] << std::endl;*/
+            std::cout << "Grid dimensions: " << gridDim[0] << " x " << gridDim[1] << " x " << gridDim[2] << std::endl;
         } else {
             std::cerr << "Failed to query device properties: " << cudaGetErrorString(err) << std::endl;
         }
@@ -160,10 +131,10 @@ public:
             cout << "ERROR: cannot open file " << filename << endl;
         }
         // Saving filename
-        get_filename(filename);
+        filename = get_filename(filename, path_to_filename);
         
         // Getting filesize (number of char in the file)
-        get_file_size(filename);
+        file_size = get_file_size(filename);
         // Getting the header (Saving the header into a string and storing the header size )
 
         get_and_parse_header(&inFile); //serve per separare l'header dal resto del file
@@ -180,7 +151,6 @@ public:
         //Allocate and initialize device memory
         device_allocation();
         populate_var_columns(num_threadss);
-
         device_free();
         /*
         cout << "Get file size: " << get_file_size << " s" << endl;
@@ -377,7 +347,7 @@ public:
         auto before = chrono::system_clock::now();
         long batch_infile = (variants_size - 1 + num_threads)/num_threads; // Number of characters each thread will process  
               
-#pragma omp parallel
+        #pragma omp parallel
         {
             int thr_ID = omp_get_thread_num();
             ifstream infile(w_filename); // Open the same file with an ifstream in each thread
@@ -452,17 +422,6 @@ public:
         cudaDeviceSynchronize();
         
         cudaMemcpy(new_lines_index, d_new_lines_index, sizeof(unsigned int)*(num_lines+1), cudaMemcpyDeviceToHost);
-    }
-
-    void get_filename(string path_filename){
-        vector<string> line_el;
-        path_to_filename = path_filename;
-        boost::split(line_el, path_filename, boost::is_any_of("/"));
-        filename = line_el[line_el.size()-1];
-    }
-    
-    void get_file_size(string filename){
-        filesize = filesystem::file_size(filename);
     }
     
     void get_header(ifstream *file){
@@ -962,6 +921,13 @@ public:
                 fprintf(stderr, "CUDA error in kernel launch: %s\n", cudaGetErrorString(err));
                 exit(EXIT_FAILURE);
             }
+
+            //TODO - Da rimuovere questa sinchronize utile per debugging:
+            //err = cudaDeviceSynchronize();
+            //if (err != cudaSuccess) {
+            //    fprintf(stderr, "CUDA error in kernel execution: %s\n", cudaGetErrorString(err));
+            //    exit(EXIT_FAILURE);
+            //}
         }else{
             get_vcf_line_kernel<<<blocksPerGrid, threadsPerBlock>>>(
                 d_filestring,
@@ -1054,8 +1020,7 @@ public:
         int totAlt = 0;
         int totSampAlt = 0;
 
-
-#pragma omp parallel //TODO lentissimo
+        #pragma omp parallel //TODO lentissimo
         {
             long start, end;
             int th_ID = omp_get_thread_num();
@@ -1083,12 +1048,10 @@ public:
                     tmp_alt_format[th_ID].sample_GT.GT.resize(batch_size*2*samp_columns.numSample, (char)0),
                     tmp_alt_format[th_ID].initMapGT();
                 }
-                
                 // For each line in the batch
-                for(long i=start; i<end && i<num_lines-1; i++){ 
+                for(long i=start; i<end && i<num_lines-1; i++){
                     var_columns.get_vcf_line_in_var_columns_format(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]), &samp_columns, &FORMAT, &(tmp_num_alt_format[th_ID]), &(tmp_alt_format[th_ID]));
                 }
-                
                 tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
                 tmp_alt[th_ID].alt_id.resize(tmp_num_alt[th_ID]);
                 tmp_alt[th_ID].alt.resize(tmp_num_alt[th_ID]);
@@ -1105,7 +1068,6 @@ public:
                 for(int i=0; i<INFO.strings_alt; i++){
                     tmp_alt[th_ID].alt_string[i].i_string.resize(tmp_num_alt[th_ID]);
                 }
-
                 tmp_alt[th_ID].numAlt = tmp_num_alt[th_ID];
                 tmp_alt_format[th_ID].var_id.resize(tmp_num_alt_format[th_ID]);
                 tmp_alt_format[th_ID].alt_id.resize(tmp_num_alt_format[th_ID]);
@@ -1125,7 +1087,6 @@ public:
                 }
 
                 tmp_alt_format[th_ID].numSample = tmp_num_alt_format[th_ID]; 
-
             }else{
                 // There aren't samples in the dataset
                 for(long i=start; i<end && i<num_lines-1; i++){
@@ -1152,45 +1113,48 @@ public:
                 tmp_alt[th_ID].numAlt = tmp_num_alt[th_ID];
             }
 
-            // Merge results in parallel
+            // Merge results in parallel - TODO da fare a mano
             #pragma omp parallel for schedule(static) reduction(+:totAlt)
             for (int i = 0; i < num_threads; i++) {
-                alt_columns.var_id.insert(
-                    alt_columns.var_id.end(),
-                    std::make_move_iterator(tmp_alt[i].var_id.begin()),
-                    std::make_move_iterator(tmp_alt[i].var_id.end())
-                );
-                alt_columns.alt_id.insert(
-                    alt_columns.alt_id.end(),
-                    std::make_move_iterator(tmp_alt[i].alt_id.begin()),
-                    std::make_move_iterator(tmp_alt[i].alt_id.end())
-                );
-                alt_columns.alt.insert(
-                    alt_columns.alt.end(),
-                    std::make_move_iterator(tmp_alt[i].alt.begin()),
-                    std::make_move_iterator(tmp_alt[i].alt.end())
-                );
+                #pragma omp critical //TODO - Da capire se ha senso
+                {
+                    alt_columns.var_id.insert(
+                        alt_columns.var_id.end(),
+                        std::make_move_iterator(tmp_alt[i].var_id.begin()),
+                        std::make_move_iterator(tmp_alt[i].var_id.end())
+                    );
+                    alt_columns.alt_id.insert(
+                        alt_columns.alt_id.end(),
+                        std::make_move_iterator(tmp_alt[i].alt_id.begin()),
+                        std::make_move_iterator(tmp_alt[i].alt_id.end())
+                    );
+                    alt_columns.alt.insert(
+                        alt_columns.alt.end(),
+                        std::make_move_iterator(tmp_alt[i].alt.begin()),
+                        std::make_move_iterator(tmp_alt[i].alt.end())
+                    );
 
-                for (int j = 0; j < INFO.ints_alt; j++) {
-                    alt_columns.alt_int[j].i_int.insert(
-                        alt_columns.alt_int[j].i_int.end(),
-                        std::make_move_iterator(tmp_alt[i].alt_int[j].i_int.begin()),
-                        std::make_move_iterator(tmp_alt[i].alt_int[j].i_int.end())
-                    );
-                }
-                for (int j = 0; j < INFO.floats_alt; j++) {
-                    alt_columns.alt_float[j].i_float.insert(
-                        alt_columns.alt_float[j].i_float.end(),
-                        std::make_move_iterator(tmp_alt[i].alt_float[j].i_float.begin()),
-                        std::make_move_iterator(tmp_alt[i].alt_float[j].i_float.end())
-                    );
-                }
-                for (int j = 0; j < INFO.strings_alt; j++) {
-                    alt_columns.alt_string[j].i_string.insert(
-                        alt_columns.alt_string[j].i_string.end(),
-                        std::make_move_iterator(tmp_alt[i].alt_string[j].i_string.begin()),
-                        std::make_move_iterator(tmp_alt[i].alt_string[j].i_string.end())
-                    );
+                    for (int j = 0; j < INFO.ints_alt; j++) {
+                        alt_columns.alt_int[j].i_int.insert(
+                            alt_columns.alt_int[j].i_int.end(),
+                            std::make_move_iterator(tmp_alt[i].alt_int[j].i_int.begin()),
+                            std::make_move_iterator(tmp_alt[i].alt_int[j].i_int.end())
+                        );
+                    }
+                    for (int j = 0; j < INFO.floats_alt; j++) {
+                        alt_columns.alt_float[j].i_float.insert(
+                            alt_columns.alt_float[j].i_float.end(),
+                            std::make_move_iterator(tmp_alt[i].alt_float[j].i_float.begin()),
+                            std::make_move_iterator(tmp_alt[i].alt_float[j].i_float.end())
+                        );
+                    }
+                    for (int j = 0; j < INFO.strings_alt; j++) {
+                        alt_columns.alt_string[j].i_string.insert(
+                            alt_columns.alt_string[j].i_string.end(),
+                            std::make_move_iterator(tmp_alt[i].alt_string[j].i_string.begin()),
+                            std::make_move_iterator(tmp_alt[i].alt_string[j].i_string.end())
+                        );
+                    }
                 }
 
                 #pragma omp atomic
@@ -1244,11 +1208,10 @@ public:
                 }
             }
         }
-    //Here finish the parallel part and we merge the threads results
+     //Here finish the parallel part and we merge the threads results
 
         alt_columns.numAlt = totAlt;
         alt_sample.numSample = totSampAlt;
-
         #pragma omp parallel
         {
             #pragma omp sections
@@ -1282,7 +1245,6 @@ public:
                 }
             }
         }
-
         if (samplesON) {
             #pragma omp parallel
             {
@@ -1318,11 +1280,536 @@ public:
                 }
             }
         }
-
         worker_thread.join();    
     }
-    
 
+    //TODO - aggiungi la struttura "var_columns_df" come argomento e vedi come gestirlo
+    void get_vcf_line_in_var_columns(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt)
+    { 
+        bool find1 = false;
+        long iter=0;
+        int local_alt = 1;
+        string tmp="\0";
+        vector<string> tmp_split;
+        vector<string> tmp_format_split;
+        
+        //Chromosome
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                if(chrom_map.find(tmp) == chrom_map.end()){
+                    chrom_map.insert(std::make_pair(tmp, (unsigned char)chrom_map.size()));
+                }
+                chrom[i] = chrom_map[tmp];
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+
+        //Position on device
+        // Salta la sottostringa delimitata da '\t' o ' '
+        while (line[start + iter] != '\t' && line[start + iter] != ' ') {
+            iter++;
+        }
+        iter++; // Salta anche il delimitatore
+
+        //ID
+        tmp="\0";
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                id[i] = tmp;
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+
+        //Reference
+        tmp="\0";
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                ref[i] = tmp;
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+
+        //Alternative
+        tmp="\0";
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                boost::split(tmp_split, tmp, boost::is_any_of(","));
+                local_alt = tmp_split.size();
+                for(int y = 0; y<local_alt; y++){
+                    (*tmp_alt).alt[(*tmp_num_alt)+y] = tmp_split[y];
+                    (*tmp_alt).alt_id[(*tmp_num_alt)+y] = (char)y;
+                    (*tmp_alt).var_id[(*tmp_num_alt)+y] = var_number[i];
+                }
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+
+        //Quality - on device
+        while (line[start + iter] != '\t' && line[start + iter] != ' ') {
+            iter++;
+        }
+        iter++;
+        
+        //Filter
+        tmp="\0";
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                if(filter_map.find(tmp) == filter_map.end()){
+                    filter_map.insert(std::make_pair(tmp, (char)filter_map.size()));
+                }
+                filter[i] = filter_map[tmp];
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+
+        //Info
+        tmp="\0";
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '||line[start+iter]=='\n'){
+                find1 = true;
+                iter++;
+                vector<string> tmp_el;
+                boost::split(tmp_el, tmp, boost::is_any_of(";")); //Info arguments separation
+                vector<string> tmp_elems;
+                for(int ii=0; ii<tmp_el.size(); ii++){
+                    boost::split(tmp_elems, tmp_el[ii], boost::is_any_of("=")); //info_id separation from contents
+                    bool find_info_type = false;
+                    bool find_info_elem = false;
+                    if(tmp_elems.size()==2){
+                        while(!find_info_type){
+                            if(info_map1[tmp_elems[0]]==STRING){
+                                //String
+                                int el=0;
+                                while(!find_info_elem){
+                                    if(in_string[el].name == tmp_elems[0]){
+                                        in_string[el].i_string[i] = tmp_elems[1];
+                                        find_info_elem = true;
+                                    } 
+                                    el++;
+                                }
+                                find_info_type = true;
+                            }else if(info_map1[tmp_elems[0]]==INT_ALT){
+                                //Int Alt
+                                int el=0;
+                                while(!find_info_elem){
+                                    if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
+                                        boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                        for(int y = 0; y<local_alt; y++){
+                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = stoi(tmp_split[y]);
+                                        }
+                                        find_info_elem = true;
+                                    }
+                                    el++;
+                                }
+                                find_info_type = true;
+                            }else if(info_map1[tmp_elems[0]]==FLOAT_ALT){
+                                //Float Alt
+                                int el=0;
+                                while(!find_info_elem){
+                                    if((*tmp_alt).alt_float[el].name == tmp_elems[0]){
+                                        boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                        
+                                        for(int y = 0; y<local_alt; y++){
+                                            try{
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = (__half)stof(tmp_split[y]);
+                                            }catch (const std::exception& e){
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
+                                            }
+                                        }
+                                        find_info_elem = true;
+                                    }
+                                    el++;
+                                }
+                                find_info_type = true;
+                            }else if(info_map1[tmp_elems[0]]==STRING_ALT){
+                                //String Alt
+                                int el=0;
+                                while(!find_info_elem){
+                                    if((*tmp_alt).alt_string[el].name == tmp_elems[0]){
+                                        boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                        for(int y = 0; y<local_alt; y++){
+                                            (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = tmp_split[y];
+                                        }
+                                        find_info_elem = true;
+                                    }
+                                    el++;
+                                }
+                                find_info_type = true;                            
+                            }else{
+                                find_info_type = true;
+                            }
+                        }
+                    } // la flag sarà su device
+                }
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+        (*tmp_num_alt) = (*tmp_num_alt)+local_alt;
+    }
+
+    void get_vcf_line_in_var_columns_format(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt, sample_columns_df* sample, header_element* FORMAT, int *tmp_num_alt_format, alt_format_df* tmp_alt_format)
+    {
+        bool find1 = false;
+        long iter=0;
+        int local_alt = 1;
+        string tmp="\0";
+        vector<string> tmp_split;
+        vector<string> tmp_format_split;
+        vector<string> tmp_subSplit;
+
+        //Chromosome
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                if(chrom_map.find(tmp) == chrom_map.end()){
+                    chrom_map.insert(std::make_pair(tmp, (unsigned char)chrom_map.size()));
+                }
+                chrom[i] = chrom_map[tmp];
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+        //Position on device
+        // Salta la sottostringa delimitata da '\t' o ' '
+        while (line[start + iter] != '\t' && line[start + iter] != ' ') {
+            iter++;
+        }
+        iter++; // Salta anche il delimitatore
+
+        //ID
+        tmp="\0";
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                id[i] = tmp;
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+        //Reference
+        tmp="\0";
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                ref[i] = tmp;
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+        //Alternative
+        tmp="\0";
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                boost::split(tmp_split, tmp, boost::is_any_of(","));
+                local_alt = tmp_split.size();
+                for(int y = 0; y<local_alt; y++){
+                    (*tmp_alt).alt[(*tmp_num_alt)+y] = tmp_split[y];
+                    (*tmp_alt).alt_id[(*tmp_num_alt)+y] = (char)y;
+                    (*tmp_alt).var_id[(*tmp_num_alt)+y] = var_number[i];
+                }
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+        //Quality - on device
+        while (line[start + iter] != '\t' && line[start + iter] != ' ') {
+            iter++;
+        }
+        iter++;
+        //Filter
+        tmp="\0";
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                if(filter_map.find(tmp) == filter_map.end()){
+                    filter_map.insert(std::make_pair(tmp, (char)filter_map.size()));
+                }
+                filter[i] = filter_map[tmp];
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+        //Info
+        tmp="\0";
+        find1=false;
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '||line[start+iter]=='\n'){
+                find1 = true;
+                iter++;
+                vector<string> tmp_el;
+                boost::split(tmp_el, tmp, boost::is_any_of(";")); //Info arguments separation
+                vector<string> tmp_elems;
+                for(int ii=0; ii<tmp_el.size(); ii++){
+                    boost::split(tmp_elems, tmp_el[ii], boost::is_any_of("=")); //info_id separation from contents
+                    bool find_info_type = false;
+                    bool find_info_elem = false;
+                    if(tmp_elems.size()==2){
+                        while(!find_info_type){
+                            if(info_map1[tmp_elems[0]]==STRING){
+                                //String
+                                int el=0;
+                                while(!find_info_elem){
+                                    if(in_string[el].name == tmp_elems[0]){
+                                        in_string[el].i_string[i] = tmp_elems[1];
+                                        find_info_elem = true;
+                                    } 
+                                    el++;
+                                }
+                                find_info_type = true;
+                            }else if(info_map1[tmp_elems[0]]==INT_ALT){
+                                //Int Alt
+                                int el=0;
+                                while(!find_info_elem){
+                                    if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
+                                        boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                        for(int y = 0; y<local_alt; y++){
+                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = stoi(tmp_split[y]);
+                                        }
+                                        find_info_elem = true;
+                                    }
+                                    el++;
+                                }
+                                find_info_type = true;
+                            }else if(info_map1[tmp_elems[0]]==FLOAT_ALT){
+                                //Float Alt
+                                int el=0;
+                                while(!find_info_elem){
+                                    if((*tmp_alt).alt_float[el].name == tmp_elems[0]){
+                                        boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                        
+                                        for(int y = 0; y<local_alt; y++){
+                                            try{
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = (__half)stof(tmp_split[y]);
+                                            }catch (const std::exception& e){
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
+                                            }
+                                        }
+                                        find_info_elem = true;
+                                    }
+                                    el++;
+                                }
+                                find_info_type = true;
+                            }else if(info_map1[tmp_elems[0]]==STRING_ALT){
+                                //String Alt
+                                int el=0;
+                                while(!find_info_elem){
+                                    if((*tmp_alt).alt_string[el].name == tmp_elems[0]){
+                                        boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                        for(int y = 0; y<local_alt; y++){
+                                            (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = tmp_split[y];
+                                        }
+                                        find_info_elem = true;
+                                    }
+                                    el++;
+                                }
+                                find_info_type = true;                            
+                            }else{
+                                find_info_type = true;
+                            }
+                        }
+                    } // la flag sarà su device
+                }
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+        (*tmp_num_alt) = (*tmp_num_alt)+local_alt;
+        //Format decomposition
+        tmp="\0";
+        find1=false;
+
+        //Format's template
+        while(!find1){
+            if(line[start+iter]=='\t'||line[start+iter]==' '){
+                find1 = true;
+                iter++;
+                boost::split(tmp_format_split, tmp, boost::is_any_of(":"));
+            }else{
+                tmp += line[start+iter];
+                iter++;
+            }
+        }
+        int samp;
+        for(samp = 0; samp < (*sample).numSample; samp++){
+            tmp="\0";
+            find1=false;
+            while(!find1){
+                if(line[start+iter]=='\t'||line[start+iter]==' '||line[start+iter]=='\n'){
+                    find1 = true;
+                    iter++;
+                    boost::split(tmp_split, tmp, boost::is_any_of(":"));
+                    vector<string> tmp_sub;
+                    for(int j = 0; j < tmp_split.size(); j++){
+                        bool find_type = false;
+                        bool find_elem = false;
+                        while(!find_type){
+                            if(!strcmp(tmp_format_split[j].c_str(), "GT")){
+                                if(!((*sample).sample_GT.size() >= 1)){
+                                    boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
+                                    local_alt = tmp_sub.size();
+                                    for(int y = 0; y<local_alt; y++){
+                                        //Fill a tuple for each alternatives
+                                        (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_number[i];
+                                        (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
+                                        (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
+                                        (*tmp_alt_format).sample_GT.GT[(*tmp_num_alt_format) + y] = (*tmp_alt_format).GTMap[tmp_sub[y]];
+                                    }
+                                    (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
+                                }
+                                find_type = true;
+                            }else if(info_map1[tmp_format_split[j]] == STRING_FORMAT || info_map1[tmp_format_split[j] + std::to_string(1)] == STRING_FORMAT){
+                                //String - deterministic
+                                int el = 0;
+                                while(!find_elem){
+                                    if(!(*sample).samp_string[el].name.compare(0, tmp_format_split[j].length(), tmp_format_split[j], 0, tmp_format_split[j].length())){
+                                        if((*sample).samp_string[el].numb==1){ //String with numb = 1
+                                            //Update the corresponing cell
+                                            (*sample).samp_string[el].i_string[i*(*sample).numSample + samp] = tmp_split[j];
+                                        }else{
+                                            //String with numb > 1 (separated by commas)
+                                            //Iterate over the alternatives (lists with the same name + ascending number, e.g., el1, el2, ...)
+                                            //referred with 'el + number'
+                                            vector<string> tmp_sub;
+                                            boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
+                                            for(int k = 0; k<(*sample).samp_string[el].numb; k++){
+                                                (*sample).samp_string[el+k].i_string[i*(*sample).numSample + samp] = tmp_sub[k];
+                                            }
+                                        }
+                                        find_elem = true;
+                                    }
+                                    el++;
+                                }
+                                find_type = true;
+                            }else if(info_map1[tmp_format_split[j]] == INT_FORMAT || info_map1[tmp_format_split[j] + std::to_string(1)] == INT_FORMAT){
+                                //Integer - deterministic - on device
+                                find_elem = true;
+                                find_type = true;
+                            }else if(info_map1[tmp_format_split[j]] == FLOAT_FORMAT || info_map1[tmp_format_split[j] + std::to_string(1)] == FLOAT_FORMAT){
+                                //Float - deterministic - on device
+                                find_elem = true;
+                                find_type = true;
+                            }else if(info_map1[tmp_format_split[j]] == STRING_FORMAT_ALT){
+                                //String alternatives
+                                // TODO - Da gestire i GT con alternatives
+                                boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
+                                local_alt = tmp_sub.size();
+                                int el = 0;
+                                while(!find_elem){
+                                    //Search the corresponding element
+                                    if(!(*tmp_alt_format).samp_string[el].name.compare(tmp_format_split[j])){
+                                        for(int y = 0; y<local_alt; y++){
+                                            //Fill a tuple for each alternatives
+                                            (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_number[i];
+                                            (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
+                                            (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
+                                            (*tmp_alt_format).samp_string[el].i_string[(*tmp_num_alt_format) + y] = tmp_sub[y];
+                                        }
+                                        find_elem = true;
+                                        (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
+                                    }
+                                    el++;
+                                }
+                                find_type = true;
+                            }else if(info_map1[tmp_format_split[j]] == INT_FORMAT_ALT){
+                                //Integer alternatives
+                                boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
+                                local_alt = tmp_sub.size();
+                                int el = 0;
+                                while(!find_elem){
+                                    //Search the corresponding element
+                                    if(!(*tmp_alt_format).samp_int[el].name.compare(tmp_format_split[j])){
+                                        //Fill a tuple for each alternatives
+                                        for(int y = 0; y<local_alt; y++){
+                                            (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_number[i];
+                                            (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
+                                            (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
+                                            (*tmp_alt_format).samp_int[el].i_int[(*tmp_num_alt_format) + y] = std::stoi(tmp_sub[y]);
+                                        }
+                                        find_elem = true;
+                                        (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
+                                    }
+                                    el++;
+                                }
+                                find_type = true;
+                            }else if(info_map1[tmp_format_split[j]] == FLOAT_FORMAT_ALT){
+                                //Float alternatives
+                                boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
+                                local_alt = tmp_sub.size();
+                                int el = 0;
+                                while(!find_elem){ 
+                                    //Search the corresponding element
+                                    if(!(*tmp_alt_format).samp_float[el].name.compare(tmp_format_split[j])){
+                                        //Fill a tuple for each alternatives
+                                        for(int y = 0; y<local_alt; y++){
+                                            (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_number[i];
+                                            (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
+                                            (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
+                                            try{
+                                                (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = (__half)std::stof(tmp_sub[y]);
+                                            }catch (const std::exception& e){
+                                                (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = 0;
+                                            }
+                                        }
+                                        find_elem = true;
+                                        (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
+                                    }
+                                    el++;
+                                }
+                                find_type = true;
+                            }
+                        }
+                    }
+                }else{
+                    tmp += line[start+iter];
+                    iter++;
+                }
+            }
+        }
+    }
+    
 };
 
 #endif
