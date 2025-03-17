@@ -1,3 +1,15 @@
+/**
+ * @file main.cu
+ * @brief Entry point for the VCF parser application.
+ *
+ * This file sets up the CUDA device, processes command-line arguments to obtain the
+ * VCF file path (-v) and the number of threads (-t) for parallel processing, and
+ * invokes the VCF parser workflow through the vcf_parsed class.
+ *
+ * Usage:
+ *   ./VCFparser -v <vcf_filename> -t <num_threads>
+ */
+
 #include "Parser.cu"        
 
 #include <cuda_runtime.h>   

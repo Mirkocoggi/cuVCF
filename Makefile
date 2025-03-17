@@ -28,13 +28,13 @@ VARCOL:
 # Target per compilare la versione GPU ottimizzata
 GPU:
 	mkdir -p bin/
-	$(NVCC) $(GPUFLAGS) --ptxas-options=-v -o bin/VCFparser src/CuFiles/main.cu -Xcompiler $(OPENMP)
+	$(NVCC) $(GPUFLAGS) --ptxas-options=-v -o bin/VCFparser src/GPUVersion/main.cu -Xcompiler $(OPENMP)
 
 # Target DEBUG: compila la versione GPU per cuda-gdb con flag di debug (-G -g) runna con -> cuda-gdb --args ./bin/VCFparser -v data/IRBT3M.vcf -t 1
 
 DEBUG:
 	mkdir -p bin/
-	$(NVCC) $(DEBUG_GPUFLAGS) -o bin/VCFparser src/CuFiles/main.cu -Xcompiler $(OPENMP)
+	$(NVCC) $(DEBUG_GPUFLAGS) -o bin/VCFparser src/GPUVersion/main.cu -Xcompiler $(OPENMP)
 
 # Target "all" compila tutti i target desiderati
 all: VARSTRUCT VARCOL GPU
