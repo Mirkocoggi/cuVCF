@@ -8,6 +8,7 @@
 #include <cuda_fp16.h>  
 #include <map>
 #include <iostream>
+#include <vector>
 
 using namespace std;
 
@@ -165,6 +166,10 @@ class sample_columns_df //aka df3
                 value++;
             }
         }
+
+        GTMap[".|."] = static_cast<char>(254);
+        GTMap["./."] = static_cast<char>(255);
+        
     }
 
     std::string getGTStringFromChar(char gtChar) const {

@@ -13,11 +13,11 @@ for((j = 1; j <= NUM_TH; j=j*2)); do
     echo "Th $j:" >> GenoGraMachine.txt
     for ((i = 1; i <= NUM_RUNS; i++)); do
         echo "Run $i"   
-        /usr/bin/time -f "Time: %E | Max Mem: %M KB" ./bin/VCFparser -v data/bos75M.vcf -t $j >> GenoGraMachine.txt 2>&1
+        /usr/bin/time -f "Time: %E | Max Mem: %M KB" ./bin/VCFparser -v data/IRBT3M.vcf -t $j >> GenoGraMachineSamples.txt 2>&1
         #echo "-----" >>  GenoGraMachine.txt
     done
 
-    echo "===================" >>  GenoGraMachine.txt
+    echo "===================\n" >>  GenoGraMachine.txt
 done
 
 #homo_sapiens-chr20.vcf

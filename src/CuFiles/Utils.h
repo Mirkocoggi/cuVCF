@@ -4,6 +4,9 @@
 #include <sys/wait.h>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
+#include <cstring>
+#include <vector>
 
 const int FLAG = 0;
 const int INT = 1;

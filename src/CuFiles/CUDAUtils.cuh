@@ -1,13 +1,17 @@
 #ifndef CUDA_UTILS_CUH
 #define CUDA_UTILS_CUH
 
+#include <cuda_runtime.h>
+#include <cuda_fp16.h>
+#include <stddef.h>
+
 using namespace std;
 
 //GTMap
 #define NUM_KEYS_GT 242
 #define MAX_KEY_LENGTH_GT 5
-#define MAX_TOKENS 10 // Maximum number of tokens to split
-#define MAX_TOKEN_LEN 512 // Maximum length of each token
+#define MAX_TOKENS 4 // Maximum number of tokens to split
+#define MAX_TOKEN_LEN 16 // Maximum length of each token
 
 __constant__ char d_keys_gt[NUM_KEYS_GT][MAX_KEY_LENGTH_GT];   // Chiavi nella constant memory
 __constant__ char d_values_gt[NUM_KEYS_GT];                    // Valori nella constant memory
@@ -15,12 +19,15 @@ __constant__ char d_values_gt[NUM_KEYS_GT];                    // Valori nella c
 #define NUM_KEYS_MAP1 128
 #define MAX_KEY_LENGTH_MAP1 32
 
-__device__ char d_keys_map1[NUM_KEYS_MAP1][MAX_KEY_LENGTH_MAP1];   // Chiavi nella constant memory
-__device__ int d_values_map1[NUM_KEYS_MAP1];                       // Valori nella constant memory
+__device__ char d_keys_map1[NUM_KEYS_MAP1][MAX_KEY_LENGTH_MAP1];   
+__device__ int d_values_map1[NUM_KEYS_MAP1];                       
 
+//TODO - queste funzioni sono simili controlla utilità
+
+//Usata per GT e funzia
 __device__ int cuda_strncmp(const char *s1, const char *s2, size_t n) {
     for (size_t i = 0; i < n; ++i) {
-        if (s1[i] != s2[i] || s1[i] == '\0') {
+        if (s1[i] != s2[i] || s1[i] == 0) {
             return (unsigned char)s1[i] - (unsigned char)s2[i];
         }
     }
@@ -33,6 +40,35 @@ __device__ int cuda_strcmp(const char *s1, const char *s2) {
         s2++;
     }
     return *(unsigned char *)s1 - *(unsigned char *)s2;
+}
+
+__device__ int cuda_strncmp_custom(const char *s1, const char *s2, size_t n) {
+    size_t i = 0;
+    //printf("s1= %s\n", s1);
+    //printf("s2= %s\n", s2);
+    // Confronta fino a quando s1 non termina
+    for (; i < n; ++i) {
+        if (s1[i] == '\0') {
+            // s1 è terminata, esci dal ciclo
+            break;
+        }
+        if (s2[i] == '\0') {
+            // s2 è troppo corto rispetto a s1: non match
+            return (unsigned char)s1[i];
+        }
+        if (s1[i] != s2[i]) {
+            return (unsigned char)s1[i] - (unsigned char)s2[i];
+        }
+    }
+    // s1 è terminata: controlla che eventuali caratteri in più in s2 siano cifre
+    for (; i < n && s2[i] != '\0'; ++i) {
+        char c = s2[i];
+        if (c < '0' || c > '9') {
+            // Se il carattere non è una cifra, le stringhe non sono considerate uguali
+            return (unsigned char)c; 
+        }
+    }
+    return 0;
 }
 
 __device__ int cuda_atoi(const char *str) {
@@ -127,7 +163,7 @@ __device__ int getValueFromKeyGT(const char* key) {
 
 __device__ int getValueFromKeyMap1(const char* key) {
     for (int i = 0; i < NUM_KEYS_MAP1; ++i) {
-        if (cuda_strncmp(key, d_keys_map1[i], MAX_KEY_LENGTH_MAP1) == 0) {
+        if (cuda_strncmp_custom(key, d_keys_map1[i], MAX_KEY_LENGTH_MAP1) == 0) {
             return d_values_map1[i];
         }
     }
@@ -135,25 +171,26 @@ __device__ int getValueFromKeyMap1(const char* key) {
 }
 
 // Helper function to split a string using a delimiter
-__device__ int split(const char *str, char delimiter, char split_array[MAX_TOKENS][MAX_TOKEN_LEN]) {
+__device__ int split(const char *str, char delimiter, char* split_array) {
     int token_count = 0;
     int token_idx = 0;
 
     for (int i = 0; str[i] != '\0'; ++i) {
         if (str[i] == delimiter) {
-            split_array[token_count][token_idx] = '\0'; // Null-terminate the token
+            split_array[token_count * MAX_TOKEN_LEN + token_idx] = '\0'; // Null-terminate the token
             ++token_count;
             token_idx = 0;
             if (token_count >= MAX_TOKENS) break; // Avoid overflow
         } else {
             if (token_idx < MAX_TOKEN_LEN - 1) {
-                split_array[token_count][token_idx++] = str[i];
+                split_array[token_count * MAX_TOKEN_LEN + (token_idx++)] = str[i];
             }
         }
     }
-    split_array[token_count][token_idx] = '\0'; // Null-terminate the last token
+    split_array[token_count * MAX_TOKEN_LEN + token_idx] = '\0'; // Null-terminate the last token
     return token_count + 1;
-};
+}
+
 
 __device__ half safeStof(const char* tmp) {
     float value = 0.0f;

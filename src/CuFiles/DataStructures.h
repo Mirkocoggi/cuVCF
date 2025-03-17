@@ -7,6 +7,7 @@
 #include <cuda_fp16.h>  
 #include <iostream>
 #include <map>
+#include <vector>
 
 using namespace std;
 

@@ -1,16 +1,23 @@
-#include "Parser.cu"
-#include <cuda_runtime.h>     
-#include <cuda_fp16.h>  
+#include "Parser.cu"        
+
+#include <cuda_runtime.h>   
+#include <cuda_fp16.h>      
 #include <thrust/device_ptr.h> 
 #include <thrust/sort.h>
-#include <boost/algorithm/string.hpp>
-#include <chrono>
-#include <fstream>
-#include <filesystem>
-#include <sys/wait.h>
-#include <unistd.h>
-#include <map>
-#include <omp.h> 
+
+#include <boost/algorithm/string.hpp> 
+#include <chrono>           
+#include <fstream>          
+#include <filesystem>       
+#include <sys/wait.h>       
+#include <unistd.h>         
+#include <map>              
+#include <omp.h>            
+#include <iostream>         
+#include <cstdlib>
+
+using namespace std;
+
 
 
 int main(int argc, char *argv[]){
@@ -48,11 +55,11 @@ int main(int argc, char *argv[]){
     vcf.run(vcf_filename, num_threadss);
 
     //vcf.print_header();
-    cout << "Start printing:" << endl;
-    vcf.var_columns.print(10);
-    vcf.alt_columns.print(10);
-    vcf.samp_columns.print(10); //TOTO: controlla come riprendi i dati da GPU
-    vcf.alt_sample.print(10);
+    //cout << "Start printing:" << endl;
+    //vcf.var_columns.print(10);
+    //vcf.alt_columns.print(10);
+    //vcf.samp_columns.print(16); //TOTO: controlla come riprendi i dati da GPU
+    //vcf.alt_sample.print(10);
 
     return 0;
 }
