@@ -10,7 +10,7 @@ OPENMP = -fopenmp
 # Flags di debug per la versione CPU (se necessario)
 DEBUGFLAGS = -std=c++17
 # Flag di debug per la versione GPU (cuda-gdb richiede -G e -g)
-DEBUG_GPUFLAGS = -G -g -std=c++17 -arch=sm_89
+DEBUG_GPUFLAGS = -G -g -O0 -lineinfo -std=c++17 -arch=sm_89
 
 # Librerie da linkare
 LIBS = -lz -I/usr/include/Imath -lImath

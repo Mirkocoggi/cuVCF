@@ -73,28 +73,34 @@ public:
      * @param num_lines Number of lines to print.
      */
     void print(long num_lines) {
-        std::cout << "VarID\tChrom\tPos\tID\tRef\tFilter\tFlag\t\tInt\t\tFloat\t\tString" << std::endl;
+        std::cout << "VarID\tChrom\tPos\tID\tRef\tQUAL\tFilter\tFlag\t\tInt\t\tFloat\t\tString" << std::endl;
         long iter = (num_lines > static_cast<long>(id.size())) ? id.size() : num_lines;
         
         for (long i = 0; i < iter; i++) {
             // Stampa VarID (presumibilmente var_number)
             if (i < static_cast<long>(var_number.size()))
-                std::cout << var_number[i] << "\t";
+                std::cout << var_number[i] << " : " << id[i] << "\t";
             else
                 std::cout << "nan\t";
             
             // Stampa Chrom: costruiamo la chiave da un singolo carattere
             if (i < static_cast<long>(chrom.size())) {
-                std::string chromKey(1, chrom[i]);
-                auto itChrom = chrom_map.find(chromKey);
-                if (itChrom != chrom_map.end()) {
-                    std::cout << itChrom->first << "\t";
-                } else {
+                unsigned char code = chrom[i];
+                bool found = false;
+                for (const auto& pair : chrom_map) {
+                    if (pair.second == code) {
+                        std::cout << pair.first << "\t";
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
                     std::cout << "nan\t";
                 }
             } else {
                 std::cout << "nan\t";
             }
+            
             
             // Stampa Pos
             if (i < static_cast<long>(pos.size()))
@@ -113,30 +119,49 @@ public:
                 std::cout << ref[i] << "\t";
             else
                 std::cout << "nan\t";
+
+            // Stampa Qual
+            if (i < static_cast<long>(qual.size()))
+                if(__half2float(qual[i]) != -1.0f){
+                    std::cout << __half2float(qual[i]) << "\t";
+                }else{
+                    std::cout << "." << "\t";
+                }
+            else
+                std::cout << "nan\t";
             
             // Stampa Filter: costruiamo la chiave dal carattere in filter
             if (i < static_cast<long>(filter.size())) {
-                std::string filterKey(1, filter[i]);
-                auto itFilter = filter_map.find(filterKey);
-                if (itFilter != filter_map.end()) {
-                    std::cout << itFilter->first << "\t";
-                } else {
+                char code = filter[i];
+                bool found = false;
+                for (const auto& pair : filter_map) {
+                    if (pair.second == code) {
+                        std::cout << pair.first << "\t";
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
                     std::cout << "nan\t";
                 }
             } else {
                 std::cout << "nan\t";
             }
             
-            /* Stampa i campi dei vettori info: Flag, Int, Float e String
+            
+            // Stampa i campi dei vettori info: Flag, Int, Float e String
             // Si assume che ogni vettore info_xxx abbia la stessa dimensione (almeno per indice i)
             // e che il campo 'name' contenga il nome della colonna.
             
             // Flag
             for (size_t j = 0; j < in_flag.size(); j++) {
-                if (i < static_cast<long>(in_flag[j].i_flag.size()))
-                    std::cout << in_flag[j].name << ": " << in_flag[j].i_flag[i] << " ";
-                else
-                    std::cout << in_flag[j].name << ": nan ";
+                if (i < static_cast<long>(in_flag[j].i_flag.size())){
+                    //if(in_flag[j].i_flag[i]==1) {
+                        std::cout << in_flag[j].name << ":" <<(int)in_flag[j].i_flag[i] << " ";
+                    //}
+                }else{
+                    std::cout << in_flag[j].name << "nan ";
+                }
             }
             std::cout << "\t";
             
@@ -165,7 +190,6 @@ public:
                 else
                     std::cout << in_string[j].name << ": nan ";
             }
-            */
             std::cout << std::endl;
         }
     }
@@ -184,7 +208,7 @@ class alt_columns_df //DF2
     /// Vector of variant IDs corresponding to each alternative allele entry.
     vector<unsigned int> var_id;
     /// Vector of alternative allele IDs.
-    vector<char> alt_id;
+    vector<unsigned char> alt_id;
     /// Vector of alternative allele strings.
     vector<string> alt;
     /// Vector of float information related to alternative alleles.

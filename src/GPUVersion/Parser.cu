@@ -60,44 +60,79 @@ using namespace std;
 class vcf_parsed
 {
 public:
+    /// Unique identifier for this VCF parsing instance.
     int id;
+    /// Name of the VCF file.
     string filename;
+    /// Full path to the VCF file.
     string path_to_filename;
+    /// The header content of the VCF file.
     string header;
+    /// Parsed header information for INFO fields.
     header_element INFO;
-    map<string,int> info_map; //Flag=0, Int=1, Float=2, String=3;
+    /// Mapping of INFO field names to type codes (Flag=0, Int=1, Float=2, String=3).
+    map<string,int> info_map;
+    /// Parsed header information for FORMAT fields.
     header_element FORMAT;
+    /// Host-side storage for variant data as a large character array.
     char *filestring;
-    char *d_filestring; 
+    /// Device-side storage for variant data.
+    char *d_filestring;
+    /// Device-side counter used for various kernel operations.
     unsigned int *d_count;
-    int header_size=0;
+    /// Size of the VCF header (in bytes).
+    int header_size = 0;
+    /// Total file size (in bytes).
     long filesize;
+    /// Size of the variant portion of the file (filesize minus header size).
     long variants_size;
-    long num_lines=0;
+    /// Number of variant lines (excluding the header).
+    long num_lines = 0;
+    /// Host-side array storing the starting index of each variant line.
     unsigned int *new_lines_index;
+    /// Device-side array storing the starting index of each variant line.
     unsigned int *d_new_lines_index;
+    /// Flag indicating whether sample data is present.
     bool samplesON = false;
+    /// Flag indicating whether detailed sample data is available.
     bool hasDetSamples = false;
+    /// Data frame containing variant column information (e.g., chromosome, position).
     var_columns_df var_columns;
+    /// Data frame containing alternative allele information.
     alt_columns_df alt_columns;
+    /// Data frame containing sample column information.
     sample_columns_df samp_columns;
+    /// Data frame for alternative allele sample format data.
     alt_format_df alt_sample;
+    /// Host-side structure containing kernel parameters.
     KernelParams h_params;
+    /// Pointer to the device-side kernel parameters structure.
     KernelParams *d_params;
-
+    /// Device memory for storing variant numbers.
     unsigned int *d_VC_var_number;
+    /// Device memory for storing variant positions.
     unsigned int *d_VC_pos;
+    /// Device memory for storing quality scores (in half precision).
     __half *d_VC_qual;
+    /// Device-side structure for float INFO field values.
     info_float_d *d_VC_in_float = (info_float_d*)malloc(sizeof(info_float_d));
+    /// Device-side structure for flag INFO field values.
     info_flag_d *d_VC_in_flag = (info_flag_d*)malloc(sizeof(info_flag_d));
+    /// Device-side structure for integer INFO field values.
     info_int_d *d_VC_in_int = (info_int_d*)malloc(sizeof(info_int_d));
-
+    /// Device memory for storing sample variant IDs.
     unsigned int *d_SC_var_id;
+    /// Device memory for storing sample IDs.
     unsigned short *d_SC_samp_id;
+    /// Device-side structure for sample float values.
     samp_Float_d *d_SC_samp_float = (samp_Float_d*)malloc(sizeof(samp_Float_d));
+    /// Device-side structure for sample flag values.
     samp_Flag_d *d_SC_samp_flag = (samp_Flag_d*)malloc(sizeof(samp_Flag_d));
+    /// Device-side structure for sample integer values.
     samp_Int_d *d_SC_samp_int = (samp_Int_d*)malloc(sizeof(samp_Int_d));
-    samp_GT_d *d_SC_sample_GT = (samp_GT_d*)malloc(sizeof(samp_GT_d)); 
+    /// Device-side structure for sample genotype values.
+    samp_GT_d *d_SC_sample_GT = (samp_GT_d*)malloc(sizeof(samp_GT_d));
+
 
     /**
      * @brief Runs the VCF parsing process.
@@ -357,7 +392,7 @@ public:
             cudaMalloc(&(d_SC_samp_int->name), tmp * sizeof(char) * max_name_size);
             cudaMalloc(&(d_SC_samp_int->numb), tmp * sizeof(int));
 
-            for (int i = 0; i < tmp; i++) { // TODO - PD
+            for (int i = 0; i < tmp; i++) {
                 cudaMemcpy(d_SC_samp_int->name+i*max_name_size, samp_columns.samp_int[i].name.c_str(), samp_columns.samp_int[i].name.size() + 1, cudaMemcpyHostToDevice);
                 cudaMemcpy(d_SC_samp_int->numb+i, &(samp_columns.samp_int[i].numb), sizeof(int), cudaMemcpyHostToDevice);
             }
@@ -1038,7 +1073,7 @@ public:
 
             // Launch kernel
             get_vcf_line_format_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_params, my_mem);
-            //get_vcf_line_format_kernel<<<1, 1>>>(d_params);
+            //get_vcf_line_format_kernel<<<1, 1>>>(d_params, my_mem);
             cudaEventRecord(kernel_done, stream1);
             // Check for errors
             err = cudaGetLastError();
@@ -1114,7 +1149,7 @@ public:
             }
 
             for (int i = 0; i < samp_columns.samp_int.size(); i++) {
-                cudaMemcpyAsync(samp_columns.samp_int[i].i_int.data(), d_SC_samp_int->i_int + (i * ((num_lines) * samp_columns.numSample)), 
+                cudaMemcpyAsync(samp_columns.samp_int[i].i_int.data(), d_SC_samp_int->i_int + (i * num_lines * samp_columns.numSample), 
                     (num_lines) * samp_columns.numSample * sizeof(int), cudaMemcpyDeviceToHost, stream2);                
             }   
 
@@ -1129,7 +1164,7 @@ public:
         cudaEventDestroy(kernel_done);
         cudaStreamDestroy(stream1);
         cudaStreamDestroy(stream2);
-        free(my_mem);
+        cudaFree(my_mem);
     }
 
     /**
@@ -1164,12 +1199,7 @@ public:
             tmp_alt[th_ID].init(alt_columns, INFO, batch_size);
             
             tmp_num_alt[th_ID] = 0;
-            
-            tmp_num_alt_format[th_ID] = 0;
-            tmp_alt_format[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, 0);
-            tmp_alt_format[th_ID].alt_id.resize(batch_size*2*samp_columns.numSample, 0);
-            tmp_alt_format[th_ID].samp_id.resize(batch_size*2*samp_columns.numSample, static_cast<unsigned short>(0));
-            
+
             start = th_ID * batch_size; // Starting point of the thread's batch
             end = start + batch_size; // Ending point of the thread's batch
             
@@ -1226,9 +1256,8 @@ public:
             }else{
                 // There aren't samples in the dataset
                 for(long i=start; i<end && i<num_lines-1; i++){ //TODO - Da sistemare
-                    get_vcf_line_in_var_columns(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]));
+                    get_vcf_line_in_var_columns(filestring, new_lines_index[i]+1, new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]));
                 }
-
                 tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
                 tmp_alt[th_ID].alt_id.resize(tmp_num_alt[th_ID]);
                 tmp_alt[th_ID].alt.resize(tmp_num_alt[th_ID]);
@@ -1419,7 +1448,6 @@ public:
         worker_thread.join();    
     }
 
-    //TODO - aggiungi la struttura "var_columns_df" come argomento e vedi come gestirlo
     /**
      * @brief Parses a VCF line and populates variant columns data.
      *
@@ -1444,7 +1472,7 @@ public:
         string tmp="\0";
         vector<string> tmp_split;
         vector<string> tmp_format_split;
-        
+
         //Chromosome
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
@@ -1505,9 +1533,9 @@ public:
                 boost::split(tmp_split, tmp, boost::is_any_of(","));
                 local_alt = tmp_split.size();
                 for(int y = 0; y<local_alt; y++){
-                    (*tmp_alt).alt[(*tmp_num_alt)+y] = tmp_split[y];
-                    (*tmp_alt).alt_id[(*tmp_num_alt)+y] = (char)y;
-                    (*tmp_alt).var_id[(*tmp_num_alt)+y] = var_columns.var_number[i];
+                    (*tmp_alt).alt[(*tmp_num_alt)] = tmp_split[y];
+                    (*tmp_alt).alt_id[(*tmp_num_alt)] = (char)y;
+                    (*tmp_alt).var_id[(*tmp_num_alt)] = var_columns.var_number[i];
                 }
             }else{
                 tmp += line[start+iter];
@@ -1656,6 +1684,7 @@ public:
         vector<string> tmp_format_split;
         vector<string> tmp_subSplit;
 
+        if(line[start+iter]=='\n') iter++;
         //Chromosome
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
@@ -1713,15 +1742,16 @@ public:
                 boost::split(tmp_split, tmp, boost::is_any_of(","));
                 local_alt = tmp_split.size();
                 for(int y = 0; y<local_alt; y++){
-                    (*tmp_alt).alt[(*tmp_num_alt)+y] = tmp_split[y];
-                    (*tmp_alt).alt_id[(*tmp_num_alt)+y] = (char)y;
-                    (*tmp_alt).var_id[(*tmp_num_alt)+y] = var_columns.var_number[i];
+                    (*tmp_alt).alt[(*tmp_num_alt) + y] = tmp_split[y];
+                    (*tmp_alt).alt_id[(*tmp_num_alt) + y] = (char)y;
+                    (*tmp_alt).var_id[(*tmp_num_alt) + y] = i;
                 }
             }else{
                 tmp += line[start+iter];
                 iter++;
             }
         }
+        
         //Quality - on device
         while (line[start + iter] != '\t' && line[start + iter] != ' ') {
             iter++;

@@ -372,12 +372,14 @@ public:
         //Alternatives
         tmp="\0";
         find1=false;
+        cout << "BBBBBBBB - tmp = " << tmp << endl;
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
                 boost::split(tmp_split, tmp, boost::is_any_of(","));
                 local_alt = tmp_split.size();
+                cout << "AAAAAAAAA - local_alt = " << local_alt << endl;
                 for(int y = 0; y<local_alt; y++){
                     (*tmp_alt).alt[(*tmp_num_alt)+y] = tmp_split[y];
                     (*tmp_alt).alt_id[(*tmp_num_alt)+y] = (char)y;
@@ -385,6 +387,7 @@ public:
                 }
             }else{
                 tmp += line[start+iter];
+                cout << "BBBBBBBB - tmp = " << tmp << endl;
                 iter++;
             }
         }

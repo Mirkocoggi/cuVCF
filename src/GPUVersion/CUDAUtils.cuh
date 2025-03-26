@@ -20,7 +20,9 @@ using namespace std;
 /// Maximum number of tokens to split.
 #define MAX_TOKENS 4
 /// Maximum length for each token.
-#define MAX_TOKEN_LEN 16
+#define MAX_TOKEN_LEN 32
+/// MAximum length for the temporary string
+#define MAX_TMP_LEN 128
 
 /**
  * @brief Constant memory holding the GT keys.
@@ -264,7 +266,6 @@ __device__ int getValueFromKeyMap1(const char* key) {
 __device__ int split(const char *str, char delimiter, char* split_array) {
     int token_count = 0;
     int token_idx = 0;
-
     for (int i = 0; str[i] != '\0'; ++i) {
         if (str[i] == delimiter) {
             split_array[token_count * MAX_TOKEN_LEN + token_idx] = '\0'; // Null-terminate the token
