@@ -155,7 +155,7 @@ public:
         vcf_parsed vcf;
 
         // Variables to hold device information
-        size_t globalMemory = 0;        // Total global memory
+        size_t globalMemory = 0;       // Total global memory
         size_t sharedMemory = 0;       // Shared memory per block
         size_t constantMemory = 0;     // Constant memory
         size_t textureAlignment = 0;   // Texture alignment
@@ -229,6 +229,7 @@ public:
         allocate_filestring();
         // Populate filestring and getting the number of lines (num_lines), saving the starting char index of each lines
         find_new_lines_index(path_to_filename, num_threadss);
+        cout << "AAAAAAAAAAA - variant_size = " << variants_size << " - num_lines = " << num_lines <<endl;
         create_info_vectors(num_threadss);
         reserve_var_columns();
         create_sample_vectors(num_threadss);
@@ -1024,11 +1025,9 @@ public:
         int blocksPerGrid = std::ceil((float)num_lines/(float)threadsPerBlock);
         cudaEvent_t kernel_done;
         cudaEventCreate(&kernel_done);
-        //int threadsPerBlock = 1;
-        //int blocksPerGrid = 1;
         auto start = chrono::system_clock::now();
         char* my_mem;
-        cudaMalloc(&my_mem, blocksPerGrid*threadsPerBlock*MAX_TOKEN_LEN*MAX_TOKENS*3);
+        cudaMalloc(&my_mem, num_lines*MAX_TOKEN_LEN*MAX_TOKENS*3);
 
         cudaStream_t stream1, stream2;
         cudaStreamCreate(&stream1);

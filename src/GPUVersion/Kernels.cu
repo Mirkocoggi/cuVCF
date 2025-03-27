@@ -286,15 +286,15 @@ __global__ void get_vcf_line_format_kernel(KernelParams* params, char* my_mem)
     params->var_number[thID] = thID;
 
     //Chromosome - CPU
-    while (__ldg(params->line[start + iter]) != '\t' && __ldg(params->line[start + iter]) != ' ') {
+    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ') {
         iter++;
     }
     iter++;
 
     //Position
     reset_tmp(tmp, tmp_idx);
-    while (__ldg(params->line[start + iter]) != '\t' && __ldg(params->line[start + iter]) != ' ') {
-        append_tmp(tmp, tmp_idx, __ldg(params->line[start + iter]));
+    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ') {
+        append_tmp(tmp, tmp_idx, __ldg(&params->line[start + iter]));
         iter++;
     }
     iter++;
@@ -303,7 +303,7 @@ __global__ void get_vcf_line_format_kernel(KernelParams* params, char* my_mem)
     //ID - CPU
     reset_tmp(tmp, tmp_idx);
     find1=false;
-    while (__ldg(params->line[start + iter]) != '\t' && __ldg(params->line[start + iter]) != ' ') {
+    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ') {
         iter++;
     }
     iter++;
@@ -311,22 +311,22 @@ __global__ void get_vcf_line_format_kernel(KernelParams* params, char* my_mem)
     //Reference - CPU
     reset_tmp(tmp, tmp_idx);
     find1=false;
-    while (__ldg(params->line[start + iter]) != '\t' && __ldg(params->line[start + iter]) != ' ') {
+    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ') {
         iter++;
     }
     iter++;
 
     //Alternative - CPU
     reset_tmp(tmp, tmp_idx);
-    while (__ldg(params->line[start + iter]) != '\t' && __ldg(params->line[start + iter]) != ' ') {
+    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ') {
         iter++;
     }
     iter++;
 
     //Quality
     reset_tmp(tmp, tmp_idx);
-    while (__ldg(params->line[start + iter]) != '\t' && __ldg(params->line[start + iter]) != ' ' && __ldg(params->line[start + iter]) != '\n') {
-        append_tmp(tmp, tmp_idx, __ldg(params->line[start + iter]));
+    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ' && __ldg(&params->line[start + iter]) != '\n') {
+        append_tmp(tmp, tmp_idx, __ldg(&params->line[start + iter]));
         ++iter;
     }
     ++iter;
@@ -334,15 +334,15 @@ __global__ void get_vcf_line_format_kernel(KernelParams* params, char* my_mem)
     
     //Filter
     reset_tmp(tmp, tmp_idx);
-    while (__ldg(params->line[start + iter]) != '\t' && __ldg(params->line[start + iter]) != ' ') {
+    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ') {
         iter++;
     }
     iter++;
 
     // Info field (semicolon-separated key-value pairs)
     reset_tmp(tmp, tmp_idx);
-    while (__ldg(params->line[start + iter]) != '\t' && __ldg(params->line[start + iter]) != '\n') {
-        append_tmp(tmp, tmp_idx, __ldg(params->line[start + iter]));
+    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != '\n') {
+        append_tmp(tmp, tmp_idx, __ldg(&params->line[start + iter]));
         ++iter;
     }
     ++iter;
@@ -369,7 +369,7 @@ __global__ void get_vcf_line_format_kernel(KernelParams* params, char* my_mem)
             int el = 0;
             while (cuda_strcmp(&(params->int_name[el*16]), key) != 0 && el < NUM_KEYS_MAP1) ++el;
             if (el < NUM_KEYS_MAP1) {
-                if(cuda_strcmp(&int_name[el*16], "TSA")){ //TODO tmp implementation per TSA
+                if(cuda_strcmp(&(params->int_name[el*16]), "TSA")){ //TODO tmp implementation per TSA
                     if(!cuda_strcmp(value, "SNV")){
                         params->in_int[el*params->numLines+thID] = 0;
                     }else if(!cuda_strcmp(value, "INS") || !cuda_strcmp(value, "insertion")){
@@ -404,8 +404,8 @@ __global__ void get_vcf_line_format_kernel(KernelParams* params, char* my_mem)
 
     //Getting the format fields
     reset_tmp(tmp, tmp_idx);
-    while (__ldg(params->line[start + iter]) != '\t' && __ldg(params->line[start + iter]) != '\n') {
-        append_tmp(tmp, tmp_idx, __ldg(params->line[start + iter]));
+    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != '\n') {
+        append_tmp(tmp, tmp_idx, __ldg(&params->line[start + iter]));
         ++iter;
     }
     ++iter;
@@ -418,7 +418,7 @@ __global__ void get_vcf_line_format_kernel(KernelParams* params, char* my_mem)
         reset_tmp(tmp, tmp_idx);
         find1 = false;
         while (!find1) {
-            if (__ldg(params->line[start + iter]) == '\t' || __ldg(params->line[start + iter]) == ' ' || __ldg(params->line[start + iter]) == '\n') {
+            if (__ldg(&params->line[start + iter]) == '\t' || __ldg(&params->line[start + iter]) == ' ' || __ldg(&params->line[start + iter]) == '\n') {
                 find1 = true;
                 iter++;
 
@@ -496,7 +496,7 @@ __global__ void get_vcf_line_format_kernel(KernelParams* params, char* my_mem)
                     }
                 }
             } else {
-                append_tmp(tmp, tmp_idx, __ldg(params->line[start + iter]));
+                append_tmp(tmp, tmp_idx, __ldg(&params->line[start + iter]));
                 iter++;
             }
         }
