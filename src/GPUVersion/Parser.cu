@@ -33,6 +33,9 @@
 #include <map>
 #include <omp.h> 
 #include <thread>
+#include <functional>
+#include <future>
+
 
 using namespace std;
 
@@ -1028,7 +1031,7 @@ public:
      * and asynchronously copies the parsed data from device to host.
      */
     void populate_runner(){
-        int threadsPerBlock = 256;
+        int threadsPerBlock = 32;
         int blocksPerGrid = (16384/threadsPerBlock) + 1; // TODO gestire dinamicamente in funzione del numero di core
         cudaEvent_t kernel_done;
         cudaEventCreate(&kernel_done);
@@ -1179,11 +1182,11 @@ public:
 
         long batch_size = (num_lines-2+num_threads)/num_threads;
         
-        alt_columns_df tmp_alt[num_threads];
-        int tmp_num_alt[num_threads];
-        
-        alt_format_df tmp_alt_format[num_threads];
-        int tmp_num_alt_format[num_threads];
+        std::vector<alt_columns_df> tmp_alt(num_threads);
+        std::vector<int> tmp_num_alt(num_threads);
+
+        std::vector<alt_format_df> tmp_alt_format(num_threads);
+        std::vector<int> tmp_num_alt_format(num_threads);
 
         
         int totAlt = 0;
@@ -1275,186 +1278,153 @@ public:
 
                 tmp_alt[th_ID].numAlt = tmp_num_alt[th_ID];
             }
-
-            // Merge results in parallel - TODO da fare a mano
-            #pragma omp parallel for schedule(static) reduction(+:totAlt)
-            for (int i = 0; i < num_threads; i++) {
-                #pragma omp critical //TODO - Da capire se ha senso
-                {
-                    alt_columns.var_id.insert(
-                        alt_columns.var_id.end(),
-                        std::make_move_iterator(tmp_alt[i].var_id.begin()),
-                        std::make_move_iterator(tmp_alt[i].var_id.end())
-                    );
-
-                    tmp_alt[i].var_id.clear(); 
-
-                    alt_columns.alt_id.insert(
-                        alt_columns.alt_id.end(),
-                        std::make_move_iterator(tmp_alt[i].alt_id.begin()),
-                        std::make_move_iterator(tmp_alt[i].alt_id.end())
-                    );
-
-                    tmp_alt[i].alt_id.clear(); 
-
-                    alt_columns.alt.insert(
-                        alt_columns.alt.end(),
-                        std::make_move_iterator(tmp_alt[i].alt.begin()),
-                        std::make_move_iterator(tmp_alt[i].alt.end())
-                    );
-
-                    tmp_alt[i].alt.clear(); 
-
-                    for (int j = 0; j < INFO.ints_alt; j++) {
-                        alt_columns.alt_int[j].i_int.insert(
-                            alt_columns.alt_int[j].i_int.end(),
-                            std::make_move_iterator(tmp_alt[i].alt_int[j].i_int.begin()),
-                            std::make_move_iterator(tmp_alt[i].alt_int[j].i_int.end())
-                        );
-                        tmp_alt[i].alt_int[j].i_int.clear(); 
-                    }
-
-                    for (int j = 0; j < INFO.floats_alt; j++) {
-                        alt_columns.alt_float[j].i_float.insert(
-                            alt_columns.alt_float[j].i_float.end(),
-                            std::make_move_iterator(tmp_alt[i].alt_float[j].i_float.begin()),
-                            std::make_move_iterator(tmp_alt[i].alt_float[j].i_float.end())
-                        );
-                        tmp_alt[i].alt_float[j].i_float.clear(); 
-                    }
-
-                    for (int j = 0; j < INFO.strings_alt; j++) {
-                        alt_columns.alt_string[j].i_string.insert(
-                            alt_columns.alt_string[j].i_string.end(),
-                            std::make_move_iterator(tmp_alt[i].alt_string[j].i_string.begin()),
-                            std::make_move_iterator(tmp_alt[i].alt_string[j].i_string.end())
-                        );
-                        tmp_alt[i].alt_string[j].i_string.clear(); 
-                    }
-                }
-
-                #pragma omp atomic
-                totAlt += tmp_num_alt[i];
-            }
-
-            // Se ci sono campioni, parallelizziamo anche l'inserimento in alt_sample
-            if (samplesON) {
-                #pragma omp parallel for schedule(static) reduction(+:totSampAlt)
-                for (int i = 0; i < num_threads; i++) {
-                    alt_sample.var_id.insert(
-                        alt_sample.var_id.end(),
-                        std::make_move_iterator(tmp_alt_format[i].var_id.begin()),
-                        std::make_move_iterator(tmp_alt_format[i].var_id.end())
-                    );
-                    alt_sample.alt_id.insert(
-                        alt_sample.alt_id.end(),
-                        std::make_move_iterator(tmp_alt_format[i].alt_id.begin()),
-                        std::make_move_iterator(tmp_alt_format[i].alt_id.end())
-                    );
-                    alt_sample.samp_id.insert(
-                        alt_sample.samp_id.end(),
-                        std::make_move_iterator(tmp_alt_format[i].samp_id.begin()),
-                        std::make_move_iterator(tmp_alt_format[i].samp_id.end())
-                    );
-
-                    for (int j = 0; j < FORMAT.ints_alt; j++) {
-                        alt_sample.samp_int[j].i_int.insert(
-                            alt_sample.samp_int[j].i_int.end(),
-                            std::make_move_iterator(tmp_alt_format[i].samp_int[j].i_int.begin()),
-                            std::make_move_iterator(tmp_alt_format[i].samp_int[j].i_int.end())
-                        );
-                    }
-                    for (int j = 0; j < FORMAT.floats_alt; j++) {
-                        alt_sample.samp_float[j].i_float.insert(
-                            alt_sample.samp_float[j].i_float.end(),
-                            std::make_move_iterator(tmp_alt_format[i].samp_float[j].i_float.begin()),
-                            std::make_move_iterator(tmp_alt_format[i].samp_float[j].i_float.end())
-                        );
-                    }
-                    for (int j = 0; j < FORMAT.strings_alt; j++) {
-                        alt_sample.samp_string[j].i_string.insert(
-                            alt_sample.samp_string[j].i_string.end(),
-                            std::make_move_iterator(tmp_alt_format[i].samp_string[j].i_string.begin()),
-                            std::make_move_iterator(tmp_alt_format[i].samp_string[j].i_string.end())
-                        );
-                    }
-
-                    #pragma omp atomic
-                    totSampAlt += tmp_num_alt_format[i];
-                }
-            }
         }
+
+        // Merge results in parallel - TODO da fare a mano
+        std::thread t1(merge_member_vector<alt_columns_df, unsigned int>, std::ref(tmp_alt),
+                std::ref(alt_columns.var_id), num_threads, &alt_columns_df::var_id);
+
+        std::thread t2(merge_member_vector<alt_columns_df, unsigned char>, std::ref(tmp_alt),
+                    std::ref(alt_columns.alt_id), num_threads, &alt_columns_df::alt_id);
+        
+        std::thread t3(merge_member_vector<alt_columns_df, string>, std::ref(tmp_alt),
+                    std::ref(alt_columns.alt), num_threads, &alt_columns_df::alt);
+
+        std::thread t4(merge_nested_member_vector<alt_columns_df, info_int, int>, 
+            std::ref(tmp_alt), std::ref(alt_columns.alt_int), num_threads, INFO.ints_alt, &alt_columns_df::alt_int, &info_int::i_int);
+
+        std::thread t5(merge_nested_member_vector<alt_columns_df, info_float, __half>, 
+            std::ref(tmp_alt), std::ref(alt_columns.alt_float), num_threads, INFO.floats_alt, &alt_columns_df::alt_float, &info_float::i_float);
+
+        std::thread t6(merge_nested_member_vector<alt_columns_df, info_string, string>, 
+            std::ref(tmp_alt), std::ref(alt_columns.alt_string), num_threads, INFO.strings_alt, &alt_columns_df::alt_string, &info_string::i_string);
+
+        std::thread t_sum([&]() {
+            int somma = 0;
+            for (int i = 0; i < num_threads; i++) {
+                somma += tmp_num_alt[i];
+            }
+            totAlt = somma;
+        });
+
+        if (samplesON) {
+            std::thread t7(merge_member_vector<alt_format_df, unsigned int>, std::ref(tmp_alt_format),
+                    std::ref(alt_sample.var_id), num_threads, &alt_format_df::var_id);
+
+            std::thread t8(merge_member_vector<alt_format_df, char>, std::ref(tmp_alt_format),
+                std::ref(alt_sample.alt_id), num_threads, &alt_format_df::alt_id);
+
+            std::thread t9(merge_member_vector<alt_format_df, unsigned short>, std::ref(tmp_alt_format),
+                    std::ref(alt_sample.samp_id), num_threads, &alt_format_df::samp_id);
+
+            std::thread t10(merge_nested_member_vector<alt_format_df, samp_String, string>, std::ref(tmp_alt_format),
+                    std::ref(alt_sample.samp_string), num_threads, FORMAT.strings_alt, &alt_format_df::samp_string, 
+                    &samp_String::i_string);
+            
+            std::thread t11(merge_nested_member_vector<alt_format_df, samp_Int, int>, std::ref(tmp_alt_format),
+                    std::ref(alt_sample.samp_int), num_threads, FORMAT.ints_alt, &alt_format_df::samp_int, 
+                    &samp_Int::i_int);
+
+            std::thread t12(merge_nested_member_vector<alt_format_df, samp_Float, __half>, std::ref(tmp_alt_format),
+                    std::ref(alt_sample.samp_float), num_threads, FORMAT.floats_alt, &alt_format_df::samp_float, 
+                    &samp_Float::i_float);
+
+            std::thread t_sum_samp([&]() {
+                int somma = 0;
+                for (int i = 0; i < num_threads; i++) {
+                    somma += tmp_num_alt_format[i];
+                }
+                totSampAlt = somma;
+            });
+
+            t7.join();
+            t8.join();
+            t9.join();
+            t10.join();
+            t11.join();
+            t12.join();
+            t_sum_samp.join();
+        }
+
+        t1.join();
+        t2.join();
+        t3.join();
+        t4.join();
+        t5.join();
+        t6.join();
+        t_sum.join();
+
      //Here finish the parallel part and we merge the threads results
 
         alt_columns.numAlt = totAlt;
         alt_sample.numSample = totSampAlt;
-        #pragma omp parallel
+        // Eseguiamo il resize in parallelo per alt_columns
         {
-            #pragma omp sections
-            {
-                #pragma omp section
-                {
-                    alt_columns.var_id.resize(totAlt);
-                    alt_columns.alt_id.resize(totAlt);
-                    alt_columns.alt.resize(totAlt);
+            // Task per ridimensionare le vector "piatte"
+            auto fut1 = std::async(std::launch::async, [&]() {
+                alt_columns.var_id.resize(totAlt);
+                alt_columns.alt_id.resize(totAlt);
+                alt_columns.alt.resize(totAlt);
+            });
+            
+            // Task per ridimensionare le vector interne di alt_int
+            auto fut2 = std::async(std::launch::async, [&]() {
+                for (int j = 0; j < INFO.ints_alt; j++) {
+                    alt_columns.alt_int[j].i_int.resize(totAlt);
                 }
-
-                #pragma omp section
-                {
-                    for (int j = 0; j < INFO.ints_alt; j++) {
-                        alt_columns.alt_int[j].i_int.resize(totAlt);
-                    }
+            });
+            
+            // Task per ridimensionare le vector interne di alt_float
+            auto fut3 = std::async(std::launch::async, [&]() {
+                for (int j = 0; j < INFO.floats_alt; j++) {
+                    alt_columns.alt_float[j].i_float.resize(totAlt);
                 }
-
-                #pragma omp section
-                {
-                    for (int j = 0; j < INFO.floats_alt; j++) {
-                        alt_columns.alt_float[j].i_float.resize(totAlt);
-                    }
+            });
+            
+            // Task per ridimensionare le vector interne di alt_string
+            auto fut4 = std::async(std::launch::async, [&]() {
+                for (int j = 0; j < INFO.strings_alt; j++) {
+                    alt_columns.alt_string[j].i_string.resize(totAlt);
                 }
-
-                #pragma omp section
-                {
-                    for (int j = 0; j < INFO.strings_alt; j++) {
-                        alt_columns.alt_string[j].i_string.resize(totAlt);
-                    }
-                }
-            }
+            });
+            
+            // Aspettiamo che tutti i task completino
+            fut1.get();
+            fut2.get();
+            fut3.get();
+            fut4.get();
         }
+
+        // Se samplesON è attivo, facciamo la stessa cosa per alt_sample
         if (samplesON) {
-            #pragma omp parallel
-            {
-                #pragma omp sections
-                {
-                    #pragma omp section
-                    {
-                        alt_sample.var_id.resize(totSampAlt);
-                        alt_sample.samp_id.resize(totSampAlt);
-                        alt_sample.alt_id.resize(totSampAlt);
-                    }
-
-                    #pragma omp section
-                    {
-                        for (int j = 0; j < FORMAT.ints_alt; j++) {
-                            alt_sample.samp_int[j].i_int.resize(totSampAlt);
-                        }
-                    }
-
-                    #pragma omp section
-                    {
-                        for (int j = 0; j < FORMAT.floats_alt; j++) {
-                            alt_sample.samp_float[j].i_float.resize(totSampAlt);
-                        }
-                    }
-
-                    #pragma omp section
-                    {
-                        for (int j = 0; j < FORMAT.strings_alt; j++) {
-                            alt_sample.samp_string[j].i_string.resize(totSampAlt);
-                        }
-                    }
+            auto fut1 = std::async(std::launch::async, [&]() {
+                alt_sample.var_id.resize(totSampAlt);
+                alt_sample.samp_id.resize(totSampAlt);
+                alt_sample.alt_id.resize(totSampAlt);
+            });
+            
+            auto fut2 = std::async(std::launch::async, [&]() {
+                for (int j = 0; j < FORMAT.ints_alt; j++) {
+                    alt_sample.samp_int[j].i_int.resize(totSampAlt);
                 }
-            }
+            });
+            
+            auto fut3 = std::async(std::launch::async, [&]() {
+                for (int j = 0; j < FORMAT.floats_alt; j++) {
+                    alt_sample.samp_float[j].i_float.resize(totSampAlt);
+                }
+            });
+            
+            auto fut4 = std::async(std::launch::async, [&]() {
+                for (int j = 0; j < FORMAT.strings_alt; j++) {
+                    alt_sample.samp_string[j].i_string.resize(totSampAlt);
+                }
+            });
+            
+            fut1.get();
+            fut2.get();
+            fut3.get();
+            fut4.get();
         }
         worker_thread.join();    
     }

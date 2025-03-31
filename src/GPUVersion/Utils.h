@@ -114,4 +114,77 @@ long get_file_size(string filename){
     return std::filesystem::file_size(filename);
 }
 
+/**
+ * @brief Merges member vectors from temporary data structures into a destination vector.
+ *
+ * This function iterates over a vector of temporary objects and merges each object's member vector
+ * (specified by the member pointer) into a global destination vector. The merge is performed using
+ * move semantics to avoid unnecessary copies. After merging, the member vector in the temporary object
+ * is cleared.
+ *
+ * @tparam T The type of the temporary objects.
+ * @tparam U The type of the elements in the member vector.
+ * @param tmp_alt A vector of temporary objects, each containing a member vector to be merged.
+ * @param dest The destination vector where all elements will be merged.
+ * @param num_threads The number of iterations (typically equal to tmp_alt.size()).
+ * @param member_ptr Pointer to the member vector within type T that should be merged.
+ */
+template <typename T, typename U>
+void merge_member_vector(
+    std::vector<T>& tmp_alt,
+    std::vector<U>& dest,
+    int num_threads,
+    std::vector<U> T::* member_ptr
+) {
+    for (int i = 0; i < num_threads; i++) {
+        dest.insert(
+            dest.end(),
+            std::make_move_iterator((tmp_alt[i].*member_ptr).begin()),
+            std::make_move_iterator((tmp_alt[i].*member_ptr).end())
+        );
+        (tmp_alt[i].*member_ptr).clear();
+    }
+}
+
+/**
+ * @brief Merges nested member vectors from temporary data structures into corresponding destination vectors.
+ *
+ * This function handles cases where each temporary object contains an outer vector (e.g., representing
+ * multiple alternative fields) and each element of that outer vector is itself a vector that needs to be merged.
+ * For every temporary object and for each element in the outer vector (up to num_nested elements), the function
+ * moves the contents of the nested vector into the corresponding nested vector in the destination object and clears
+ * the source nested vector afterwards.
+ *
+ * @tparam T The type of the temporary objects.
+ * @tparam S The type of the elements in the outer vector (e.g., a structure representing a field group).
+ * @tparam V The type of the elements in the inner (nested) vectors.
+ * @param tmp_alt A vector of temporary objects containing nested member vectors.
+ * @param dest The destination vector (global) where the nested vectors will be merged.
+ * @param num_threads The number of temporary objects (typically equal to tmp_alt.size()).
+ * @param num_nested The number of elements in the outer vector (e.g., the number of alternative fields).
+ * @param outer_member_ptr Pointer to the outer vector member within the temporary object T.
+ * @param inner_member_ptr Pointer to the inner vector member within the outer element S.
+ */
+template <typename T, typename S, typename V>
+void merge_nested_member_vector(
+    std::vector<T>& tmp_alt,
+    std::vector<S>& dest,
+    int num_threads,
+    int num_nested,
+    std::vector<S> T::* outer_member_ptr,
+    std::vector<V> S::* inner_member_ptr
+) {
+    for (int i = 0; i < num_threads; i++) {
+        for (int j = 0; j < num_nested; j++) {
+            (dest[j].*inner_member_ptr).insert(
+                (dest[j].*inner_member_ptr).end(),
+                std::make_move_iterator(((tmp_alt[i].*outer_member_ptr)[j].*inner_member_ptr).begin()),
+                std::make_move_iterator(((tmp_alt[i].*outer_member_ptr)[j].*inner_member_ptr).end())
+            );
+            ((tmp_alt[i].*outer_member_ptr)[j].*inner_member_ptr).clear();
+        }
+    }
+}
+ 
+
 #endif
