@@ -133,7 +133,6 @@ public:
     /// Device-side structure for sample genotype values.
     samp_GT_d *d_SC_sample_GT = (samp_GT_d*)malloc(sizeof(samp_GT_d));
 
-
     /**
      * @brief Runs the VCF parsing process.
      *
@@ -229,7 +228,6 @@ public:
         allocate_filestring();
         // Populate filestring and getting the number of lines (num_lines), saving the starting char index of each lines
         find_new_lines_index(path_to_filename, num_threadss);
-        cout << "AAAAAAAAAAA - variant_size = " << variants_size << " - num_lines = " << num_lines <<endl;
         create_info_vectors(num_threadss);
         reserve_var_columns();
         create_sample_vectors(num_threadss);
@@ -277,7 +275,6 @@ public:
      * @param my_map Host map containing keys and their corresponding integer values.
      */
     void initialize_map1(const std::map<std::string, int> &my_map){
-        
         if(my_map.size() > NUM_KEYS_MAP1) {
             std::cerr << "Too many keys." << std::endl;
             return;
@@ -352,11 +349,13 @@ public:
         samp_GT *d_SC_sample_GT;
         map<string, char> GTMap;
         */
+
+        
+        initialize_map1(var_columns.info_map1);
        
         if (hasDetSamples) {
             // Copy map to constant memory
             copyMapToConstantMemory(samp_columns.GTMap);
-            initialize_map1(var_columns.info_map1);
             // Allocate and initialize d_SC_var_id
             cudaMalloc(&d_SC_var_id, (num_lines) * samp_columns.numSample * sizeof(unsigned int));
             cudaMemset(d_SC_var_id, 0, (num_lines) * samp_columns.numSample * sizeof(unsigned int));
@@ -405,11 +404,11 @@ public:
             cudaMemcpy(d_SC_sample_GT->numb, &(samp_columns.sample_GT[0].numb), sizeof(int), cudaMemcpyHostToDevice);
 
             //TODO - Da rimuovere questa sinchronize utile per debugging:
-            cudaError_t err = cudaDeviceSynchronize();
-            if (err != cudaSuccess) {
-                fprintf(stderr, "CUDA error in device allocation: %s\n", cudaGetErrorString(err));
-                exit(EXIT_FAILURE);
-            }
+            //cudaError_t err = cudaDeviceSynchronize();
+            //if (err != cudaSuccess) {
+            //    fprintf(stderr, "CUDA error in device allocation: %s\n", cudaGetErrorString(err));
+            //    exit(EXIT_FAILURE);
+            //}
         }
 
     }
@@ -561,9 +560,7 @@ public:
             header_size += line.length() + 1;
         }
         header_size += line.length() + 1;
-        //cout << "\nheader char: " << to_string(header_size) << endl;
         variants_size = filesize - header_size; // New size without the header
-        //cout<<"filesize: "<<filesize<<" variants_size: "<<variants_size<<endl;
     }
     
     /**
@@ -644,8 +641,6 @@ public:
             samp_columns.numSample = 0;
         }
         
-        //cout << "Num Samples = " << samp_columns.numSample << endl;
-
         INFO.total_values = INFO.ID.size();
         INFO.no_alt_values = INFO.total_values - INFO.alt_values;
 
@@ -739,6 +734,18 @@ public:
                     info_map[FORMAT.ID[i]] = 11;
                     var_columns.info_map1[FORMAT.ID[i]] = 11;
                     FORMAT.flags++;
+                }else if(strcmp(&FORMAT.Number[i][0], ".") == 0){ // TODO - temporaneo per IRBT!!
+                    if(!strcmp(&FORMAT.Type[i][0], "Integer")){
+                        for(int j = 0; j < std::stoi(FORMAT.Number[i]); j++){
+                            samp_int_tmp.name = FORMAT.ID[i] + std::to_string(j);
+                            samp_columns.samp_int.push_back(samp_int_tmp);
+                            samp_columns.samp_int.back().i_int.resize((num_lines)*samp_columns.numSample, 0);
+                            samp_columns.samp_int.back().numb = 2;
+                            info_map[FORMAT.ID[i]+std::to_string(j)] = 9;
+                            var_columns.info_map1[FORMAT.ID[i]+std::to_string(j)] = 9;
+                            FORMAT.ints++;
+                        }
+                    }
                 }else{ 
                     //Number > 1
                     if(!strcmp(&FORMAT.Type[i][0], "String")){
@@ -910,7 +917,7 @@ public:
                     info_map[INFO.ID[i]] = 0;
                     var_columns.info_map1[INFO.ID[i]] = 0;
                 }
-            }else if(/*fai il punto*/ false){
+            }else if(false /*fai il punto*/){ //TODO
                 
             }else{
                 //in progress, se num > 1 TODO
@@ -1021,30 +1028,35 @@ public:
      * and asynchronously copies the parsed data from device to host.
      */
     void populate_runner(){
-        int threadsPerBlock = 512;
-        int blocksPerGrid = std::ceil((float)num_lines/(float)threadsPerBlock);
+        int threadsPerBlock = 256;
+        int blocksPerGrid = (16384/threadsPerBlock) + 1; // TODO gestire dinamicamente in funzione del numero di core
         cudaEvent_t kernel_done;
         cudaEventCreate(&kernel_done);
         auto start = chrono::system_clock::now();
         char* my_mem;
-        cudaMalloc(&my_mem, num_lines*MAX_TOKEN_LEN*MAX_TOKENS*3);
+        int batchSize = threadsPerBlock*blocksPerGrid;
+        cudaMalloc(&my_mem, batchSize*MAX_TOKEN_LEN*MAX_TOKENS*3);
 
         cudaStream_t stream1, stream2;
         cudaStreamCreate(&stream1);
         cudaStreamCreate(&stream2);
+
+        // Pass existing device pointers to h_params
+        h_params.line = d_filestring;
+        h_params.var_number = d_VC_var_number;
+        h_params.pos = d_VC_pos;
+        h_params.qual = d_VC_qual;
+        h_params.in_float = d_VC_in_float->i_float;
+        h_params.in_flag = d_VC_in_flag->i_flag;
+        h_params.in_int = d_VC_in_int->i_int;
+        h_params.float_name = d_VC_in_float->name;
+        h_params.flag_name = d_VC_in_flag->name;
+        h_params.int_name = d_VC_in_int->name;
+        h_params.new_lines_index = d_new_lines_index;
+        h_params.numLines = num_lines;
+
         if(samplesON){            
-            // Pass existing device pointers to h_params
-            h_params.line = d_filestring;
-            h_params.var_number = d_VC_var_number;
-            h_params.pos = d_VC_pos;
-            h_params.qual = d_VC_qual;
-            h_params.in_float = d_VC_in_float->i_float;
-            h_params.in_flag = d_VC_in_flag->i_flag;
-            h_params.in_int = d_VC_in_int->i_int;
-            h_params.float_name = d_VC_in_float->name;
-            h_params.flag_name = d_VC_in_flag->name;
-            h_params.int_name = d_VC_in_int->name;
-            h_params.new_lines_index = d_new_lines_index;
+            
             h_params.samp_var_id = d_SC_var_id;
             h_params.samp_id = d_SC_samp_id;
             h_params.samp_float = d_SC_samp_float->i_float;
@@ -1058,51 +1070,38 @@ public:
             h_params.samp_int_numb = d_SC_samp_int->numb;
             h_params.sample_GT = d_SC_sample_GT->GT;
             h_params.numSample = samp_columns.numSample;
-            h_params.numLines = num_lines;
             h_params.numGT = (int)(FORMAT.numGT - '0');
 
             // Allocate d_params and copy h_params to GPU
             allocParamPointers(&d_params, &h_params);
             //TODO - Da rimuovere questa sinchronize utile per debugging:
-            cudaError_t err = cudaDeviceSynchronize();
-            if (err != cudaSuccess) {
-                fprintf(stderr, "CUDA error in param alloc: %s\n", cudaGetErrorString(err));
-                exit(EXIT_FAILURE);
-            }
+            //cudaError_t err = cudaDeviceSynchronize();
+            //if (err != cudaSuccess) {
+            //    fprintf(stderr, "CUDA error in param alloc: %s\n", cudaGetErrorString(err));
+            //    exit(EXIT_FAILURE);
+            //}
 
             // Launch kernel
-            get_vcf_line_format_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_params, my_mem);
-            //get_vcf_line_format_kernel<<<1, 1>>>(d_params, my_mem);
+            kernel<<<blocksPerGrid, threadsPerBlock, 0, stream1>>>(d_params, my_mem, batchSize, true);
+
             cudaEventRecord(kernel_done, stream1);
             // Check for errors
-            err = cudaGetLastError();
-            if (err != cudaSuccess) {
-                fprintf(stderr, "CUDA error in kernel launch: %s\n", cudaGetErrorString(err));
-                exit(EXIT_FAILURE);
-            }
+            //err = cudaGetLastError();
+            //if (err != cudaSuccess) {
+            //    fprintf(stderr, "CUDA error in kernel launch: %s\n", cudaGetErrorString(err));
+            //    exit(EXIT_FAILURE);
+            //}
 
             //TODO - Da rimuovere questa sinchronize utile per debugging:
-            err = cudaDeviceSynchronize();
-            if (err != cudaSuccess) {
-                fprintf(stderr, "CUDA error in kernel execution: %s\n", cudaGetErrorString(err));
-                exit(EXIT_FAILURE);
-            }
+            //err = cudaDeviceSynchronize();
+            //if (err != cudaSuccess) {
+            //    fprintf(stderr, "CUDA error in kernel execution: %s\n", cudaGetErrorString(err));
+            //    exit(EXIT_FAILURE);
+            //}
         }else{
-            get_vcf_line_kernel<<<blocksPerGrid, threadsPerBlock>>>(
-                d_filestring,
-                d_VC_var_number,
-                d_VC_pos,
-                d_VC_qual,
-                d_VC_in_float->i_float,
-                d_VC_in_flag->i_flag,
-                d_VC_in_int->i_int,
-                d_VC_in_float->name,
-                d_VC_in_flag->name,
-                d_VC_in_int->name,
-                d_new_lines_index,
-                num_lines, 
-                my_mem
-            );
+            // Allocate d_params and copy h_params to GPU
+            allocParamPointers(&d_params, &h_params);
+            kernel<<<blocksPerGrid, threadsPerBlock, 0, stream1>>>(d_params, my_mem, batchSize, false);
             cudaEventRecord(kernel_done, stream1);
             
             // Controllo errori di lancio del kernel
@@ -1255,8 +1254,8 @@ public:
             }else{
                 // There aren't samples in the dataset
                 for(long i=start; i<end && i<num_lines-1; i++){ //TODO - Da sistemare
-                    get_vcf_line_in_var_columns(filestring, new_lines_index[i]+1, new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]));
-                }
+                    get_vcf_line_in_var_columns(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]));
+                }                      
                 tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
                 tmp_alt[th_ID].alt_id.resize(tmp_num_alt[th_ID]);
                 tmp_alt[th_ID].alt.resize(tmp_num_alt[th_ID]);
@@ -1287,16 +1286,24 @@ public:
                         std::make_move_iterator(tmp_alt[i].var_id.begin()),
                         std::make_move_iterator(tmp_alt[i].var_id.end())
                     );
+
+                    tmp_alt[i].var_id.clear(); 
+
                     alt_columns.alt_id.insert(
                         alt_columns.alt_id.end(),
                         std::make_move_iterator(tmp_alt[i].alt_id.begin()),
                         std::make_move_iterator(tmp_alt[i].alt_id.end())
                     );
+
+                    tmp_alt[i].alt_id.clear(); 
+
                     alt_columns.alt.insert(
                         alt_columns.alt.end(),
                         std::make_move_iterator(tmp_alt[i].alt.begin()),
                         std::make_move_iterator(tmp_alt[i].alt.end())
                     );
+
+                    tmp_alt[i].alt.clear(); 
 
                     for (int j = 0; j < INFO.ints_alt; j++) {
                         alt_columns.alt_int[j].i_int.insert(
@@ -1304,20 +1311,25 @@ public:
                             std::make_move_iterator(tmp_alt[i].alt_int[j].i_int.begin()),
                             std::make_move_iterator(tmp_alt[i].alt_int[j].i_int.end())
                         );
+                        tmp_alt[i].alt_int[j].i_int.clear(); 
                     }
+
                     for (int j = 0; j < INFO.floats_alt; j++) {
                         alt_columns.alt_float[j].i_float.insert(
                             alt_columns.alt_float[j].i_float.end(),
                             std::make_move_iterator(tmp_alt[i].alt_float[j].i_float.begin()),
                             std::make_move_iterator(tmp_alt[i].alt_float[j].i_float.end())
                         );
+                        tmp_alt[i].alt_float[j].i_float.clear(); 
                     }
+
                     for (int j = 0; j < INFO.strings_alt; j++) {
                         alt_columns.alt_string[j].i_string.insert(
                             alt_columns.alt_string[j].i_string.end(),
                             std::make_move_iterator(tmp_alt[i].alt_string[j].i_string.begin()),
                             std::make_move_iterator(tmp_alt[i].alt_string[j].i_string.end())
                         );
+                        tmp_alt[i].alt_string[j].i_string.clear(); 
                     }
                 }
 
@@ -1472,6 +1484,10 @@ public:
         vector<string> tmp_split;
         vector<string> tmp_format_split;
 
+        if(line[start+iter]=='\n'){
+            iter++;
+        } 
+
         //Chromosome
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
@@ -1534,7 +1550,7 @@ public:
                 for(int y = 0; y<local_alt; y++){
                     (*tmp_alt).alt[(*tmp_num_alt)] = tmp_split[y];
                     (*tmp_alt).alt_id[(*tmp_num_alt)] = (char)y;
-                    (*tmp_alt).var_id[(*tmp_num_alt)] = var_columns.var_number[i];
+                    (*tmp_alt).var_id[(*tmp_num_alt)] = i;
                 }
             }else{
                 tmp += line[start+iter];
@@ -1683,7 +1699,9 @@ public:
         vector<string> tmp_format_split;
         vector<string> tmp_subSplit;
 
-        if(line[start+iter]=='\n') iter++;
+        if(line[start+iter]=='\n'){
+            iter++;
+        } 
         //Chromosome
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){

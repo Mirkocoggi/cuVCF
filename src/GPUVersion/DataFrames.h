@@ -75,11 +75,10 @@ public:
     void print(long num_lines) {
         std::cout << "VarID\tChrom\tPos\tID\tRef\tQUAL\tFilter\tFlag\t\tInt\t\tFloat\t\tString" << std::endl;
         long iter = (num_lines > static_cast<long>(id.size())) ? id.size() : num_lines;
-        
         for (long i = 0; i < iter; i++) {
             // Stampa VarID (presumibilmente var_number)
             if (i < static_cast<long>(var_number.size()))
-                std::cout << var_number[i] << " : " << id[i] << "\t";
+                std::cout << var_number[i] << "\t";
             else
                 std::cout << "nan\t";
             
@@ -156,9 +155,9 @@ public:
             // Flag
             for (size_t j = 0; j < in_flag.size(); j++) {
                 if (i < static_cast<long>(in_flag[j].i_flag.size())){
-                    //if(in_flag[j].i_flag[i]==1) {
-                        std::cout << in_flag[j].name << ":" <<(int)in_flag[j].i_flag[i] << " ";
-                    //}
+                    if(in_flag[j].i_flag[i]==1) {
+                        std::cout << in_flag[j].name << ";";
+                    }
                 }else{
                     std::cout << in_flag[j].name << "nan ";
                 }
