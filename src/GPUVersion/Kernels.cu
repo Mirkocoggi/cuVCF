@@ -91,14 +91,14 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
     long iter=0;
     int tmp_idx;
     int num_sample_tokens;
-    // TODO - sistemare tutte le dimensioni necessarie
     char tmp[MAX_TMP_LEN]; 
     char* tmp_split = (char*) &my_mem[thID*MAX_TOKEN_LEN*MAX_TOKENS*3];
     char* tmp_values = (char*) &my_mem[thID*MAX_TOKEN_LEN*MAX_TOKENS*3 + MAX_TOKEN_LEN*MAX_TOKENS];
     char* sub_split = (char*) &my_mem[thID*MAX_TOKEN_LEN*MAX_TOKENS*3 + 2*MAX_TOKEN_LEN*MAX_TOKENS];
-    char key[MAX_TOKEN_LEN], value[MAX_TOKEN_LEN]; // TODO -> gestire se non servono
+    char key[MAX_TOKEN_LEN], value[MAX_TOKEN_LEN];
 
-    thID = thID + currBatch*batch_size; // TODO - deve essere dopo my_mem e prima del resto
+    thID = thID + currBatch*batch_size;
+
     if(thID>=params->numLines){
         return;
     }

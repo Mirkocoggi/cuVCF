@@ -162,6 +162,7 @@ public:
         size_t constantMemory = 0;     // Constant memory
         size_t textureAlignment = 0;   // Texture alignment
         int maxThreadsPerBlock = 0;    // Maximum threads per block
+        int cudaCores;                 // Total number of CUDA cores
         int threadsDim[3] = {0};       // Maximum threads per block dimensions
         int gridDim[3] = {0};          // Maximum grid dimensions
 
@@ -194,6 +195,36 @@ public:
             gridDim[0] = prop.maxGridSize[0];
             gridDim[1] = prop.maxGridSize[1];
             gridDim[2] = prop.maxGridSize[2];
+
+            // Determine number of CUDA cores per SM based on compute capability
+            int coresPerSM = 0;
+            if (prop.major == 1) {
+                // Tesla architecture
+                coresPerSM = 8;
+            } else if (prop.major == 2) {
+                // Fermi architecture
+                coresPerSM = (prop.minor == 0 || prop.minor == 1) ? 32 : 48;
+            } else if (prop.major == 3) {
+                // Kepler architecture
+                coresPerSM = 192;
+            } else if (prop.major == 5) {
+                // Maxwell architecture
+                coresPerSM = 128;
+            } else if (prop.major == 6) {
+                // Pascal architecture
+                coresPerSM = (prop.minor == 1 || prop.minor == 2) ? 128 : 64;
+            } else if (prop.major == 7) {
+                // Volta or Turing architecture
+                coresPerSM = (prop.minor == 0) ? 64 : 64;  // Adjust if needed
+            } else if (prop.major == 8) {
+                // Ampere architecture
+                coresPerSM = (prop.minor == 0) ? 64 : (prop.minor == 6 ? 128 : 64);
+            } else {
+                // Fallback assumption
+                coresPerSM = 128;
+            }
+
+            cudaCores = coresPerSM * prop.multiProcessorCount;
 
             //Print the saved values
             //std::cout << "Device Information:" << std::endl;
@@ -236,7 +267,7 @@ public:
         create_sample_vectors(num_threadss);
         //Allocate and initialize device memory
         device_allocation();
-        populate_var_columns(num_threadss);
+        populate_var_columns(num_threadss, cudaCores);
         device_free();
 
     }
@@ -307,22 +338,17 @@ public:
      * and INFO fields. If sample data is present, it also allocates memory for sample fields.
      */
     void device_allocation(){
-
-        //TODO: valutare se può avere senso o meno creare i vettoroni in locale e poi spostare tutto su device (meno memcpy)
-
         cudaMalloc(&d_VC_var_number, (num_lines) * sizeof(unsigned int));
         cudaMalloc(&d_VC_pos, (num_lines) * sizeof(unsigned int));
         cudaMalloc(&d_VC_qual, (num_lines) * sizeof(__half));
-        //TODO: cudamallocmanaged, 
+
         int tmp = var_columns.in_float.size();
-        //TODO: in costant memory / texture memory mettere i nomi su cui iterare
 
         const int max_name_size = 16;
         // allocazione di tutti i campi float in successione
         cudaMalloc(&(d_VC_in_float->i_float), tmp * (num_lines) * sizeof(__half)); //Va in segfault qui
         cudaMalloc(&(d_VC_in_float->name), tmp * sizeof(char) * max_name_size); //allocazione in successione di tutti i nomi (assumo massimo 16 caratteri)
 
-        //TODO: verificare se è possibile allocare in successione i nomi
         for (int i = 0; i < tmp; i++) {
             cudaMemcpy(d_VC_in_float->name+i*max_name_size, var_columns.in_float[i].name.c_str(), var_columns.in_float[i].name.size() + 1, cudaMemcpyHostToDevice);
         }
@@ -343,17 +369,6 @@ public:
             cudaMemcpy(d_VC_in_int->name+i*max_name_size, var_columns.in_int[i].name.c_str(), var_columns.in_int[i].name.size() + 1, cudaMemcpyHostToDevice);
         }
 
-        /*
-        unsigned int *d_SC_var_id;
-        unsigned short *d_SC_samp_id;
-        samp_Float *d_SC_samp_float;
-        samp_Flag *d_SC_samp_flag;
-        samp_Int *d_SC_samp_int;
-        samp_GT *d_SC_sample_GT;
-        map<string, char> GTMap;
-        */
-
-        
         initialize_map1(var_columns.info_map1);
        
         if (hasDetSamples) {
@@ -737,18 +752,89 @@ public:
                     info_map[FORMAT.ID[i]] = 11;
                     var_columns.info_map1[FORMAT.ID[i]] = 11;
                     FORMAT.flags++;
-                }else if(strcmp(&FORMAT.Number[i][0], ".") == 0){ // TODO - temporaneo per IRBT!!
-                    if(!strcmp(&FORMAT.Type[i][0], "Integer")){
-                        for(int j = 0; j < std::stoi(FORMAT.Number[i]); j++){
-                            samp_int_tmp.name = FORMAT.ID[i] + std::to_string(j);
-                            samp_columns.samp_int.push_back(samp_int_tmp);
-                            samp_columns.samp_int.back().i_int.resize((num_lines)*samp_columns.numSample, 0);
-                            samp_columns.samp_int.back().numb = 2;
-                            info_map[FORMAT.ID[i]+std::to_string(j)] = 9;
-                            var_columns.info_map1[FORMAT.ID[i]+std::to_string(j)] = 9;
-                            FORMAT.ints++;
+                }else if(strcmp(&FORMAT.Number[i][0], ".") == 0){
+                    int userNumber = -1;
+                    // Ciclo per richiedere un input corretto (intero non negativo)
+                    while(true) {
+                        std::cout << "Select the number for the field " 
+                                << FORMAT.ID[i] << " (non negative integer): ";
+                        if (std::cin >> userNumber && userNumber >= 0) {
+                            break; // Input corretto, esce dal ciclo
+                        } else {
+                            std::cout << "Valore non valido. Riprova." << std::endl;
+                            std::cin.clear(); // Ripristina lo stato del flusso
+                            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Scarta l'input errato
                         }
                     }
+                
+                    // Caso in cui l'utente inserisca 1: trattiamo il campo come un singolo elemento
+                    if(userNumber == 1){
+                        if(!strcmp(&FORMAT.Type[i][0], "String")){
+                            samp_string_tmp.name = FORMAT.ID[i];
+                            samp_columns.samp_string.push_back(samp_string_tmp);
+                            samp_columns.samp_string.back().i_string.resize((num_lines)*samp_columns.numSample, "\0");
+                            samp_columns.samp_string.back().numb = userNumber;
+                            info_map[FORMAT.ID[i]] = 8;
+                            var_columns.info_map1[FORMAT.ID[i]] = 8;
+                            FORMAT.strings++;                        
+                        } else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
+                            samp_int_tmp.name = FORMAT.ID[i];
+                            samp_columns.samp_int.push_back(samp_int_tmp);
+                            samp_columns.samp_int.back().i_int.resize((num_lines)*samp_columns.numSample, 0);
+                            samp_columns.samp_int.back().numb = userNumber;
+                            info_map[FORMAT.ID[i]] = 9;
+                            var_columns.info_map1[FORMAT.ID[i]] = 9;
+                            FORMAT.ints++;
+                        } else if(!strcmp(&FORMAT.Type[i][0], "Float")){
+                            samp_float_tmp.name = FORMAT.ID[i];
+                            samp_columns.samp_float.push_back(samp_float_tmp);
+                            samp_columns.samp_float.back().i_float.resize((num_lines)*samp_columns.numSample, 0);
+                            samp_columns.samp_float.back().numb = userNumber;
+                            info_map[FORMAT.ID[i]] = 10;
+                            var_columns.info_map1[FORMAT.ID[i]] = 10;
+                            FORMAT.floats++;
+                        }
+                    }else if(userNumber == 0){
+                        samp_flag_tmp.name = FORMAT.ID[i];
+                        samp_columns.samp_flag.push_back(samp_flag_tmp);
+                        samp_columns.samp_flag.back().i_flag.resize((num_lines)*samp_columns.numSample, 0);
+                        samp_columns.samp_flag.back().numb = userNumber;
+                        info_map[FORMAT.ID[i]] = 11;
+                        var_columns.info_map1[FORMAT.ID[i]] = 11;
+                        FORMAT.flags++;
+                    }else { // userNumber>1
+                        if(!strcmp(&FORMAT.Type[i][0], "String")){
+                            for(int j = 0; j < userNumber; j++){
+                                samp_string_tmp.name = FORMAT.ID[i] + std::to_string(j);
+                                samp_columns.samp_string.push_back(samp_string_tmp);
+                                samp_columns.samp_string.back().i_string.resize((num_lines)*samp_columns.numSample, "\0");
+                                samp_columns.samp_string.back().numb = userNumber;
+                                info_map[FORMAT.ID[i] + std::to_string(j)] = 8;
+                                var_columns.info_map1[FORMAT.ID[i] + std::to_string(j)] = 8;
+                                FORMAT.strings++;
+                            }
+                        } else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
+                            for(int j = 0; j < userNumber; j++){
+                                samp_int_tmp.name = FORMAT.ID[i] + std::to_string(j);
+                                samp_columns.samp_int.push_back(samp_int_tmp);
+                                samp_columns.samp_int.back().i_int.resize((num_lines)*samp_columns.numSample, 0);
+                                samp_columns.samp_int.back().numb = userNumber;
+                                info_map[FORMAT.ID[i] + std::to_string(j)] = 9;
+                                var_columns.info_map1[FORMAT.ID[i] + std::to_string(j)] = 9;
+                                FORMAT.ints++;
+                            }
+                        } else if(!strcmp(&FORMAT.Type[i][0], "Float")){
+                            for(int j = 0; j < userNumber; j++){
+                                samp_float_tmp.name = FORMAT.ID[i] + std::to_string(j);
+                                samp_columns.samp_float.push_back(samp_float_tmp);
+                                samp_columns.samp_float.back().i_float.resize((num_lines)*samp_columns.numSample, 0);
+                                samp_columns.samp_float.back().numb = userNumber;
+                                info_map[FORMAT.ID[i] + std::to_string(j)] = 10;
+                                var_columns.info_map1[FORMAT.ID[i] + std::to_string(j)] = 10;
+                                FORMAT.floats++;
+                            }
+                        }
+                    }                    
                 }else{ 
                     //Number > 1
                     if(!strcmp(&FORMAT.Type[i][0], "String")){
@@ -920,8 +1006,6 @@ public:
                     info_map[INFO.ID[i]] = 0;
                     var_columns.info_map1[INFO.ID[i]] = 0;
                 }
-            }else if(false /*fai il punto*/){ //TODO
-                
             }else{
                 //in progress, se num > 1 TODO
                 // Può avere solo come valori: 0, 1, R, A, G, .
@@ -1030,9 +1114,9 @@ public:
      * Sets up CUDA streams and events, launches the appropriate kernel (based on whether sample data is present),
      * and asynchronously copies the parsed data from device to host.
      */
-    void populate_runner(){
+    void populate_runner(int numb_cores){
         int threadsPerBlock = 32;
-        int blocksPerGrid = (16384/threadsPerBlock) + 1; // TODO gestire dinamicamente in funzione del numero di core
+        int blocksPerGrid = (numb_cores/threadsPerBlock) + 1; // TODO gestire dinamicamente in funzione del numero di core
         cudaEvent_t kernel_done;
         cudaEventCreate(&kernel_done);
         auto start = chrono::system_clock::now();
@@ -1176,9 +1260,9 @@ public:
      *
      * @param num_threads Number of threads to use for parallel merging.
      */
-    void populate_var_columns(int num_threads){
+    void populate_var_columns(int num_threads, int numb_cores){
 
-        std::thread worker_thread(&vcf_parsed::populate_runner, this);
+        std::thread worker_thread(&vcf_parsed::populate_runner, this, numb_cores);
 
         long batch_size = (num_lines-2+num_threads)/num_threads;
         
@@ -1280,7 +1364,7 @@ public:
             }
         }
 
-        // Merge results in parallel - TODO da fare a mano
+        // Merge results in parallel
         std::thread t1(merge_member_vector<alt_columns_df, unsigned int>, std::ref(tmp_alt),
                 std::ref(alt_columns.var_id), num_threads, &alt_columns_df::var_id);
 
@@ -1554,6 +1638,9 @@ public:
         //Info
         tmp="\0";
         find1=false;
+        bool find_info_type = false;
+        bool find_info_elem = false;
+        int el=0;
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '||line[start+iter]=='\n'){
                 find1 = true;
@@ -1563,13 +1650,13 @@ public:
                 vector<string> tmp_elems;
                 for(int ii=0; ii<tmp_el.size(); ii++){
                     boost::split(tmp_elems, tmp_el[ii], boost::is_any_of("=")); //info_id separation from contents
-                    bool find_info_type = false;
-                    bool find_info_elem = false;
+                    find_info_type = false;
+                    find_info_elem = false;
                     if(tmp_elems.size()==2){
                         while(!find_info_type){
                             if(var_columns.info_map1[tmp_elems[0]]==STRING){
                                 //String
-                                int el=0;
+                                el=0;
                                 while(!find_info_elem){
                                     if(var_columns.in_string[el].name == tmp_elems[0]){
                                         var_columns.in_string[el].i_string[i] = tmp_elems[1];
@@ -1580,7 +1667,7 @@ public:
                                 find_info_type = true;
                             }else if(var_columns.info_map1[tmp_elems[0]]==INT_ALT){
                                 //Int Alt
-                                int el=0;
+                                el=0;
                                 while(!find_info_elem){
                                     if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
@@ -1594,7 +1681,7 @@ public:
                                 find_info_type = true;
                             }else if(var_columns.info_map1[tmp_elems[0]]==FLOAT_ALT){
                                 //Float Alt
-                                int el=0;
+                                el=0;
                                 while(!find_info_elem){
                                     if((*tmp_alt).alt_float[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
@@ -1613,7 +1700,7 @@ public:
                                 find_info_type = true;
                             }else if(var_columns.info_map1[tmp_elems[0]]==STRING_ALT){
                                 //String Alt
-                                int el=0;
+                                el=0;
                                 while(!find_info_elem){
                                     if((*tmp_alt).alt_string[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
@@ -1686,6 +1773,7 @@ public:
                 iter++;
             }
         }
+
         //Position on device
         // Salta la sottostringa delimitata da '\t' o ' '
         while (line[start + iter] != '\t' && line[start + iter] != ' ') {
@@ -1706,6 +1794,7 @@ public:
                 iter++;
             }
         }
+
         //Reference
         tmp="\0";
         find1=false;
@@ -1719,6 +1808,7 @@ public:
                 iter++;
             }
         }
+
         //Alternative
         tmp="\0";
         find1=false;
@@ -1744,6 +1834,7 @@ public:
             iter++;
         }
         iter++;
+
         //Filter
         tmp="\0";
         find1=false;
@@ -1760,9 +1851,13 @@ public:
                 iter++;
             }
         }
+
         //Info
         tmp="\0";
         find1=false;
+        bool find_info_type = false;
+        bool find_info_elem = false;
+        int el=0;
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '||line[start+iter]=='\n'){
                 find1 = true;
@@ -1772,13 +1867,13 @@ public:
                 vector<string> tmp_elems;
                 for(int ii=0; ii<tmp_el.size(); ii++){
                     boost::split(tmp_elems, tmp_el[ii], boost::is_any_of("=")); //info_id separation from contents
-                    bool find_info_type = false;
-                    bool find_info_elem = false;
+                    find_info_type = false;
+                    find_info_elem = false;
                     if(tmp_elems.size()==2){
                         while(!find_info_type){
                             if(var_columns.info_map1[tmp_elems[0]]==STRING){
                                 //String
-                                int el=0;
+                                el=0;
                                 while(!find_info_elem){
                                     if(var_columns.in_string[el].name == tmp_elems[0]){
                                         var_columns.in_string[el].i_string[i] = tmp_elems[1];
@@ -1789,7 +1884,7 @@ public:
                                 find_info_type = true;
                             }else if(var_columns.info_map1[tmp_elems[0]]==INT_ALT){
                                 //Int Alt
-                                int el=0;
+                                el=0;
                                 while(!find_info_elem){
                                     if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
@@ -1803,7 +1898,7 @@ public:
                                 find_info_type = true;
                             }else if(var_columns.info_map1[tmp_elems[0]]==FLOAT_ALT){
                                 //Float Alt
-                                int el=0;
+                                el=0;
                                 while(!find_info_elem){
                                     if((*tmp_alt).alt_float[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
@@ -1822,7 +1917,7 @@ public:
                                 find_info_type = true;
                             }else if(var_columns.info_map1[tmp_elems[0]]==STRING_ALT){
                                 //String Alt
-                                int el=0;
+                                el=0;
                                 while(!find_info_elem){
                                     if((*tmp_alt).alt_string[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
@@ -1846,6 +1941,7 @@ public:
             }
         }
         (*tmp_num_alt) = (*tmp_num_alt)+local_alt;
+        
         //Format decomposition
         tmp="\0";
         find1=false;
@@ -1861,7 +1957,10 @@ public:
                 iter++;
             }
         }
+
         int samp;
+        bool find_type = false;
+        bool find_elem = false;
         for(samp = 0; samp < (*sample).numSample; samp++){
             tmp="\0";
             find1=false;
@@ -1872,8 +1971,8 @@ public:
                     boost::split(tmp_split, tmp, boost::is_any_of(":"));
                     vector<string> tmp_sub;
                     for(int j = 0; j < tmp_split.size(); j++){
-                        bool find_type = false;
-                        bool find_elem = false;
+                        find_type = false;
+                        find_elem = false;
                         while(!find_type){
                             if(!strcmp(tmp_format_split[j].c_str(), "GT")){
                                 if(!((*sample).sample_GT.size() >= 1)){

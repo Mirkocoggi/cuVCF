@@ -477,7 +477,6 @@ class sample_columns_df //aka df3
             }
             cout << "\t";
 
-            //TODO - il segfault è qui dentro
             for(int j=0; j < sample_GT[0].numb; j++){
                 cout << "GT"<< j << "=" << getGTStringFromChar(sample_GT[j].GT[i]) << ";";
             }
@@ -675,7 +674,7 @@ class alt_format_df //aka df4 in progress
      *
      * @param n Number of entries to print.
      */
-    void print(int n){ //TODO
+    void print(int n){
         cout << "VarID\tSampID\talt_id\tFloat\t\tInt\t\tStr\t\tGT" << endl;
 
         int iter = (n>samp_id.size()) ? samp_id.size() : n;

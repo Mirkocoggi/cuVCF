@@ -52,9 +52,6 @@ using namespace std;
   */
  __device__ int d_values_map1[NUM_KEYS_MAP1];
 
-
-//TODO - queste funzioni sono simili controlla utilità
-
 /**
  * @brief Compares two strings (s1 and s2) up to n characters.
  * @param s1 Pointer to the first string.
@@ -70,20 +67,6 @@ __device__ int cuda_strncmp(const char *s1, const char *s2, size_t n) {
     }
     return 0;
 }
-
-/**
- * @brief Compares two strings (s1 and s2) until the null terminator.
- * @param s1 Pointer to the first string.
- * @param s2 Pointer to the second string.
- * @return 0 if the strings are equal, or a negative/positive value if s1 < s2 or s1 > s2.
-
-__device__ int cuda_strcmp(const char *s1, const char *s2) {
-    while (*s1 && (*s1 == *s2)) {
-        s1++;
-        s2++;
-    }
-    return *(unsigned char *)s1 - *(unsigned char *)s2;
-} */
 
 /**
  * @brief Custom comparison of two strings (s1 and s2) up to n characters, allowing trailing digits in s2.
