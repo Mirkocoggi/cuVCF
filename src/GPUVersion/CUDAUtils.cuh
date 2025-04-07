@@ -28,29 +28,29 @@ using namespace std;
  * @brief Constant memory holding the GT keys.
  * Each key is up to MAX_KEY_LENGTH_GT characters long.
  */
- __constant__ char d_keys_gt[NUM_KEYS_GT][MAX_KEY_LENGTH_GT];
+__constant__ char d_keys_gt[NUM_KEYS_GT][MAX_KEY_LENGTH_GT];
 
- /**
+/**
   * @brief Constant memory holding the values corresponding to the GT keys.
   * Each value is a single char for each key.
   */
- __constant__ char d_values_gt[NUM_KEYS_GT];
+__constant__ char d_values_gt[NUM_KEYS_GT];
  
- /// Maximum number of keys in Map1.
- #define NUM_KEYS_MAP1 128
- /// Maximum length for each key in Map1.
- #define MAX_KEY_LENGTH_MAP1 32
+/// Maximum number of keys in Map1.
+#define NUM_KEYS_MAP1 128
+/// Maximum length for each key in Map1.
+#define MAX_KEY_LENGTH_MAP1 32
  
- /**
+/**
   * @brief Device memory holding the keys for Map1.
   * Each key can be up to MAX_KEY_LENGTH_MAP1 characters long.
   */
- __device__ char d_keys_map1[NUM_KEYS_MAP1][MAX_KEY_LENGTH_MAP1];
+__device__ char d_keys_map1[NUM_KEYS_MAP1][MAX_KEY_LENGTH_MAP1];
  
- /**
+/**
   * @brief Device memory holding the integer values corresponding to Map1 keys.
   */
- __device__ int d_values_map1[NUM_KEYS_MAP1];
+__device__ int d_values_map1[NUM_KEYS_MAP1];
 
 /**
  * @brief Compares two strings (s1 and s2) up to n characters.
@@ -292,5 +292,80 @@ __device__ half safeStof(const char* tmp) {
 
     return __float2half(value);
 }
+
+//TODO: da controllare:
+/// Numero di chiavi per la mappa PolyPhen.
+#define NUM_KEYS_POLYPHEN 4
+/// Lunghezza massima di ogni chiave per la mappa PolyPhen (includendo il terminatore null).
+#define MAX_KEY_LENGTH_POLYPHEN 20
+
+/// Numero di chiavi per la mappa CSQ.
+#define NUM_KEYS_CSQ 32
+/// Lunghezza massima di ogni chiave per la mappa CSQ (includendo il terminatore null).
+#define MAX_KEY_LENGTH_CSQ 32
+
+/**
+ * @brief Memoria costante contenente le chiavi per la mappa PolyPhen.
+ * Ogni chiave è una stringa lunga fino a MAX_KEY_LENGTH_POLYPHEN caratteri.
+ */
+__constant__ char d_polyphen_keys[NUM_KEYS_POLYPHEN][MAX_KEY_LENGTH_POLYPHEN] = {
+    "",
+    "benign",
+    "possibly_damaging",
+    "probably_damaging"
+};
+
+/**
+ * @brief Memoria costante contenente i valori corrispondenti alle chiavi PolyPhen.
+ * Ogni valore è rappresentato da un singolo char.
+ */
+__constant__ char d_polyphen_values[NUM_KEYS_POLYPHEN] = {0, 1, 2, 3};
+
+/**
+ * @brief Memoria costante contenente le chiavi per la mappa CSQ.
+ * Ogni chiave è una stringa lunga fino a MAX_KEY_LENGTH_CSQ caratteri.
+ */
+__constant__ char d_csq_keys[NUM_KEYS_CSQ][MAX_KEY_LENGTH_CSQ] = {
+    "synonymous_variant",
+    "missense_variant",
+    "nonsense_variant",
+    "frameshift_variant",
+    "inframe_insertion",
+    "inframe_deletion",
+    "5_prime_UTR_variant",
+    "3_prime_UTR_variant",
+    "splice_region_variant",
+    "splice_acceptor_variant",
+    "splice_donor_variant",
+    "regulatory_region_variant",
+    "upstream_gene_variant",
+    "downstream_gene_variant",
+    "coding_sequence_variant",
+    "non_coding_transcript_variant",
+    "mature_miRNA_variant",
+    "ncRNA_exon_variant",
+    "ncRNA_intronic_variant",
+    "protein_altering_variant",
+    "transcript_ablation",
+    "transcript_amplification",
+    "intron_variant",
+    "intergenic_variant",
+    "enhancer_variant",
+    "regulatory_region_variant",
+    "non_coding_exon_variant",
+    "pseudogene_variant"
+};
+
+/**
+ * @brief Memoria costante contenente i valori corrispondenti alle chiavi CSQ.
+ * Ogni valore è rappresentato da un singolo char.
+ */
+__constant__ char d_csq_values[NUM_KEYS_CSQ] = {
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27
+};
+
+
+
 
 #endif
