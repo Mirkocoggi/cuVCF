@@ -45,6 +45,8 @@ void init_GTMap() {
             value++;
         }
     }
+    GTMap[".|."] = static_cast<char>(254);
+    GTMap["./."] = static_cast<char>(255);
 }
 
 void bind_GTWrapper(py::module &m) {

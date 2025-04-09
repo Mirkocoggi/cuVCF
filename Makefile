@@ -15,6 +15,9 @@ DEBUG_GPUFLAGS = -G -g -O0 -lineinfo -std=c++17 -arch=sm_89
 # Librerie da linkare
 LIBS = -lz -I/usr/include/Imath -lImath
 
+# Recupera i flag di include per Python (es. -I/usr/include/python3.12)
+PYINCLUDES := $(shell python3-config --includes)
+
 # Target per compilare la versione CPU (VARSTRUCT)
 VARSTRUCT:
 	mkdir -p bin/
@@ -36,11 +39,17 @@ DEBUG:
 	mkdir -p bin/
 	$(NVCC) $(DEBUG_GPUFLAGS) -o bin/VCFparser src/GPUVersion/main.cu -Xcompiler $(OPENMP)
 
+# Target per compilare il modulo Python con binding (shared library)
+PYBIND:
+	mkdir -p bin/
+	nvcc $(GPUFLAGS) $(PYINCLUDES) -Xcompiler "-fPIC -Wall -fopenmp" -shared -o bin/GPUParser.so src/GPUVersion/Bindings.cpp src/GPUVersion/Parser.cu $(LIBS)
+#	nvcc -O3 -Xcompiler -shared -std=c++17 -arch=sm_89 -fPIC $(python3 -m pybind11 --includes) $(OPENMP) src/GPUVersion/Bindings.cpp -o bin/GPUParser$(python3-config --extension-suffix) $(LIBS)
+
 # Target "all" compila tutti i target desiderati
-all: VARSTRUCT VARCOL GPU
+all: VARSTRUCT VARCOL GPU PYBIND
 
 # Pulizia dei file compilati
 clean:
 	rm -rf bin/
 
-.PHONY: all clean VARSTRUCT VARCOL GPU DEBUG
+.PHONY: all clean VARSTRUCT VARCOL GPU DEBUG PYBIND
