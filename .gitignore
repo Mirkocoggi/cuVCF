@@ -1,5 +1,11 @@
 .DS_Store
 .vscode
 bin/
+rapids_env/
+vcflib/
 *.log
 *.res
+df1.csv
+df2.csv
+df3.csv
+df4.csv

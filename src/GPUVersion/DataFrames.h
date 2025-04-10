@@ -400,6 +400,8 @@ class sample_columns_df //aka df3
      * It also maps missing genotype values.
      */
     void initMapGT(){
+        GTMap[".|."] = static_cast<char>(254);
+        GTMap["./."] = static_cast<char>(255);
         int value = 0;
         // First __half of the map from 0|0 to 10|10
         for (int i = 0; i < 11; ++i) {
@@ -416,11 +418,7 @@ class sample_columns_df //aka df3
                 GTMap[key] = value;
                 value++;
             }
-        }
-
-        GTMap[".|."] = static_cast<char>(254);
-        GTMap["./."] = static_cast<char>(255);
-        
+        }       
     }
 
     /**

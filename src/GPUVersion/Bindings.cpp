@@ -11,6 +11,91 @@
 
 namespace py = pybind11;
 
+//------------------------------------------------------------------------------
+// GTWrapper
+//------------------------------------------------------------------------------
+class GTWrapper {
+    public:
+        char gt_value;  // Valore char usato per rappresentare il genotype
+        static std::map<std::string, char> GTMap;  // Mappa condivisa per la conversione
+    
+        GTWrapper(char value) : gt_value(value) {}
+    
+        // Ritorna la stringa associata a gt_value tramite GTMap
+        std::string to_string() const {
+            for (const auto& pair : GTMap) {
+                if (pair.second == gt_value) {
+                    return pair.first;
+                }
+            }
+            return std::string(1, gt_value);
+        }
+    };
+    
+    // Inizializzazione della mappa statica
+    std::map<std::string, char> GTWrapper::GTMap;
+    
+    void init_GTMap() {
+        int value = 0;
+        for (int i = 0; i < 11; ++i) {
+            for (int j = 0; j < 11; ++j) {
+                std::string key1 = std::to_string(i) + "|" + std::to_string(j);
+                GTWrapper::GTMap[key1] = value;
+                value++;
+            }
+        }
+        for (int i = 0; i < 11; ++i) {
+            for (int j = 0; j < 11; ++j) {
+                std::string key2 = std::to_string(i) + "/" + std::to_string(j);
+                GTWrapper::GTMap[key2] = value;
+                value++;
+            }
+        }
+        GTWrapper::GTMap[".|."] = static_cast<char>(254);
+        GTWrapper::GTMap["./."] = static_cast<char>(255);
+    }
+    
+    void bind_GTWrapper(py::module &m) {
+        py::class_<GTWrapper>(m, "GT")
+            .def(py::init<char>())
+            .def("__repr__", &GTWrapper::to_string);
+    }
+    
+//------------------------------------------------------------------------------
+// half_wrapper per __half di CUDA
+//------------------------------------------------------------------------------
+    struct half_wrapper {
+        __half value;
+        half_wrapper() : value(__float2half(0.0f)) {}
+        half_wrapper(float f) : value(__float2half(f)) {}
+        half_wrapper(const __half &h) : value(h) {}
+        float to_float() const { return __half2float(value); }
+    };
+    
+    PYBIND11_MAKE_OPAQUE(std::vector<half_wrapper>);
+    
+    void bind_vector_half(py::module &m) {
+        py::bind_vector<std::vector<half_wrapper>>(m, "VectorHalf");
+    }
+    
+    // Helper: converte std::vector<__half> in std::vector<half_wrapper>
+    std::vector<half_wrapper> convert_half_vector(const std::vector<__half>& src) {
+        std::vector<half_wrapper> result;
+        result.reserve(src.size());
+        for (const auto &h : src) {
+            result.push_back(half_wrapper(h));
+        }
+        return result;
+    }
+    
+    // Helper: Setter che converte da vector<half_wrapper> a vector<__half>
+    void set_half_vector(std::vector<__half>& dest, const std::vector<half_wrapper>& src) {
+        dest.clear();
+        for (const auto &hw : src) {
+            dest.push_back(hw.value);
+        }
+    }
+    
 //---------------------------------------------------------------------
 // Helper: converte std::vector<__half> in un py::array_t<uint16_t>
 // con gestione della memoria tramite capsule per mantenere la validità
@@ -41,7 +126,6 @@ py::array_t<uint16_t> half_vector_to_uint16(const std::vector<__half>& vec) {
 //------------------------------------------------------------------------------
 // get_var_columns_data, costruttore df1
 //------------------------------------------------------------------------------
-
 py::dict get_var_columns_data(const var_columns_df &df) {
     py::dict d;
 
@@ -63,25 +147,15 @@ py::dict get_var_columns_data(const var_columns_df &df) {
     // qual: converti il vector<__half> in un array di uint16_t
     d["qual"] = half_vector_to_uint16(df.qual);
 
-    
-    // Esempio per i campi INFO:
-    // Supponiamo che ogni elemento in in_float abbia: 
-    //    std::string name; e std::vector<__half> i_float;
-    // Qui li converto in array di float
     for (const auto &info : df.in_float) {
-        std::vector<float> col;
-        col.reserve(info.i_float.size());
-        for (const __half &h : info.i_float) {
-            col.push_back(__half2float(h));
-        }
-        d[info.name.c_str()] = py::array_t<float>(col.size(), col.data());
+        d[info.name.c_str()] = half_vector_to_uint16(info.i_float);
     }
-    // I campi in_flag, in_string, in_int possono essere aggiunti similmente,
-    // oppure sfruttando py::cast se sono già dei vector con tipi compatibili (es. vector<bool> o vector<int> o vector<string>)
-    
-    // Per esempio, per in_flag:
+
+    // Gestione delle flag: inserisci solo se almeno un valore è 1
     for (const auto &info : df.in_flag) {
-        d[info.name.c_str()] = py::cast(info.i_flag);
+        if (std::any_of(info.i_flag.begin(), info.i_flag.end(), [](auto val) { return val == 1; })) {
+            d[info.name.c_str()] = py::cast(info.i_flag);
+        }
     }
     for (const auto &info : df.in_string) {
         d[info.name.c_str()] = py::cast(info.i_string);
@@ -96,7 +170,6 @@ py::dict get_var_columns_data(const var_columns_df &df) {
 //------------------------------------------------------------------------------
 // get_alt_columns_data, costruttore df2
 //------------------------------------------------------------------------------
-
 py::dict get_alt_columns_data(const alt_columns_df &df) {
     py::dict d;
 
@@ -106,20 +179,17 @@ py::dict get_alt_columns_data(const alt_columns_df &df) {
     // Il vettore di stringhe 'alt' viene convertito usando py::cast
     d["alt"] = py::cast(df.alt);
 
-    // Per ogni elemento in alt_float, converto il vector<__half> in vector<float>
     for (const auto &info : df.alt_float) {
-        std::vector<float> col;
-        col.reserve(info.i_float.size());
-        for (const __half &h : info.i_float) {
-            col.push_back(__half2float(h));
+        d[info.name.c_str()] = half_vector_to_uint16(info.i_float);
+    }
+    
+    // Inserisci flag solo se contiene almeno un 1
+    for (const auto &info : df.alt_flag) {
+        if (std::any_of(info.i_flag.begin(), info.i_flag.end(), [](auto val) { return val == 1; })) {
+            d[info.name.c_str()] = py::cast(info.i_flag);
         }
-        d[info.name.c_str()] = py::array_t<float>(col.size(), col.data());
     }
 
-    // Per alt_flag, alt_string e alt_int, sfruttiamo py::cast
-    for (const auto &info : df.alt_flag) {
-        d[info.name.c_str()] = py::cast(info.i_flag);
-    }
     for (const auto &info : df.alt_string) {
         d[info.name.c_str()] = py::cast(info.i_string);
     }
@@ -138,6 +208,7 @@ py::dict get_sample_columns_data(const sample_columns_df &df) {
     
     // Campi base (var_id e samp_id)
     d["var_id"] = py::array_t<unsigned int>(df.var_id.size(), df.var_id.data());
+
     d["samp_id"] = py::array_t<unsigned short>(df.samp_id.size(), df.samp_id.data());
     
     // Per ciascun elemento in samp_float: converti il vector<__half> in array di uint16_t
@@ -147,12 +218,14 @@ py::dict get_sample_columns_data(const sample_columns_df &df) {
         }
     }
     
-    // Per samp_flag, samp_string, samp_int usa py::cast (presupponendo siano tipi standard)
+    // Per samp_flag inseriamo solo se esiste almeno un 1
     for (const auto &s : df.samp_flag) {
-        if (!s.i_flag.empty()) {
+        if (!s.i_flag.empty() &&
+            std::any_of(s.i_flag.begin(), s.i_flag.end(), [](auto val) { return val == 1; })) {
             d[s.name.c_str()] = py::cast(s.i_flag);
         }
     }
+
     for (const auto &s : df.samp_string) {
         if (!s.i_string.empty()) {
             d[s.name.c_str()] = py::cast(s.i_string);
@@ -194,9 +267,10 @@ py::dict get_alt_format_data(const alt_format_df &df) {
             d[s.name.c_str()] = half_vector_to_uint16(s.i_float);
         }
     }
-    // Per samp_flag, samp_string e samp_int
+    // Per samp_flag: inserisci solo se contiene almeno un 1
     for (const auto &s : df.samp_flag) {
-        if (!s.i_flag.empty()) {
+        if (!s.i_flag.empty() &&
+            std::any_of(s.i_flag.begin(), s.i_flag.end(), [](auto val) { return val == 1; })) {
             d[s.name.c_str()] = py::cast(s.i_flag);
         }
     }
@@ -219,101 +293,13 @@ py::dict get_alt_format_data(const alt_format_df &df) {
     return d;
 }
 
-
-//------------------------------------------------------------------------------
-// GTWrapper
-//------------------------------------------------------------------------------
-
-class GTWrapper {
-public:
-    char gt_value;  // Valore char usato per rappresentare il genotype
-    static std::map<std::string, char> GTMap;  // Mappa condivisa per la conversione
-
-    GTWrapper(char value) : gt_value(value) {}
-
-    // Ritorna la stringa associata a gt_value tramite GTMap
-    std::string to_string() const {
-        for (const auto& pair : GTMap) {
-            if (pair.second == gt_value) {
-                return pair.first;
-            }
-        }
-        return std::string(1, gt_value);
-    }
-};
-
-// Inizializzazione della mappa statica
-std::map<std::string, char> GTWrapper::GTMap;
-
-void init_GTMap() {
-    int value = 0;
-    for (int i = 0; i < 11; ++i) {
-        for (int j = 0; j < 11; ++j) {
-            std::string key1 = std::to_string(i) + "|" + std::to_string(j);
-            GTWrapper::GTMap[key1] = value;
-            value++;
-        }
-    }
-    for (int i = 0; i < 11; ++i) {
-        for (int j = 0; j < 11; ++j) {
-            std::string key2 = std::to_string(i) + "/" + std::to_string(j);
-            GTWrapper::GTMap[key2] = value;
-            value++;
-        }
-    }
-    GTWrapper::GTMap[".|."] = static_cast<char>(254);
-    GTWrapper::GTMap["./."] = static_cast<char>(255);
-}
-
-void bind_GTWrapper(py::module &m) {
-    py::class_<GTWrapper>(m, "GT")
-        .def(py::init<char>())
-        .def("__repr__", &GTWrapper::to_string);
-}
-
-//------------------------------------------------------------------------------
-// half_wrapper per __half di CUDA
-//------------------------------------------------------------------------------
-
-struct half_wrapper {
-    __half value;
-    half_wrapper() : value(__float2half(0.0f)) {}
-    half_wrapper(float f) : value(__float2half(f)) {}
-    half_wrapper(const __half &h) : value(h) {}
-    float to_float() const { return __half2float(value); }
-};
-
-PYBIND11_MAKE_OPAQUE(std::vector<half_wrapper>);
-
-void bind_vector_half(py::module &m) {
-    py::bind_vector<std::vector<half_wrapper>>(m, "VectorHalf");
-}
-
-// Helper: converte std::vector<__half> in std::vector<half_wrapper>
-std::vector<half_wrapper> convert_half_vector(const std::vector<__half>& src) {
-    std::vector<half_wrapper> result;
-    result.reserve(src.size());
-    for (const auto &h : src) {
-        result.push_back(half_wrapper(h));
-    }
-    return result;
-}
-
-// Helper: Setter che converte da vector<half_wrapper> a vector<__half>
-void set_half_vector(std::vector<__half>& dest, const std::vector<half_wrapper>& src) {
-    dest.clear();
-    for (const auto &hw : src) {
-        dest.push_back(hw.value);
-    }
-}
-
 //------------------------------------------------------------------------------
 // Modulo di binding
 //------------------------------------------------------------------------------
 
 PYBIND11_MODULE(GPUParser, m) {
     m.doc() = "Python bindings for CUDA-accelerated VCF parser using pybind11";
-
+    py::bind_map<std::map<std::string, char>>(m, "FilterMap");
     // Bind half_wrapper
     py::class_<half_wrapper>(m, "half")
         .def(py::init<>())
@@ -411,6 +397,7 @@ PYBIND11_MODULE(GPUParser, m) {
             },
             "Quality scores as half values wrapped in half_wrapper")
         .def_readwrite("filter", &var_columns_df::filter)
+        .def_readwrite("filter_map", &var_columns_df::filter_map)
         .def_readwrite("in_float", &var_columns_df::in_float)
         .def_readwrite("in_flag", &var_columns_df::in_flag)
         .def_readwrite("in_string", &var_columns_df::in_string)

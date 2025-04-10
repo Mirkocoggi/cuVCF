@@ -42,7 +42,7 @@ DEBUG:
 # Target per compilare il modulo Python con binding (shared library)
 PYBIND:
 	mkdir -p bin/
-	nvcc $(GPUFLAGS) $(PYINCLUDES) -Xcompiler "-fPIC -Wall -fopenmp" -shared -o bin/GPUParser.so src/GPUVersion/Bindings.cpp src/GPUVersion/Parser.cu $(LIBS)
+	nvcc $(GPUFLAGS) $(PYINCLUDES) -Xcompiler "-fPIC -w -fopenmp" -shared -o bin/GPUParser.so src/GPUVersion/Bindings.cpp src/GPUVersion/Parser.cu $(LIBS)
 #	nvcc -O3 -Xcompiler -shared -std=c++17 -arch=sm_89 -fPIC $(python3 -m pybind11 --includes) $(OPENMP) src/GPUVersion/Bindings.cpp -o bin/GPUParser$(python3-config --extension-suffix) $(LIBS)
 
 # Target "all" compila tutti i target desiderati

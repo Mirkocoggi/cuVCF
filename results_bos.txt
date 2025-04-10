@@ -1,0 +1,36 @@
+Esecuzione filtro: EVA_4 - bos_taurus
+Tempo: 837395 ms
+
+Esecuzione filtro: E_Multiple_observations - bos_taurus
+Tempo: 505205 ms
+
+Esecuzione filtro: TSA=SNV - bos_taurus
+Tempo: 819886 ms
+
+Esecuzione filtro: POS > 200000 - bos_taurus
+Tempo: 1021169 ms
+
+Esecuzione filtro: POS > 200000 & POS < 300000 - bos_taurus
+Tempo: 315989 ms
+
+Esecuzione filtro: ! E_Multiple_observations and TSA=SNV - bos_taurus
+Tempo: 453841 ms
+
+Esecuzione filtro: POS > 200000 & E_Multiple_observations - bos_taurus
+Tempo: 523782 ms
+
+Esecuzione filtro: POS > 200000 & POS < 300000 & E_Multiple_observations - bos_taurus
+Tempo: 341498 ms
+
+Esecuzione filtro: POS > 200000 & TSA=SNV - bos_taurus
+Tempo: 781043 ms
+
+Esecuzione filtro: POS > 200000 & POS < 300000 & TSA=SNV - bos_taurus
+Tempo: 376550 ms
+
+Esecuzione filtro: EVA_4 & POS > 200000 & TSA=SNV - bos_taurus
+Tempo: 811185 ms
+
+Esecuzione filtro: EVA_4 & POS > 200000 & POS < 300000 & TSA=SNV - bos_taurus
+Tempo: 391397 ms
+

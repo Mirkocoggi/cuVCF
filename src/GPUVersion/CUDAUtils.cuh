@@ -14,7 +14,7 @@
 using namespace std;
 
 /// Maximum number of keys in the GT map.
-#define NUM_KEYS_GT 242
+#define NUM_KEYS_GT 244
 /// Maximum length for each key in the GT map.
 #define MAX_KEY_LENGTH_GT 5
 /// Maximum number of tokens to split.
