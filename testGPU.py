@@ -1,6 +1,37 @@
+# source rapids_env/bin/activate
+import cupy as cp
 import GPUParser as vcf
-import pandas as pd
+import cudf as pd
 import time
+import numpy as np
+import math
+import gc
+
+def save_cudf_to_csv_in_chunks(df, filename, npartitions=10, index=False):
+    """
+    Salva il DataFrame cuDF in un unico file CSV, scrivendo i dati a chunk.
+    
+    Parameters:
+        df (cudf.DataFrame): DataFrame da salvare.
+        filename (str): Nome del file CSV finale.
+        npartitions (int): Numero di chunk in cui suddividere il DataFrame.
+        index (bool): Se salvare o meno l'indice nel CSV.
+    """
+    n_rows = len(df)
+    chunk_size = math.ceil(n_rows / npartitions)
+    
+    # Ottieni l'intestazione per scriverla solo una volta
+    header = ",".join(df.columns.astype(str)) + "\n"
+    
+    with open(filename, "w") as f:
+        f.write(header)
+        for i in range(npartitions):
+            start = i * chunk_size
+            end = min(start + chunk_size, n_rows)
+            chunk = df.iloc[start:end]
+            # Converti il chunk in CSV senza header
+            csv_str = chunk.to_csv(index=index, header=False)
+            f.write(csv_str)
 
 
 res = vcf.vcf_parsed()
@@ -8,7 +39,7 @@ res = vcf.vcf_parsed()
 print("Start parsing")
 
 start_run = time.perf_counter()
-res.run("data/bos_taurus.vcf", 16)
+res.run("data/felis_catus.vcf", 16)
 end_run = time.perf_counter()
 run_time = end_run - start_run
 print(f"Tempo di esecuzione di run: {run_time:.4f} secondi")
@@ -32,35 +63,30 @@ dfpd_time = end_dfpd - start_dfpd
 print(f"Tempo di creazione dei DataFrame pandas: {dfpd_time:.4f} secondi")
 
 start_csv = time.perf_counter()
-df1.to_csv("df1.csv", index=False)
-df2.to_csv("df2.csv", index=False)
-df3.to_csv("df3.csv", index=False)
-df4.to_csv("df4.csv", index=False)
+npartitions = 10  # puoi regolare questo parametro in base alle tue necessità
+save_cudf_to_csv_in_chunks(df1, "df1.csv", npartitions, index=False)
+save_cudf_to_csv_in_chunks(df2, "df2.csv", npartitions, index=False)
+save_cudf_to_csv_in_chunks(df3, "df3.csv", npartitions, index=False)
+save_cudf_to_csv_in_chunks(df4, "df4.csv", npartitions, index=False)
 end_csv = time.perf_counter()
 csv_time = end_csv - start_csv
 print(f"Tempo di salvataggio in CSV: {csv_time:.4f} secondi")
 
-total_time = run_time + df_time + csv_time
-print(f"Tempo totale: {total_time:.4f} secondi")
+print("CSV creati")
+del df1
+del df2
+del df3
+del df4
+gc.collect()
+print("Dataframe eliminati")
 
-#print("DATAFRAME 1:")
-#print(df1.iloc[:10])
-#print("DATAFRAME 2:")
-#print(df2.iloc[:10])
-#print("DATAFRAME 3:")
-#print(df3.iloc[:10])
-#print("DATAFRAME 4:")
-#print(df4.iloc[:10])
+time_elapsed = 0.0
+start_run = time.perf_counter()
+df1 = pd.read_csv("df1.csv", delimiter=",")
+df2 = pd.read_csv("df2.csv", delimiter=",")
+df3 = pd.read_csv("df3.csv", delimiter=",")
+df4 = pd.read_csv("df4.csv", delimiter=",")
+end_run = time.perf_counter()
+time_elapsed = time_elapsed+(end_run - start_run)
 
-# Se necessario, in Python puoi reinterpretare gli array raw di half come np.float16:
-#import numpy as np
-# Ad esempio, per il campo "qual" in df1:
-#if "qual" in data1:
-#    # data1["qual"] è un array di uint16
-#    arr = data1["qual"]
-#    data1["qual"] = arr.view(np.float16)
-#
-#df1 = pd.DataFrame(data1)
-#
-#print("DATAFRAME 1.1:")
-#print(df1.iloc[:10])
+print(f"Tempo caricamento da csv: {time_elapsed:.4f} secondi")

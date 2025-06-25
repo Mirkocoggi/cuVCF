@@ -111,7 +111,6 @@ runtime_ms=$((runtime_ns / 1000000))
 echo "Tempo: ${runtime_ms} ms" >> results_bos.txt
 echo "" >> results_bos.txt
 
-
 filter_expr="EVA_4 & POS > 200000 & TSA=SNV - bos_taurus"
 echo "Esecuzione filtro: $filter_expr" >> results_bos.txt
 start=$(date +%s%N)
