@@ -313,6 +313,7 @@ PYBIND11_MODULE(GPUParser, m) {
     // Inizializza e bind GTWrapper
     init_GTMap();
     bind_GTWrapper(m);
+    m.attr("GTMapGlobal") = py::cast(&GTWrapper::GTMap);
 
     py::class_<samp_GT>(m, "samp_GT")
         .def(py::init<>())

@@ -33,10 +33,18 @@ def save_cudf_to_csv_in_chunks(df, filename, npartitions=10, index=False):
             csv_str = chunk.to_csv(index=index, header=False)
             f.write(csv_str)
 
+time_elapsed = 0
+
 # Parsing e misurazione dei tempi
 res = vcf.vcf_parsed()
 print("Start parsing")
+start_run = time.perf_counter()
 res.run("data/bos_taurus.vcf", 16)
+end_run = time.perf_counter()
+time_elapsed = time_elapsed+(end_run - start_run)
+print(f"Parsing time: {time_elapsed:.4f} secondi")
+
+start_run = time.perf_counter()
 
 data1 = vcf.get_var_columns_data(res.var_columns) 
 data2 = vcf.get_alt_columns_data(res.alt_columns)
@@ -57,34 +65,33 @@ df1 = cudf.DataFrame(data1)
 df2 = cudf.DataFrame(data2)
 df3 = cudf.DataFrame(data3)
 df4 = cudf.DataFrame(data4)
+end_run = time.perf_counter()
+time_elapsed = time_elapsed+(end_run - start_run)
+print(f"Dataframe creati in: {time_elapsed:.4f} secondi")
 
-print("Dataframe creati")
+start_run = time.perf_counter()
+npartitions = 10  
+save_cudf_to_csv_in_chunks(df1, "df1.csv", npartitions, index=False)
+save_cudf_to_csv_in_chunks(df2, "df2.csv", npartitions, index=False)
+save_cudf_to_csv_in_chunks(df3, "df3.csv", npartitions, index=False)
+save_cudf_to_csv_in_chunks(df4, "df4.csv", npartitions, index=False)
+end_run = time.perf_counter()
+time_elapsed = time_elapsed+(end_run - start_run)
+print(f"CSV creati in: {time_elapsed:.4f} secondi")
 
-print("Prime 3 righe di df1:")
-print(df1.head(3))
+del df1
+del df2
+del df3
+del df4
 
-print("Prime 3 righe di df2:")
-print(df2.head(3))
-
-print("Prime 3 righe di df3:")
-print(df3.head(3))
-
-print("Prime 3 righe di df4:")
-print(df4.head(3))
-
-#npartitions = 10  
-#save_cudf_to_csv_in_chunks(df1, "df1.csv", npartitions, index=False)
-#save_cudf_to_csv_in_chunks(df2, "df2.csv", npartitions, index=False)
-#save_cudf_to_csv_in_chunks(df3, "df3.csv", npartitions, index=False)
-#save_cudf_to_csv_in_chunks(df4, "df4.csv", npartitions, index=False)
-#
-#print("CSV creati")
-
-#df1 = cudf.read_csv("df1.csv", delimiter=",")
-#df2 = cudf.read_csv("df2.csv", delimiter=",")
-#df3 = cudf.read_csv("df3.csv", delimiter=",")
-#df4 = cudf.read_csv("df4.csv", delimiter=",")
-
+start_run = time.perf_counter()
+df1 = cudf.read_csv("df1.csv", delimiter=",")
+df2 = cudf.read_csv("df2.csv", delimiter=",")
+df3 = cudf.read_csv("df3.csv", delimiter=",")
+df4 = cudf.read_csv("df4.csv", delimiter=",")
+end_run = time.perf_counter()
+time_elapsed = time_elapsed+(end_run - start_run)
+print(f"CSV Caricati in: {time_elapsed:.4f} secondi")
 
 ######################## FILTRI ########################
 

@@ -14,3 +14,7 @@ miniconda.sh
 Miniconda3-latest-Linux-x86_64.sh
 myannotations.bed
 output.vcf
+vcflib
+result
+data/
+GPUParser.deb
