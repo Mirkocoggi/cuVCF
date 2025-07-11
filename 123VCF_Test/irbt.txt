@@ -1,0 +1,26 @@
+# --- INFO singoli ---------------------------------------------------
+AC > 8
+AC > 8 AND AF > 0.5
+
+# --- FORMAT singoli -------------------------------------------------
+FORMAT/GT = "1|1"
+FORMAT/AD0 > 3
+FORMAT/AD0 > 3 AND FORMAT/AD1 < 10        # AD0 > 3 & AD1 < 10
+
+# --- combinazioni INFO + FORMAT ------------------------------------
+FORMAT/GT = "1|1"          AND AC > 8
+FORMAT/GT = "1|1"          AND AC > 8 AND AF > 0.5
+
+AC > 8      AND FORMAT/AD0 > 3
+AC > 8      AND FORMAT/AD0 > 3 AND FORMAT/AD1 < 10
+AC > 8 AND AF > 0.5 AND FORMAT/AD0 > 3
+AC > 8 AND AF > 0.5 AND FORMAT/AD0 > 3 AND FORMAT/AD1 < 10
+
+FORMAT/AD0 > 3                          AND FORMAT/GT = "1|1"
+FORMAT/AD0 > 3 AND FORMAT/AD1 < 10      AND FORMAT/GT = "1|1"
+
+AC > 8 AND FORMAT/GT = "1|1"            AND FORMAT/AD0 > 3
+AC > 8 AND FORMAT/GT = "1|1"            AND FORMAT/AD0 > 3 AND FORMAT/AD1 < 10
+
+AC > 8 AND AF > 0.5 AND FORMAT/GT = "1|1"            AND FORMAT/AD0 > 3
+AC > 8 AND AF > 0.5 AND FORMAT/GT = "1|1"            AND FORMAT/AD0 > 3 AND FORMAT/AD1 < 10

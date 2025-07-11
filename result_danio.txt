@@ -1,36 +1,36 @@
 Esecuzione filtro: EVA_4 - danio_rerio
-Tempo: 174940 ms
+Tempo: 127298 ms
 
 Esecuzione filtro: E_Multiple_observations - danio_rerio
-Tempo: 50837 ms
+Tempo: 41329 ms
 
 Esecuzione filtro: TSA=SNV - danio_rerio
-Tempo: 156944 ms
+Tempo: 124391 ms
 
 Esecuzione filtro: POS > 1780000 - danio_rerio
-Tempo: 106719 ms
+Tempo: 126 ms
 
 Esecuzione filtro: POS > 1780000 & POS < 1800000 - danio_rerio
-Tempo: 34952 ms
+Tempo: 4 ms
 
 Esecuzione filtro: ! E_Multiple_observations and TSA=SNV - danio_rerio
-Tempo: 160467 ms
+Tempo: 120996 ms
 
 Esecuzione filtro: POS > 1780000 & E_Multiple_observations - danio_rerio
-Tempo: 42739 ms
+Tempo: 109 ms
 
 Esecuzione filtro: POS > 1780000 & POS < 1800000 & E_Multiple_observations - danio_rerio
-Tempo: 37374 ms
+Tempo: 4 ms
 
 Esecuzione filtro: POS > 1780000 & TSA=SNV - danio_rerio
-Tempo: 108399 ms
+Tempo: 4 ms
 
 Esecuzione filtro: POS > 1780000 & POS < 1800000 & TSA=SNV - danio_rerio
-Tempo: 41895 ms
+Tempo: 3 ms
 
 Esecuzione filtro: EVA_4 & POS > 1780000 & TSA=SNV - danio_rerio
-Tempo: 112177 ms
+Tempo: 3 ms
 
 Esecuzione filtro: EVA_4 & POS > 1780000 & POS < 1800000 & TSA=SNV - danio_rerio
-Tempo: 43235 ms
+Tempo: 3 ms
 

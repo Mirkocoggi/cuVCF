@@ -1,36 +1,36 @@
 Esecuzione filtro: EVA_4 - felis_catus
-Tempo: 32107 ms
+Tempo: 24826 ms
 
 Esecuzione filtro: E_Multiple_observations - felis_catus
-Tempo: 10282 ms
+Tempo: 8070 ms
 
 Esecuzione filtro: TSA=SNV - felis_catus
-Tempo: 26893 ms
+Tempo: 23586 ms
 
 Esecuzione filtro: POS > 140680000 - felis_catus
-Tempo: 13135 ms
+Tempo: 31 ms
 
 Esecuzione filtro: POS > 140680000 & POS < 160680000 - felis_catus
-Tempo: 13393 ms
+Tempo: 4 ms
 
 Esecuzione filtro: ! E_Multiple_observations and TSA=SNV - felis_catus
-Tempo: 27012 ms
+Tempo: 23222 ms
 
 Esecuzione filtro: POS > 140680000 & E_Multiple_observations - felis_catus
-Tempo: 10553 ms
+Tempo: 26 ms
 
 Esecuzione filtro: POS > 140680000 & POS < 160680000 & E_Multiple_observations - felis_catus
-Tempo: 12971 ms
+Tempo: 4 ms
 
 Esecuzione filtro: POS > 140680000 & TSA=SNV - felis_catus
-Tempo: 15138 ms
+Tempo: 4 ms
 
 Esecuzione filtro: POS > 140680000 & POS < 160680000 & TSA=SNV - felis_catus
-Tempo: 15461 ms
+Tempo: 4 ms
 
 Esecuzione filtro: EVA_4 & POS > 140680000 & TSA=SNV - felis_catus
-Tempo: 15973 ms
+Tempo: 4 ms
 
 Esecuzione filtro: EVA_4 & POS > 140680000 & POS < 160680000 & TSA=SNV - felis_catus
-Tempo: 16340 ms
+Tempo: 4 ms
 

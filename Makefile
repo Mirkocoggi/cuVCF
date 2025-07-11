@@ -1,55 +1,88 @@
-# Compilatore C++ e NVCC
-CXX = g++
+# ────────────────────────────────────────────────────────────────
+#  P Y T H O N   /   P Y B I N D 1 1
+# ────────────────────────────────────────────────────────────────
+PYINC        := $(shell python3-config --includes)          # -I.../python3.x
+PYBIND11INC  := $(shell python3 -m pybind11 --includes)     # -I.../pybind11
+PYLDFLAGS    := $(shell python3-config --ldflags)           # -lpython3.x …
+PYEXT        := $(shell python3-config --extension-suffix)  # .cpython-*.so
+
+# ────────────────────────────────────────────────────────────────
+#  C O M P I L A T I O N   F L A G S
+# ────────────────────────────────────────────────────────────────
+OPENMP          = -fopenmp
+CPPFLAGS        = -O3 -std=c++17
+GPUFLAGS        = -O3 -std=c++17 -arch=sm_89
+DEBUG_CXXFLAGS  = -O0 -g -std=c++17 -fsanitize=address,undefined
+DEBUG_GPUFLAGS  = -G -g -O0 -lineinfo -std=c++17 -arch=sm_89
+
+# Librerie comuni
+LIBS = -lz -I/usr/include/Imath -lImath        # aggiungi -lHalf se serve
+
+# Toolchain
+CXX  = g++
 NVCC = nvcc
 
-# Flags di compilazione per la versione ottimizzata (CPU e GPU)
-CPPFLAGS = -O3 -std=c++17
-GPUFLAGS = -O3 -std=c++17 -arch=sm_89
-OPENMP = -fopenmp
+# Cartella di output
+BIN_DIR = bin
+$(BIN_DIR):
+	@mkdir -p $@
 
-# Flags di debug per la versione CPU (se necessario)
-DEBUGFLAGS = -std=c++17
-# Flag di debug per la versione GPU (cuda-gdb richiede -G e -g)
-DEBUG_GPUFLAGS = -G -g -O0 -lineinfo -std=c++17 -arch=sm_89
+# ────────────────────────────────────────────────────────────────
+#  E X E C U T A B L E S   ( C P U   S O L O )
+# ────────────────────────────────────────────────────────────────
+VARSTRUCT: | $(BIN_DIR)
+	$(CXX) src/VCFparser_mt.cpp -o $(BIN_DIR)/VCFparser $(OPENMP) $(CPPFLAGS) $(LIBS)
 
-# Librerie da linkare
-LIBS = -lz -I/usr/include/Imath -lImath
+VARCOL: | $(BIN_DIR)
+	$(CXX) src/CPUVersion/VCFparser_mt_col.cpp -o $(BIN_DIR)/VCFparser $(OPENMP) $(CPPFLAGS) $(LIBS)
 
-# Recupera i flag di include per Python (es. -I/usr/include/python3.12)
-PYINCLUDES := $(shell python3-config --includes)
+VARCOL_DEBUG: | $(BIN_DIR)
+	$(CXX) src/CPUVersion/VCFparser_mt_col.cpp \
+	       -o $(BIN_DIR)/VCFparser_debug \
+	       $(OPENMP) $(DEBUG_CXXFLAGS) $(LIBS)
 
-# Target per compilare la versione CPU (VARSTRUCT)
-VARSTRUCT:
-	mkdir -p bin/
-	$(CXX) src/VCFparser_mt.cpp -o bin/VCFparser $(OPENMP) $(CPPFLAGS) $(LIBS)
+# ────────────────────────────────────────────────────────────────
+#  E X E C U T A B L E S   ( G P U )
+# ────────────────────────────────────────────────────────────────
+GPU: | $(BIN_DIR)
+	$(NVCC) $(GPUFLAGS) --ptxas-options=-v \
+	       -o $(BIN_DIR)/VCFparser src/GPUVersion/main.cu -Xcompiler $(OPENMP)
 
-# Target per compilare la versione CPU (VARCOL)
-VARCOL:
-	mkdir -p bin/
-	$(CXX) src/VCFparser_mt_col.cpp -o bin/VCFparser $(OPENMP) $(CPPFLAGS) $(LIBS)
+DEBUG: | $(BIN_DIR)
+	$(NVCC) $(DEBUG_GPUFLAGS) \
+	       -o $(BIN_DIR)/VCFparser src/GPUVersion/main.cu -Xcompiler $(OPENMP)
 
-# Target per compilare la versione GPU ottimizzata
-GPU:
-	mkdir -p bin/
-	$(NVCC) $(GPUFLAGS) --ptxas-options=-v -o bin/VCFparser src/GPUVersion/main.cu -Xcompiler $(OPENMP)
+# ────────────────────────────────────────────────────────────────
+#  P Y T H O N   M O D U L E S
+# ────────────────────────────────────────────────────────────────
+# GPU bindings
+PYBIND: | $(BIN_DIR)
+	$(NVCC) $(GPUFLAGS) $(PYINC) $(PYBIND11INC) \
+	       -Xcompiler "-fPIC -w $(OPENMP)" -shared \
+	       -o $(BIN_DIR)/GPUParser.so \
+	       src/GPUVersion/Bindings.cpp src/GPUVersion/Parser.cu \
+	       $(LIBS) $(PYLDFLAGS)
 
-# Target DEBUG: compila la versione GPU per cuda-gdb con flag di debug (-G -g) runna con -> cuda-gdb --args ./bin/VCFparser -v data/IRBT3M.vcf -t 1
+# CPU bindings (release)
+CPUBIND: | $(BIN_DIR)
+	$(CXX) $(CPPFLAGS) $(PYINC) $(PYBIND11INC) -shared -fPIC \
+	      -o $(BIN_DIR)/CPUParser.so \
+	      src/CPUVersion/Bindings.cpp src/CPUVersion/VCFparser_mt_col.cpp \
+	      $(OPENMP) $(LIBS) $(PYLDFLAGS)
 
-DEBUG:
-	mkdir -p bin/
-	$(NVCC) $(DEBUG_GPUFLAGS) -o bin/VCFparser src/GPUVersion/main.cu -Xcompiler $(OPENMP)
+# CPU bindings con AddressSanitizer + UBSan (debug)
+CPUBIND_DEBUG: | $(BIN_DIR)
+	$(CXX) $(DEBUG_CXXFLAGS) $(PYINC) $(PYBIND11INC) -shared -fPIC \
+	      -o $(BIN_DIR)/CPUParser_debug$(PYEXT) \
+	      src/CPUVersion/Bindings.cpp src/CPUVersion/VCFparser_mt_col.cpp \
+	      $(OPENMP) $(LIBS) $(PYLDFLAGS)
 
-# Target per compilare il modulo Python con binding (shared library)
-PYBIND:
-	mkdir -p bin/
-	nvcc $(GPUFLAGS) $(PYINCLUDES) -Xcompiler "-fPIC -w -fopenmp" -shared -o bin/GPUParser.so src/GPUVersion/Bindings.cpp src/GPUVersion/Parser.cu $(LIBS)
-#	nvcc -O3 -Xcompiler -shared -std=c++17 -arch=sm_89 -fPIC $(python3 -m pybind11 --includes) $(OPENMP) src/GPUVersion/Bindings.cpp -o bin/GPUParser$(python3-config --extension-suffix) $(LIBS)
+# ────────────────────────────────────────────────────────────────
+#  B U I L D   A L L   &   C L E A N
+# ────────────────────────────────────────────────────────────────
+all: VARSTRUCT VARCOL GPU PYBIND CPUBIND
 
-# Target "all" compila tutti i target desiderati
-all: VARSTRUCT VARCOL GPU PYBIND
-
-# Pulizia dei file compilati
 clean:
-	rm -rf bin/
+	rm -rf $(BIN_DIR)
 
-.PHONY: all clean VARSTRUCT VARCOL GPU DEBUG PYBIND
+.PHONY: all clean VARSTRUCT VARCOL GPU DEBUG PYBIND CPUBIND CPUBIND_DEBUG

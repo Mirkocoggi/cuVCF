@@ -44,7 +44,7 @@ public:
         bool find1 = false;
         long iter=0;
         int local_alt = 1;
-        string tmp="\0";
+        string tmp="";
         vector<string> tmp_split;
         vector<string> tmp_format_split;
         
@@ -64,7 +64,7 @@ public:
         }
 
         //Position
-        tmp="\0";
+        tmp="";
         find1=false;
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
@@ -73,11 +73,12 @@ public:
                 try{
                     pos[i] = stoul(tmp);
                 }catch(const std::exception& e){
-                    cout << "Stoul error: " << tmp << " iterazione: " << i << " Iter " <<iter << " What: "<< e.what() <<endl;
-                    for(int k = start; k < end; k++){
-                        cout << line[k];
-                    }
-                    cout << endl;
+                    //cout << "Stoul error: " << tmp << " iterazione: " << i << " Iter " <<iter << " What: "<< e.what() <<endl;
+                    //for(int k = start; k < end; k++){
+                    //    cout << line[k];
+                    //}
+                    //cout << endl;
+                    pos[i] = 0;
                 }
                 
             }else{
@@ -87,7 +88,7 @@ public:
         }
 
         //ID
-        tmp="\0";
+        tmp="";
         find1=false;
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
@@ -101,7 +102,7 @@ public:
         }
 
         //Reference
-        tmp="\0";
+        tmp="";
         find1=false;
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
@@ -115,7 +116,7 @@ public:
         }
 
         //Alternative
-        tmp="\0";
+        tmp="";
         find1=false;
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
@@ -135,7 +136,7 @@ public:
         }
 
         //Quality
-        tmp="\0";
+        tmp="";
         find1=false;
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
@@ -157,7 +158,7 @@ public:
         }
         
         //Filter
-        tmp="\0";
+        tmp="";
         find1=false;
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
@@ -174,7 +175,7 @@ public:
         }
 
         //Info
-        tmp="\0";
+        tmp="";
         find1=false;
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '||line[start+iter]=='\n'){
@@ -307,7 +308,7 @@ public:
         bool find1 = false;
         long iter=0;
         int local_alt = 1;
-        string tmp="\0";
+        string tmp="";
         vector<string> tmp_split;
         vector<string> tmp_format_split;
         vector<string> tmp_subSplit;
@@ -328,7 +329,7 @@ public:
         }
 
         //Position
-        tmp="\0";
+        tmp="";
         find1=false;
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
@@ -342,7 +343,7 @@ public:
         }
 
         //ID
-        tmp="\0";
+        tmp="";
         find1=false;
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
@@ -356,7 +357,7 @@ public:
         }
 
         //Reference
-        tmp="\0";
+        tmp="";
         find1=false;
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
@@ -370,16 +371,14 @@ public:
         }
 
         //Alternatives
-        tmp="\0";
+        tmp="";
         find1=false;
-        cout << "BBBBBBBB - tmp = " << tmp << endl;
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
                 boost::split(tmp_split, tmp, boost::is_any_of(","));
                 local_alt = tmp_split.size();
-                cout << "AAAAAAAAA - local_alt = " << local_alt << endl;
                 for(int y = 0; y<local_alt; y++){
                     (*tmp_alt).alt[(*tmp_num_alt)+y] = tmp_split[y];
                     (*tmp_alt).alt_id[(*tmp_num_alt)+y] = (char)y;
@@ -387,13 +386,12 @@ public:
                 }
             }else{
                 tmp += line[start+iter];
-                cout << "BBBBBBBB - tmp = " << tmp << endl;
                 iter++;
             }
         }
 
         //Quality
-        tmp="\0";
+        tmp="";
         find1=false;
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
@@ -415,7 +413,7 @@ public:
         }
 
         //Filter
-        tmp="\0";
+        tmp="";
         find1=false;
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
@@ -432,7 +430,7 @@ public:
         }
 
         //Info
-        tmp="\0";
+        tmp="";
         find1=false;
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '||line[start+iter]=='\n'){
@@ -558,7 +556,7 @@ public:
         (*tmp_num_alt) = (*tmp_num_alt)+local_alt;
 
         //Format decomposition
-        tmp="\0";
+        tmp="";
         find1=false;
 
         //Format's template
@@ -578,7 +576,7 @@ public:
         //TODO - Da gestire il GT qui dentro
         int samp;
         for(samp = 0; samp < (*sample).numSample; samp++){
-            tmp="\0";
+            tmp="";
             find1=false;
             while(!find1){
                 if(line[start+iter]=='\t'||line[start+iter]==' '||line[start+iter]=='\n'){
@@ -786,7 +784,6 @@ public:
             cout << ref[i] << "\t";
             cout << filter_map.find(std::string(1, filter[i]))->first << "\t";
 
-            cout << "AAAAAAAA 1.1" << endl;
 
             for(int j=0; j<in_flag.size(); j++){
                 cout<<in_flag[j].name<<": "<<in_flag[j].i_flag[i]<<", ";

@@ -613,9 +613,6 @@ void vcf_parsed::create_sample_vectors(int num_threads){
     samp_Int samp_alt_int_tmp;
     samp_String samp_alt_string_tmp;
 
-    int numIter = FORMAT.ID.size();
-    if(numIter == 0 ) return;
-
     if(FORMAT.hasGT && FORMAT.numGT == 'A'){
         alt_sample.initMapGT();
         alt_sample.sample_GT.numb = -1;
@@ -630,6 +627,9 @@ void vcf_parsed::create_sample_vectors(int num_threads){
         }
         samp_columns.sample_GT.resize(FORMAT.numGT-'0');   
     }
+
+    int numIter = FORMAT.ID.size();
+    if(numIter == 0 ) return;
 
     for(int i = 0; i < numIter; i++){
         if(strcmp(&FORMAT.Number[i][0], "A") != 0){
