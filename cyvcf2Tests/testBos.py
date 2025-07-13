@@ -1,205 +1,77 @@
 #!/usr/bin/env python3
+# cyvcf2 ≥ 0.30
+import os, subprocess, time, pathlib
+from cyvcf2 import VCF
 
-#source cyvcf2_env/bin/activate
+RAW_VCF = "../data/bos_taurus.vcf"
+GZ_VCF  = RAW_VCF + ".gz"
+RES_TXT = "../result/cyvcf2_bos_times.txt"
+pathlib.Path("../result").mkdir(exist_ok=True)
 
+# ---------------------------------------------------------------------------
+# 1) bgzip + tabix (una sola volta)
+# ---------------------------------------------------------------------------
+if not os.path.exists(GZ_VCF):
+    print("⇢ bgzip bos_taurus.vcf …")
+    with open(GZ_VCF, "wb") as gz:
+        subprocess.check_call(["bgzip", "-c", RAW_VCF], stdout=gz)
 
-from cyvcf2 import VCF, Writer
-import time
+if not os.path.exists(GZ_VCF + ".tbi"):
+    print("⇢ tabix -p vcf bos_taurus.vcf.gz …")
+    subprocess.check_call(["tabix", "-p", "vcf", GZ_VCF])
 
-# Definisci funzioni filtro per ogni condizione
-def filter_EVA_4(variant):
-    # Restituisce True se il campo INFO "EVA_4" esiste (non None)
-    return variant.INFO.get("EVA_4") is not None
+VCF_IN = GZ_VCF            # useremo sempre il file indicizzato
 
-def filter_E_Multiple_observations(variant):
-    return variant.INFO.get("E_Multiple_observations") is not None
+# ---------------------------------------------------------------------------
+# 2) definizione dei filtri
+# ---------------------------------------------------------------------------
+def eva4(v):    return v.INFO.get("EVA_4") is not None
+def emult(v):   return v.INFO.get("E_Multiple_observations") is not None
+def tsa_snv(v): return (t := v.INFO.get("TSA")) is not None and t.strip() == "SNV"
+def pos_gt(v, thr):              return v.POS > thr
+def pos_between(v, lo, hi):      return lo < v.POS < hi
 
-def filter_TSA_SNV(variant):
-    # Supponiamo che il campo "TSA" contenga la stringa "SNV"
-    tsa = variant.INFO.get("TSA")
-    return tsa is not None and tsa.strip() == "SNV"
+# lista di (etichetta, funzione-filtro)
+TESTS = [
+    ("EVA_4",                               eva4),
+    ("E_Multiple_observations",             emult),
+    ("TSA=SNV",                             tsa_snv),
+    ("POS>200000",                          lambda v: pos_gt(v, 200_000)),
+    ("200k<POS<300k",                       lambda v: pos_between(v, 200_000, 300_000)),
+    ("!E_Multiple_observations && TSA=SNV", lambda v: (not emult(v)) and tsa_snv(v)),
+    ("POS>200k && E_Multiple_observations", lambda v: pos_gt(v, 200_000) and emult(v)),
+    ("200k<POS<300k && E_Multiple_observations",
+                                             lambda v: pos_between(v, 200_000, 300_000) and emult(v)),
+    ("POS>200k && TSA=SNV",                 lambda v: pos_gt(v, 200_000) and tsa_snv(v)),
+    ("200k<POS<300k && TSA=SNV",
+                                             lambda v: pos_between(v, 200_000, 300_000) and tsa_snv(v)),
+    ("EVA_4 && POS>200k && TSA=SNV",
+                                             lambda v: eva4(v) and pos_gt(v, 200_000) and tsa_snv(v)),
+    ("EVA_4 && 200k<POS<300k && TSA=SNV",
+                                             lambda v: eva4(v) and pos_between(v, 200_000, 300_000) and tsa_snv(v)),
+]
 
-def filter_pos_gt(variant, pos_min):
-    return variant.POS > pos_min
-
-def filter_pos_range(variant, pos_min, pos_max):
-    return pos_min < variant.POS < pos_max
-
-def filter_not_EMultiple_and_TSA_SNV(variant):
-    """
-    Passa la variante se:
-      - Il campo INFO "E_Multiple_observations" NON è presente (None),
-      - E il campo "TSA" esiste e, pulito dagli spazi, è uguale a "SNV".
-    """
-    has_EMultiple = variant.INFO.get("E_Multiple_observations")
-    tsa = variant.INFO.get("TSA")
-    return (has_EMultiple is None) and (tsa is not None and tsa.strip() == "SNV")
-
-def filter_pos_gt_and_EMultiple(variant):
-    """
-    Passa la variante se (su file annotato):
-      - Il campo INFO "mypos" è presente ed è maggiore di 1780000,
-      - E il campo INFO "E_Multiple_observations" è presente.
-    """
-    mypos = variant.INFO.get("mypos")
-    has_EMultiple = variant.INFO.get("E_Multiple_observations")
-    try:
-        pos_val = int(mypos) if mypos is not None else None
-    except ValueError:
-        pos_val = None
-    return (pos_val is not None and pos_val > 1780000) and (has_EMultiple is not None)
-
-def filter_pos_range_and_EMultiple(variant):
-    """
-    Passa la variante se (su file annotato):
-      - Il campo INFO "mypos" è presente ed è compreso tra 1780000 e 1800000,
-      - E il campo INFO "E_Multiple_observations" è presente.
-    """
-    mypos = variant.INFO.get("mypos")
-    has_EMultiple = variant.INFO.get("E_Multiple_observations")
-    try:
-        pos_val = int(mypos) if mypos is not None else None
-    except ValueError:
-        pos_val = None
-    return (pos_val is not None and 1780000 < pos_val < 1800000) and (has_EMultiple is not None)
-
-def filter_range_and_TSA_SNV(variant):
-    """
-    Filtro: POS > 1780000 & POS < 1800000 & TSA=SNV - danio_rerio
-    Si applica su un file annotato contenente il campo INFO "mypos".
-    Restituisce True se:
-      - "mypos" esiste ed il suo valore (convertito a int) è compreso tra 1780000 e 1800000,
-      - E il campo INFO "TSA" esiste e, rimosso eventuale spazi, è uguale a "SNV".
-    """
-    mypos = variant.INFO.get("mypos")
-    tsa = variant.INFO.get("TSA")
-    try:
-        pos_val = int(mypos) if mypos is not None else None
-    except ValueError:
-        pos_val = None
-    return (pos_val is not None and 1780000 < pos_val < 1800000) and (tsa is not None and tsa.strip() == "SNV")
-
-def filter_EVA4_range_and_TSA_SNV(variant):
-    """
-    Filtro: EVA_4 & POS > 1780000 & POS < 1800000 & TSA=SNV - danio_rerio
-    Restituisce True se:
-      - Il campo INFO "EVA_4" esiste,
-      - "mypos" esiste ed il suo valore (convertito a int) è compreso tra 1780000 e 1800000,
-      - E il campo INFO "TSA" esiste e, rimosso eventuale spazi, è uguale a "SNV".
-    """
-    eva4 = variant.INFO.get("EVA_4")
-    mypos = variant.INFO.get("mypos")
-    tsa = variant.INFO.get("TSA")
-    try:
-        pos_val = int(mypos) if mypos is not None else None
-    except ValueError:
-        pos_val = None
-    return (eva4 is not None) and (pos_val is not None and 1780000 < pos_val < 1800000) and (tsa is not None and tsa.strip() == "SNV")
-
-
-# Funzione generale per applicare un filtro a un VCF
-def filter_vcf(input_vcf, output_vcf, filter_func):
-    vcf_reader = VCF(input_vcf)
-    vcf_writer = Writer(output_vcf, vcf_reader)
-    for variant in vcf_reader:
-        if filter_func(variant):
-            vcf_writer.write_record(variant)
-    vcf_writer.close()
+# ---------------------------------------------------------------------------
+# 3) benchmark
+# ---------------------------------------------------------------------------
+def benchmark(label, filt_fun):
+    rdr = VCF(VCF_IN)               # nessun writer: iteriamo e basta
+    t0 = time.perf_counter()
+    for rec in rdr:
+        _ = filt_fun(rec)           # valutazione filtro
+    dt = time.perf_counter() - t0
+    rdr.close()
+    return dt
 
 def main():
-    # Esempio filtro: EVA_4
-    print("Filtro: EVA_4")
-    start = time.perf_counter()
-    filter_vcf("data/danio_rerio.vcf", "output_EVA_4.vcf", filter_EVA_4)
-    end = time.perf_counter()
-    print("Tempo EVA_4: {:.4f} s".format(end - start))
-    
-    # Filtro: E_Multiple_observations
-    print("Filtro: E_Multiple_observations")
-    start = time.perf_counter()
-    filter_vcf("data/danio_rerio.vcf", "output_E_Multiple_observations.vcf", filter_E_Multiple_observations)
-    end = time.perf_counter()
-    print("Tempo E_Multiple_observations: {:.4f} s".format(end - start))
-    
-    # Filtro: TSA = SNV
-    print("Filtro: TSA=SNV")
-    start = time.perf_counter()
-    filter_vcf("data/danio_rerio.vcf", "output_TSA_SNV.vcf", filter_TSA_SNV)
-    end = time.perf_counter()
-    print("Tempo TSA=SNV: {:.4f} s".format(end - start))
-    
-    # Filtro: POS > 1780000
-    print("Filtro: POS > 1780000")
-    start = time.perf_counter()
-    # Qui usiamo il campo POS direttamente (non è nel INFO, perciò non serve annotazione)
-    filter_vcf("data/danio_rerio.vcf", "output_POS_gt_1780000.vcf",
-               lambda var: filter_pos_gt(var, 1780000))
-    end = time.perf_counter()
-    print("Tempo POS > 1780000: {:.4f} s".format(end - start))
-    
-    # Filtro: POS tra 1780000 e 1800000
-    print("Filtro: 1780000 < POS < 1800000")
-    start = time.perf_counter()
-    filter_vcf("data/danio_rerio.vcf", "output_POS_1780000_1800000.vcf",
-               lambda var: filter_pos_range(var, 1780000, 1800000))
-    end = time.perf_counter()
-    print("Tempo POS range: {:.4f} s".format(end - start))
+    with open(RES_TXT, "w") as fh:
+        for lab, func in TESTS:
+            elapsed = benchmark(lab, func)
+            line = f"Esecuzione filtro: {lab}\nTempo: {elapsed:.9f} s\n\n"
+            fh.write(line)
+            print(line, end="")     # stampa anche a video
 
-    # Filtro: ! E_Multiple_observations & TSA = SNV (da VCF originale)
-    print("Filtro: ! E_Multiple_observations & TSA = SNV")
-    start = time.perf_counter()
-    filter_vcf("data/danio_rerio.vcf", "output_not_EMultiple_TSA_SNV.vcf", filter_not_EMultiple_and_TSA_SNV)
-    end = time.perf_counter()
-    print("Tempo ! E_Multiple_observations & TSA = SNV: {:.4f} s".format(end - start))
-    
-    # Filtro: POS > 1780000 & E_Multiple_observations (su file annotato)
-    print("Filtro: POS > 1780000 & E_Multiple_observations")
-    start = time.perf_counter()
-    filter_vcf("data/danio_rerio_annotated_new_fixed.vcf", "output_POS_gt_and_EMultiple.vcf",
-               filter_pos_gt_and_EMultiple)
-    end = time.perf_counter()
-    print("Tempo POS > 1780000 & E_Multiple_observations: {:.4f} s".format(end - start))
+    print(f"\nTempistiche scritte in {RES_TXT}")
 
-    # Filtro: POS > 1780000 & POS < 1800000 & E_Multiple_observations (su file annotato)
-    print("Filtro: 1780000 < POS < 1800000 & E_Multiple_observations")
-    start = time.perf_counter()
-    filter_vcf("data/danio_rerio_annotated_new_fixed.vcf", "output_POS_range_and_EMultiple.vcf",
-               filter_pos_range_and_EMultiple)
-    end = time.perf_counter()
-    print("Tempo 1780000 < POS < 1800000 & E_Multiple_observations: {:.4f} s".format(end - start))
-
-    # Filtro combinato: POS > 1780000 & TSA=SNV
-    print("Filtro: POS > 1780000 & TSA=SNV")
-    start = time.perf_counter()
-    filter_vcf("data/danio_rerio.vcf", "output_combined.vcf",
-               lambda var: var.POS > 1780000 and filter_TSA_SNV(var))
-    end = time.perf_counter()
-    print("Tempo  POS > 1780000 & TSA=SNV: {:.4f} s".format(end - start))
-
-    # Filtro: POS > 1780000 & POS < 1800000 & TSA=SNV - danio_rerio
-    print("Filtro: 1780000 < POS < 1800000 & TSA = SNV (danio_rerio)")
-    start = time.perf_counter()
-    filter_vcf("data/danio_rerio_annotated_new_fixed.vcf", "output_range_TSA_SNV_bos.vcf",
-               filter_range_and_TSA_SNV)
-    end = time.perf_counter()
-    print("Tempo 1780000 < POS < 1800000 & TSA = SNV: {:.4f} s".format(end - start))
-        
-    # Filtro combinato: EVA_4 & POS > 1780000 & TSA=SNV
-    print("Filtro: EVA_4 & POS > 1780000 & TSA=SNV")
-    start = time.perf_counter()
-    filter_vcf("data/danio_rerio.vcf", "output_combined.vcf",
-               lambda var: filter_EVA_4(var) and var.POS > 1780000 and filter_TSA_SNV(var))
-    end = time.perf_counter()
-    print("Tempo filtro combinato: {:.4f} s".format(end - start))
-
-    # Filtro: EVA_4 & POS > 1780000 & POS < 1800000 & TSA=SNV - danio_rerio
-    print("Filtro: EVA_4 & 1780000 < POS < 1800000 & TSA = SNV (danio_rerio)")
-    start = time.perf_counter()
-    filter_vcf("data/danio_rerio_annotated_new_fixed.vcf", "output_EVA4_range_TSA_SNV_bos.vcf",
-               filter_EVA4_range_and_TSA_SNV)
-    end = time.perf_counter()
-    print("Tempo EVA_4 & 1780000 < POS < 1800000 & TSA = SNV: {:.4f} s".format(end - start))
-    
-    
 if __name__ == "__main__":
     main()

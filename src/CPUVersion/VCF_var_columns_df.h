@@ -38,6 +38,9 @@ public:
     vector<info_string> in_string;
     vector<info_int> in_int;
     map<string,int> info_map1;
+
+    //mutable std::mutex chrom_mtx;
+    //mutable std::mutex filter_mtx;
     
     void get_vcf_line_in_var_columns(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt)
     { 
@@ -48,13 +51,17 @@ public:
         vector<string> tmp_split;
         vector<string> tmp_format_split;
         
+        if(line[start+iter]=='\n'){
+            iter++;
+        } 
+
         //Chromosome
         while(!find1){
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
                 if(chrom_map.find(tmp) == chrom_map.end()){
-                    chrom_map.insert(std::make_pair(tmp, (char)chrom_map.size()));
+                    chrom_map.insert(std::make_pair(tmp, (unsigned char)chrom_map.size()));
                 }
                 chrom[i] = chrom_map[tmp];
             }else{
@@ -283,11 +290,15 @@ public:
                         if((info_map1[tmp_elems[0]]==FLAG) && strcmp(&tmp_elems[0][0],"")){
                             //Flag
                             int el=0;
+                            const int nFlags = static_cast<int>(in_flag.size());
                             while(!find_info_elem){
+                                if(el>=nFlags){
+                                    find_info_elem = true;
+                                }
                                 if(in_flag[el].name == tmp_elems[0]){
                                     in_flag[el].i_flag[i] = 1;
                                     find_info_elem = true;
-                                } 
+                                }
                                 el++;
                             }
                                 

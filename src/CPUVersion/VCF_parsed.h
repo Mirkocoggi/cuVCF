@@ -734,7 +734,7 @@ public:
 
         long batch_size = (num_lines-2+num_threads)/num_threads;        
         
-#pragma omp parallel
+#pragma omp parallel 
         {
             long start, end;
             int th_ID = omp_get_thread_num();

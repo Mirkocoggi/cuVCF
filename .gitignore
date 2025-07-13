@@ -21,3 +21,6 @@ GPUParser.deb
 result_danio.txt
 results_bos.txt
 results_felis.txt
+vcflib/
+bcfbcftools-1.22.tar.bz2
+bcfbcftools-1.22/
