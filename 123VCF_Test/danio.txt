@@ -1,13 +1,10 @@
-# --- filtri INFO/FILTER singoli ------------------------------------
 EVA_4
 E_Multiple_observations
 TSA=SNV
 
-# --- filtri numerici su tag INFO=mypos -----------------------------
 mypos > 1780000
 mypos > 1780000 AND mypos < 1800000
 
-# --- combinazioni logiche ------------------------------------------
 NOT E_Multiple_observations AND TSA=SNV
 mypos > 1780000 AND E_Multiple_observations
 mypos > 1780000 AND mypos < 1800000 AND E_Multiple_observations

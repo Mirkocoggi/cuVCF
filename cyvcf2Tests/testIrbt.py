@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# cyvcf2 ≥ 0.30
+
 import os, subprocess, time, pathlib, numpy as np
 from cyvcf2 import VCF
 
@@ -8,9 +8,6 @@ GZ_VCF  = RAW_VCF + ".gz"
 RES_TXT = "../result/cyvcf2_irbt_times.txt"
 pathlib.Path("../result").mkdir(exist_ok=True)
 
-###############################################################################
-# 1) bgzip + tabix (solo la prima volta)
-###############################################################################
 if not os.path.exists(GZ_VCF):
     print("⇢ bgzip IRBT.vcf …")
     with open(GZ_VCF, "wb") as gz:
@@ -20,11 +17,8 @@ if not os.path.exists(GZ_VCF + ".tbi"):
     print("⇢ tabix -p vcf IRBT.vcf.gz …")
     subprocess.check_call(["tabix", "-p", "vcf", GZ_VCF])
 
-VCF_IN = GZ_VCF            # useremo sempre il file indicizzato
+VCF_IN = GZ_VCF
 
-###############################################################################
-# 2) utilità e predicati di filtro
-###############################################################################
 def _parse_info_numeric(val, cast):
     """
     Restituisce una lista di valori cast-ati:
@@ -40,13 +34,12 @@ def _parse_info_numeric(val, cast):
     if isinstance(val, (bytes, str)):
         s = val.decode() if isinstance(val, bytes) else val
         return [cast(x) for x in s.split(",") if x != "."]
-    # caso residuale: iterable (cyvcf2 > 0.30 talvolta restituisce tuple)
+
     try:
         return [cast(x) for x in val]
     except TypeError:
         return []
 
-# — INFO —
 def ac_gt8(v):
     vals = _parse_info_numeric(v.INFO.get("AC"), int)
     return vals and max(vals) > 8
@@ -55,9 +48,8 @@ def af_gt05(v):
     vals = _parse_info_numeric(v.INFO.get("AF"), float)
     return vals and max(vals) > 0.5
 
-# — FORMAT, sample 0 —
 def gt_1_1(v):
-    g = v.genotypes[0]              # (allele1, allele2, phased?)
+    g = v.genotypes[0]              
     return g[0] == 1 and g[1] == 1
 
 def ad_values(v):
@@ -80,20 +72,15 @@ def ad0_gt3_ad1_lt10(v):
     ad0, ad1 = ad_values(v)
     return (ad0 is not None and ad0 > 3) and (ad1 is not None and ad1 < 10)
 
-###############################################################################
-# 3) elenco dei test
-###############################################################################
 TESTS = [
-    # 1. INFO
+
     ("AC > 8",                                    ac_gt8),
     ("AC > 8 && AF > 0.5",                        lambda v: ac_gt8(v) and af_gt05(v)),
 
-    # 2. FORMAT (sample 0)
     ("GT = 1|1",                                  gt_1_1),
     ("AD0 > 3 (sample0)",                         ad0_gt3),
     ("AD0 > 3 && AD1 < 10 (sample0)",             ad0_gt3_ad1_lt10),
 
-    # 3. Combinazioni
     ("GT=1|1 && AC>8",                            lambda v: gt_1_1(v) and ac_gt8(v)),
     ("GT=1|1 && AC>8 && AF>0.5",
                                                  lambda v: gt_1_1(v) and ac_gt8(v) and af_gt05(v)),
@@ -122,9 +109,6 @@ TESTS = [
                                                  lambda v: ac_gt8(v) and af_gt05(v) and gt_1_1(v) and ad0_gt3_ad1_lt10(v)),
 ]
 
-###############################################################################
-# 4) benchmark senza scrivere alcun VCF
-###############################################################################
 def bench(label, predicate):
     rdr = VCF(VCF_IN)
     t0 = time.perf_counter()

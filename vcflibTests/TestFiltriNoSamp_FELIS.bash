@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# Funzione per eseguire il filtro, cronometrare l'esecuzione e salvare l'output.
-# Il terzo parametro, flag, indica se si utilizza -f (INFO filter) oppure -g (Genotype filter).
-
 filter_expr="EVA_4 - felis_catus"
 echo "Esecuzione filtro: $filter_expr" > ../result/Vcflib_results_felis.txt
 echo "Esecuzione filtro: $filter_expr" > ../result/Vcflib_results_felis.txt
@@ -47,8 +44,8 @@ echo "" >> ../result/Vcflib_results_felis.txt
 echo "Tempo: ${runtime_ms} ms" >> ../result/Vcflib_results_felis.txt
 echo "" >> ../result/Vcflib_results_felis.txt
 
-#CREAZIONE FILE
-echo "INIZIO CREAZIONE FILE"
+#Files creation
+echo "Files creation"
 grep -v "^#" ../data/felis_catus.vcf | awk '{print $1"\t"($2-1)"\t"$2"\t"$2}' > myannotations.bed
 vcfannotate -b myannotations.bed -k mypos ../data/felis_catus.vcf > ../data/felis_catus_annotated.vcf
 sed '/^##INFO=<ID=mypos,/ s/Type=String/Type=Integer/' ../data/felis_catus_annotated.vcf > ../data/felis_catus_annotated_new.vcf

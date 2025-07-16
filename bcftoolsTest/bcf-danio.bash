@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# cyvcf2 ≥ 0.30
+
 import os, subprocess, time, pathlib
 from cyvcf2 import VCF
 
@@ -8,9 +8,6 @@ GZ_VCF  = RAW_VCF + ".gz"
 RES_TXT = "../result/cyvcf2_danio_times.txt"
 pathlib.Path("../result").mkdir(exist_ok=True)
 
-# ---------------------------------------------------------------------------
-# 1) bgzip + tabix (solo la prima volta)
-# ---------------------------------------------------------------------------
 if not os.path.exists(GZ_VCF):
     print("⇢ bgzip danio_rerio.vcf …")
     with open(GZ_VCF, "wb") as gz:
@@ -20,11 +17,8 @@ if not os.path.exists(GZ_VCF + ".tbi"):
     print("⇢ tabix -p vcf danio_rerio.vcf.gz …")
     subprocess.check_call(["tabix", "-p", "vcf", GZ_VCF])
 
-VCF_IN = GZ_VCF            # useremo sempre il file bgz + indice
+VCF_IN = GZ_VCF
 
-# ---------------------------------------------------------------------------
-# 2) predicati di filtro
-# ---------------------------------------------------------------------------
 def eva4(v):    return v.INFO.get("EVA_4") is not None
 def emult(v):   return v.INFO.get("E_Multiple_observations") is not None
 def tsa_snv(v): return (t := v.INFO.get("TSA")) is not None and t.strip() == "SNV"
@@ -56,14 +50,11 @@ TESTS = [
                                                    lambda v: eva4(v) and pos_between(v, POS_LOW, POS_HIGH) and tsa_snv(v)),
 ]
 
-# ---------------------------------------------------------------------------
-# 3) benchmark senza scrivere alcun VCF
-# ---------------------------------------------------------------------------
 def bench(label, pred):
-    rdr = VCF(VCF_IN)          # lettura indicizzata: niente warning sui contig
+    rdr = VCF(VCF_IN)
     t0 = time.perf_counter()
     for rec in rdr:
-        _ = pred(rec)          # valutiamo il predicato, ignoriamo l’output
+        _ = pred(rec) 
     rdr.close()
     return time.perf_counter() - t0
 

@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# Funzione per eseguire il filtro, cronometrare l'esecuzione e salvare l'output.
-# Il terzo parametro, flag, indica se si utilizza -f (INFO filter) oppure -g (Genotype filter).
-
 filter_expr="EVA_4 - danio_rerio"
 echo "Esecuzione filtro: $filter_expr" > ../result/Vcflib_result_danio.txt
 echo "Esecuzione filtro: $filter_expr" > ../result/Vcflib_result_danio.txt

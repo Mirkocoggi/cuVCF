@@ -1,6 +1,5 @@
 #!/bin/bash
 
-#CREAZIONE FILE
 grep -v "^#" ../data/IRBT.vcf | awk '{print $1"\t"($2-1)"\t"$2"\t"$2}' > myannotations.bed
 vcfannotate -b myannotations.bed -k mypos ../data/IRBT.vcf > ../data/IRBT_annotated.vcf
 sed '/^##INFO=<ID=mypos,/ s/Type=String/Type=Integer/' ../data/IRBT_annotated.vcf > ../data/IRBT_annotated_new.vcf

@@ -1,13 +1,10 @@
-# --- INFO / FILTER singoli -----------------------------------------
 EVA_4
 E_Multiple_observations
 TSA=SNV
 
-# --- range sul tag INFO=mypos (aggiunto con vcfannotate) ------------
 mypos > 200000
 mypos > 200000 AND mypos < 300000
 
-# --- combinazioni logiche ------------------------------------------
 NOT E_Multiple_observations AND TSA=SNV
 mypos > 200000 AND E_Multiple_observations
 mypos > 200000 AND mypos < 300000 AND E_Multiple_observations
