@@ -1,8 +1,24 @@
-#ifndef VCF_PARCED_H
-#define VCF_PARCED_H
-#include "VCFparser_mt_col_struct.h"
-#include "VCF_var.h"
-#include "VCF_var_columns_df.h"
+/**
+ * @file VCF_parsed.h
+ * @brief Multi-threaded CPU implementation for parsing and processing VCF files.
+ *
+ * This header defines the main structures and functions for parsing Variant Call Format (VCF) files
+ * using multi-threading on the CPU. It provides the core logic for reading, decompressing, and
+ * extracting variant, sample, and alternative data from VCF files, supporting both compressed (.gz)
+ * and uncompressed formats.
+ *
+ * Key features:
+ *   - Efficient multi-threaded parsing and memory management for large VCF files.
+ *   - Support for both INFO and FORMAT fields, including alternative alleles and sample data.
+ *   - Integration with custom dataframes for column-oriented storage.
+ *   - Utility functions for file handling, header parsing, and data extraction.
+ *
+ * @note All code paths are CPU-only; no CUDA or GPU dependencies are required.
+ *       Designed for compatibility with pybind11 bindings and downstream Python analysis.
+ */
+
+#ifndef VCF_PARSED_H
+#define VCF_PARSED_H
 #include <chrono>
 #include <boost/algorithm/string.hpp>
 #include <Imath/half.h>
@@ -192,6 +208,7 @@ public:
         after = chrono::system_clock::now();
         auto populate_var_columns = std::chrono::duration<double>(after - before).count();
         
+        // Uncomment the following lines for debugging purposes
         //cout << "Get file size: " << get_file_size << " s" << endl;
         //cout << "get_header: " << get_header << " s" << endl;
         //cout << "find_new_lines: " << find_new_lines << " s" << endl;
@@ -282,7 +299,7 @@ public:
         if(tmp_split.size() > 9){
             samplesON = true;
             samp_columns.numSample = tmp_split.size() - 9;
-            alt_sample.numSample = samp_columns.numSample; //TODO - controlla perchè è subito anche negli alt
+            alt_sample.numSample = samp_columns.numSample;
 
             for(int i = 0; i < samp_columns.numSample; i++){
                 samp_columns.sampNames.insert(std::make_pair(tmp_split[9+i], i));
@@ -293,8 +310,6 @@ public:
             samp_columns.numSample = 0;
         }
         
-        //cout << "Num Samples = " << samp_columns.numSample << endl;
-
         INFO.total_values = INFO.ID.size();
         INFO.no_alt_values = INFO.total_values - INFO.alt_values;
 
@@ -382,7 +397,6 @@ public:
         
         after = chrono::system_clock::now();
         auto f_new_lines = std::chrono::duration<double>(after - before).count(); 
-        //cout << "\nFilestring time: " << filestring_time << " s " << "New lines time: " << f_new_lines << " s\n\n" << endl;
     }
     
     void create_sample_vectors(int num_threads){
@@ -404,7 +418,7 @@ public:
             alt_sample.initMapGT();
             alt_sample.sample_GT.numb = -1;
         }else if(FORMAT.hasGT){
-            int iter = FORMAT.numGT - '0';//std::stoi(FORMAT.numGT); //number of vector needed TODO - da sistemare, se no non possiamo avere numb=10...
+            int iter = FORMAT.numGT - '0';
             samp_columns.initMapGT();
             for(int i=0; i<iter; i++){ //create a vector of vectors
                 samp_GT tmp;
@@ -492,7 +506,6 @@ public:
                 if(!strcmp(&FORMAT.Type[i][0], "String")){ 
                     samp_alt_string_tmp.name = FORMAT.ID[i];
                     alt_sample.samp_string.push_back(samp_alt_string_tmp);
-                    //alt_sample.samp_string.back().i_string.resize(batch_size*samp_columns.numSample*2, "\0");
                     alt_sample.samp_string.back().numb = -1;
                     info_map[FORMAT.ID[i]] = 11;
                     var_columns.info_map1[FORMAT.ID[i]] = 11;
@@ -500,7 +513,6 @@ public:
                 }else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
                     samp_alt_int_tmp.name = FORMAT.ID[i];
                     alt_sample.samp_int.push_back(samp_alt_int_tmp);
-                    //alt_sample.samp_int.back().i_int.resize(batch_size*samp_columns.numSample*2, 0);
                     alt_sample.samp_int.back().numb = -1;
                     info_map[FORMAT.ID[i]] = 12;
                     var_columns.info_map1[FORMAT.ID[i]] = 12;
@@ -508,7 +520,6 @@ public:
                 }else if(!strcmp(&FORMAT.Type[i][0], "Float")){
                     samp_alt_float_tmp.name = FORMAT.ID[i];
                     alt_sample.samp_float.push_back(samp_alt_float_tmp);
-                    //alt_sample.samp_float.back().i_float.resize(batch_size*samp_columns.numSample*2, 0);
                     alt_sample.samp_float.back().numb = -1;
                     info_map[FORMAT.ID[i]] = 13;
                     var_columns.info_map1[FORMAT.ID[i]] = 13;
@@ -552,7 +563,6 @@ public:
                 if(strcmp(&INFO.Type[i][0], "Integer")==0){
                     INFO.ints_alt++;
                     alt_int_tmp.name = INFO.ID[i];
-                    //alt_int_tmp.i_int.resize(2*batch_size, 0);
                     alt_columns.alt_int.push_back(alt_int_tmp);
                     info_map[INFO.ID[i]] = 4;
                     var_columns.info_map1[INFO.ID[i]] = 4;
@@ -560,7 +570,6 @@ public:
                 if(strcmp(&INFO.Type[i][0], "Float")==0){
                     INFO.floats_alt++;
                     alt_float_tmp.name = INFO.ID[i];
-                    //alt_float_tmp.i_float.resize(2*batch_size, 0);
                     alt_columns.alt_float.push_back(alt_float_tmp);
                     info_map[INFO.ID[i]] = 5;
                     var_columns.info_map1[INFO.ID[i]] = 5;
@@ -568,12 +577,11 @@ public:
                 if(strcmp(&INFO.Type[i][0], "String")==0){
                     INFO.strings_alt++;
                     alt_string_tmp.name = INFO.ID[i];
-                    //alt_string_tmp.i_string.resize(2*batch_size, "\0");
                     alt_columns.alt_string.push_back(alt_string_tmp);
                     info_map[INFO.ID[i]] = 6;
                     var_columns.info_map1[INFO.ID[i]] = 6;
                 }
-                if(strcmp(&INFO.Type[i][0], "Flag")==0){ //Per ora non gestito
+                if(strcmp(&INFO.Type[i][0], "Flag")==0){ 
                     INFO.flags_alt++;
                     info_map[INFO.ID[i]] = 7;
                 }
@@ -608,13 +616,10 @@ public:
                     info_map[INFO.ID[i]] = 0;
                     var_columns.info_map1[INFO.ID[i]] = 0;
                 }
-            }else if(/*fai il punto*/ false){
-                
-            }else{
-                
-
-                //in progress, se num > 1 TODO
-                // Può avere solo come valori: 0, 1, R, A, G, .
+            } else {
+                // TODO: Handle cases where INFO.Number > 1 or is one of: 0, 1, R, A, G, .
+                // Only the following values are allowed for INFO.Number: 0, 1, R, A, G, .
+                // Implement logic for multi-valued fields.
             }
         }
         
@@ -673,43 +678,6 @@ public:
             cout<<" size: "<<var_columns.in_int[i].i_int.size();
             cout<<endl;
         }
-        /*cout<<endl;
-        cout<<"Flags: "<<endl;
-        for(int i=0; i<var_columns.in_flag.size(); i++){
-            cout<<var_columns.in_flag[i].name<<": ";
-            for(int j=0; j<var_columns.in_flag[i].i_flag.size(); j++){
-                cout<<var_columns.in_flag[i].i_flag[j]<<" ";
-            }
-            cout<<endl;
-        }
-        cout<<endl;
-        cout<<"Floats: "<<endl;
-        for(int i=0; i<var_columns.in_float.size(); i++){
-            cout<<var_columns.in_float[i].name<<": ";
-            for(int j=0; j<var_columns.in_float[i].i_float.size(); j++){
-                cout<<var_columns.in_float[i].i_float[j]<<" ";
-            }
-            cout<<endl;
-        }
-        cout<<endl;
-        cout<<"Strings: "<<endl;
-        for(int i=0; i<var_columns.in_string.size(); i++){
-            cout<<var_columns.in_string[i].name<<": ";
-            for(int j=0; j<var_columns.in_string[i].i_string.size(); j++){
-                cout<<var_columns.in_string[i].i_string[j]<<" ";
-            }
-            cout<<endl;
-        }
-        cout<<endl;
-        cout<<"Ints: "<<endl;
-        for(int i=0; i<var_columns.in_int.size(); i++){
-            cout<<var_columns.in_int[i].name<<": ";
-            for(int j=0; j<var_columns.in_int[i].i_int.size(); j++){
-                cout<<var_columns.in_int[i].i_int[j]<<" ";
-            }
-            cout<<endl;
-        }
-        cout<<endl;*/
     }
     
     void reserve_var_columns(){
@@ -753,7 +721,7 @@ public:
                 tmp_alt_format[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, 0);
                 tmp_alt_format[th_ID].alt_id.resize(batch_size*2*samp_columns.numSample, 0);
                 tmp_alt_format[th_ID].samp_id.resize(batch_size*2*samp_columns.numSample, static_cast<unsigned short>(0));
-                if(FORMAT.hasGT && FORMAT.numGT == 'A'){ //TODO
+                if(FORMAT.hasGT && FORMAT.numGT == 'A'){
                     tmp_alt_format[th_ID].sample_GT.GT.resize(batch_size*2*samp_columns.numSample, (char)0),
                     tmp_alt_format[th_ID].initMapGT();
                 }
@@ -907,44 +875,37 @@ public:
 
         alt_columns.numAlt = totAlt;
         alt_sample.numSample = totSampAlt;
-        // Eseguiamo il resize in parallelo per alt_columns
         {
-            // Task per ridimensionare le vector "piatte"
             auto fut1 = std::async(std::launch::async, [&]() {
                 alt_columns.var_id.resize(totAlt);
                 alt_columns.alt_id.resize(totAlt);
                 alt_columns.alt.resize(totAlt);
             });
             
-            // Task per ridimensionare le vector interne di alt_int
             auto fut2 = std::async(std::launch::async, [&]() {
                 for (int j = 0; j < INFO.ints_alt; j++) {
                     alt_columns.alt_int[j].i_int.resize(totAlt);
                 }
             });
             
-            // Task per ridimensionare le vector interne di alt_float
             auto fut3 = std::async(std::launch::async, [&]() {
                 for (int j = 0; j < INFO.floats_alt; j++) {
                     alt_columns.alt_float[j].i_float.resize(totAlt);
                 }
             });
             
-            // Task per ridimensionare le vector interne di alt_string
             auto fut4 = std::async(std::launch::async, [&]() {
                 for (int j = 0; j < INFO.strings_alt; j++) {
                     alt_columns.alt_string[j].i_string.resize(totAlt);
                 }
             });
             
-            // Aspettiamo che tutti i task completino
             fut1.get();
             fut2.get();
             fut3.get();
             fut4.get();
         }
 
-        // Se samplesON è attivo, facciamo la stessa cosa per alt_sample
         if (samplesON) {
             auto fut1 = std::async(std::launch::async, [&]() {
                 alt_sample.var_id.resize(totSampAlt);

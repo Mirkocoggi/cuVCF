@@ -1,3 +1,17 @@
+/**
+ * @file Parser.h
+ * @brief Header file defining the VCF parser class and its interface
+ * @author Your Name
+ * @date 2025-07-16
+ *
+ * @details This file defines the vcf_parsed class which provides:
+ *  - VCF file parsing functionality
+ *  - CUDA device memory management
+ *  - Host/device data synchronization
+ *  - Sample and variant data processing
+ *
+ * @note This is part of the GPU-accelerated VCF parser implementation
+ */
 #ifndef PARSER_H
 #define PARSER_H
 
@@ -8,10 +22,24 @@
 
 /**
  * @class vcf_parsed
- * @brief Encapsulates the VCF file parsing workflow.
+ * @brief Encapsulates the VCF file parsing workflow
+ * @ingroup Parser
  *
- * This class manages reading the VCF file, extracting the header and variant/sample data,
- * allocating memory on both host and device, launching CUDA kernels, and merging the results.
+ * @details This class manages:
+ *  - VCF file reading and header extraction
+ *  - Host and device memory allocation
+ *  - CUDA kernel execution
+ *  - Results merging and cleanup
+ *
+ * The parser supports:
+ *  - Standard VCF fields (CHROM, POS, etc.)
+ *  - INFO field parsing
+ *  - FORMAT field parsing
+ *  - Sample data processing
+ *  - Compressed (.gz) input files
+ *
+ * @note All device memory is automatically managed
+ * @warning Requires sufficient GPU memory for file size
  */
 
 class vcf_parsed

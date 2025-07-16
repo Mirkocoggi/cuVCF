@@ -1,3 +1,14 @@
+/**
+ * @file VCF_var_columns_df.h
+ * @brief Column-oriented data structures for VCF variant data storage and processing
+ * 
+ * This header defines the data structures and methods for storing VCF variant information
+ * in a column-oriented format. It provides efficient storage and access patterns for
+ * variant data including chromosomes, positions, IDs, reference alleles, and INFO fields.
+ * 
+ * @note This is part of the CPU-only implementation and requires no CUDA dependencies
+ */
+
 #ifndef VCF_VARCOLUMNS_H
 #define VCF_VARCOLUMNS_H
 #include "VCFparser_mt_col_struct.h"
@@ -7,6 +18,13 @@
 #include <boost/algorithm/string.hpp>
 #include <Imath/half.h>
 
+/**
+ * @brief Constants defining the types of VCF fields
+ * 
+ * These constants are used to identify different types of fields in the VCF file,
+ * including basic types (FLAG, INT, FLOAT, STRING) and their variants for ALT
+ * and FORMAT sections.
+ */
 const int FLAG = 0;
 const int INT = 1;
 const int FLOAT = 2;
@@ -21,27 +39,79 @@ const int STRING_FORMAT_ALT = 11;
 const int INT_FORMAT_ALT = 12;
 const int FLOAT_FORMAT_ALT = 13;
 
+/**
+ * @class var_columns_df
+ * @brief Column-oriented data frame for VCF variant data
+ * 
+ * Stores VCF data in a column-oriented format for efficient processing and memory usage.
+ * Each field from the VCF file (CHROM, POS, ID, etc.) is stored in its own vector,
+ * allowing for better cache utilization and SIMD processing.
+ */
+
 class var_columns_df
 {
 public:
+    /** @brief Vector storing variant numbers for each entry */
     vector<unsigned int> var_number;
+    
+    /** 
+     * @brief Maps chromosome names to compact char codes
+     * @details Provides efficient storage by mapping chromosome names (e.g., "chr1") 
+     *          to single character codes
+     */
     std::map<std::string, char> chrom_map;
-    vector<char> chrom; // TODO si riempie in modo sequenziale, ha gli stessi valori di var_number
-    vector<unsigned int>pos;
+    
+    /** @brief Vector storing chromosome codes sequentially */
+    vector<char> chrom;
+    
+    /** @brief Vector storing genomic positions */
+    vector<unsigned int> pos;
+    
+    /** @brief Vector storing variant identifiers */
     vector<string> id;
+    
+    /** @brief Vector storing reference alleles */
     vector<string> ref;
+    
+    /** @brief Vector storing quality scores in half precision */
     vector<half> qual;
+
+    /** @brief Maps filter names to compact char representations */
     std::map<std::string, char> filter_map;
+    
+    /** @brief Vector storing filter status codes */
     vector<char> filter;
+    
+    /** @brief Vector storing float-type INFO fields */
     vector<info_float> in_float;
+    
+    /** @brief Vector storing flag-type INFO fields */
     vector<info_flag> in_flag;
+    
+    /** @brief Vector storing string-type INFO fields */
     vector<info_string> in_string;
+    
+    /** @brief Vector storing integer-type INFO fields */
     vector<info_int> in_int;
+    
+    /** @brief Maps INFO field names to their indices */
     map<string,int> info_map1;
 
-    //mutable std::mutex chrom_mtx;
-    //mutable std::mutex filter_mtx;
-    
+
+    /**
+     * @brief Parses a VCF line and populates the variant columns
+     * 
+     * @param line Pointer to the VCF line buffer
+     * @param start Starting position in the line buffer
+     * @param end Ending position in the line buffer
+     * @param i Index of the current variant
+     * @param tmp_alt Pointer to temporary alternative allele storage
+     * @param tmp_num_alt Pointer to store number of alternative alleles
+     * 
+     * @details This function parses a single line from a VCF file and populates
+     * the corresponding columns (CHROM, POS, ID, REF, etc.) in the data frame.
+     * It handles both basic fields and complex INFO fields.
+     */
     void get_vcf_line_in_var_columns(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt)
     { 
         bool find1 = false;
@@ -80,11 +150,6 @@ public:
                 try{
                     pos[i] = stoul(tmp);
                 }catch(const std::exception& e){
-                    //cout << "Stoul error: " << tmp << " iterazione: " << i << " Iter " <<iter << " What: "<< e.what() <<endl;
-                    //for(int k = start; k < end; k++){
-                    //    cout << line[k];
-                    //}
-                    //cout << endl;
                     pos[i] = 0;
                 }
                 
@@ -189,10 +254,10 @@ public:
                 find1 = true;
                 iter++;
                 vector<string> tmp_el;
-                boost::split(tmp_el, tmp, boost::is_any_of(";")); //Info arguments separation
+                boost::split(tmp_el, tmp, boost::is_any_of(";")); // Split INFO field into individual key-value pairs
                 vector<string> tmp_elems;
                 for(int ii=0; ii<tmp_el.size(); ii++){
-                    boost::split(tmp_elems, tmp_el[ii], boost::is_any_of("=")); //info_id separation from contents
+                    boost::split(tmp_elems, tmp_el[ii], boost::is_any_of("=")); // Separate INFO field identifier from its value content
                     bool find_info_type = false;
                     bool find_info_elem = false;
                     if(tmp_elems.size()==2){
@@ -314,6 +379,29 @@ public:
         (*tmp_num_alt) = (*tmp_num_alt)+local_alt;
     }
 
+    /**
+     * @brief Parses a VCF line with FORMAT fields and populates data structures
+     * 
+     * @param line Raw VCF line buffer
+     * @param start Starting position in line buffer
+     * @param end Ending position in line buffer
+     * @param i Current variant index
+     * @param tmp_alt Alternative allele storage
+     * @param tmp_num_alt Number of alternative alleles counter
+     * @param sample Sample data storage
+     * @param FORMAT FORMAT field specifications
+     * @param tmp_num_alt_format Alternative format entry counter
+     * @param tmp_alt_format Alternative format storage
+     * 
+     * @details Processes a VCF line containing FORMAT fields by:
+     *   1. Extracting basic variant information (CHROM, POS, etc.)
+     *   2. Processing alternative alleles
+     *   3. Handling INFO fields
+     *   4. Parsing FORMAT template
+     *   5. Processing sample-specific data according to FORMAT
+     * 
+     * @note Handles both fixed-format and alternative format fields
+     */
     void get_vcf_line_in_var_columns_format(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt, sample_columns_df* sample, header_element* FORMAT, int *tmp_num_alt_format, alt_format_df* tmp_alt_format)
     {
         bool find1 = false;
@@ -448,10 +536,10 @@ public:
                 find1 = true;
                 iter++;
                 vector<string> tmp_el;
-                boost::split(tmp_el, tmp, boost::is_any_of(";")); //Info arguments separation
+                boost::split(tmp_el, tmp, boost::is_any_of(";")); // Split INFO field into individual key-value pairs
                 vector<string> tmp_elems;
                 for(int ii=0; ii<tmp_el.size(); ii++){
-                    boost::split(tmp_elems, tmp_el[ii], boost::is_any_of("=")); //info_id separation from contents
+                    boost::split(tmp_elems, tmp_el[ii], boost::is_any_of("=")); // Separate INFO field identifier from its value content
                     bool find_info_type = false;
                     bool find_info_elem = false;
                     if(tmp_elems.size()==2){
@@ -582,9 +670,7 @@ public:
             }
         }
         
-        //(*sample).print();
-
-        //TODO - Da gestire il GT qui dentro
+        //Format's data
         int samp;
         for(samp = 0; samp < (*sample).numSample; samp++){
             tmp="";
@@ -600,7 +686,6 @@ public:
                         bool find_elem = false;
                         while(!find_type){
                             if(!strcmp(tmp_format_split[j].c_str(), "GT")){
-                                // TODO - da considerare come rifare la struttura visto che se numb > 1 servono + array
                                 (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
                                 
                                 (*sample).samp_id[i*(*sample).numSample + samp] =  static_cast<unsigned short>(samp);
@@ -634,7 +719,7 @@ public:
                                 while(!find_elem){
                                     if(!(*sample).samp_string[el].name.compare(0, tmp_format_split[j].length(), tmp_format_split[j], 0, tmp_format_split[j].length())){
                                         if((*sample).samp_string[el].numb==1){ //String with numb = 1
-                                            //Update the corresponing cell
+                                            //Update the corresponding cell
                                             (*sample).samp_string[el].i_string[i*(*sample).numSample + samp] = tmp_split[j];
                                         }else{
                                             //String with numb > 1 (separated by commas)
@@ -707,7 +792,6 @@ public:
                                 find_type = true;
                             }else if(info_map1[tmp_format_split[j]] == STRING_FORMAT_ALT){
                                 //String alternatives
-                                // TODO - Da gestire i GT con alternatives
                                 boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                 local_alt = tmp_sub.size();
                                 int el = 0;
@@ -785,6 +869,11 @@ public:
         
     }
 
+    /**
+     * @brief Print the VCF variant columns data frame
+     * 
+     * @param num_lines 
+     */
     void print(long num_lines){
         int iter = (num_lines>var_number.size()) ? var_number.size() : num_lines;
         for(long i=0; i<num_lines; i++){

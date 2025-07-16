@@ -1,11 +1,17 @@
 /**
  * @file Kernels.cu
- * @brief Contains CUDA kernels and device helper functions for VCF file parsing.
+ * @brief CUDA kernels and device functions for VCF file parsing
+ * @author Your Name
+ * @date 2025-07-16
  *
- * This file provides:
- *  - A kernel to identify newline indices in an input file.
- *  - A kernel to parse VCF lines in a specific format and populate the KernelParams structure.
- *  - Device helper functions for temporary string manipulation.
+ * @details This file implements the GPU-accelerated parsing of VCF files through:
+ *  - Line indexing: Identifies newline positions in parallel
+ *  - Field parsing: Extracts and processes VCF fields (INFO, FORMAT, etc.)
+ *  - Memory optimization: Uses shared and device memory efficiently
+ *  - Batch processing: Handles large files in configurable chunks
+ *
+ * @note Uses __ldg for coalesced memory access to improve performance
+ * @warning Requires compute capability 3.0 or higher for __ldg operations
  */
 
 #ifndef KERNELS_CU
@@ -32,16 +38,18 @@
 using namespace std;
 
 /**
- * @brief CUDA kernel to find newline indices in an input character array.
+ * @brief CUDA kernel to find newline indices in an input buffer
  *
- * Each thread checks a single character; if it finds a newline ('\n'),
- * it atomically writes its index into the output array.
+ * @param input [in] Input character buffer in device memory
+ * @param len [in] Length of input buffer
+ * @param output [out] Array to store newline indices
+ * @param len_output [in] Size of output array
+ * @param global_count [out] Atomic counter for output array
  *
- * @param input Pointer to the input character array.
- * @param len Length of the input array.
- * @param output Pointer to the output array where newline indices will be stored.
- * @param len_output Total length of the output array.
- * @param global_count Pointer to a global counter used for atomic index writes.
+ * @details Each thread:
+ *  1. Processes one character using coalesced reads
+ *  2. If newline found, atomically adds index to output
+ *  3. Last thread writes sentinel value
  */
 __global__ void cu_find_new_lines_index(const char* input, unsigned int len, unsigned int* output, 
                 unsigned int len_output, unsigned int* global_count){
@@ -85,6 +93,24 @@ __device__ void append_tmp(char* tmp, int& tmp_idx, char c) {
     tmp[tmp_idx] = '\0';
 };
 
+/**
+ * @brief Device function to parse a VCF line
+ *
+ * @param params [in,out] Kernel parameters containing all data structures
+ * @param my_mem [in] Temporary buffer for string operations
+ * @param currBatch [in] Current batch index
+ * @param batch_size [in] Number of lines per batch
+ * @param hasSamp [in] Whether sample data is present
+ *
+ * @details Processes VCF fields in sequence:
+ *  1. Basic fields (CHROM, POS, ID, REF, ALT, QUAL, FILTER)
+ *  2. INFO field key-value pairs
+ *  3. FORMAT field specifications (if samples present)
+ *  4. Sample data according to FORMAT (if samples present)
+ *
+ * @note Uses temporary buffers in my_mem for string operations
+ * @warning Assumes my_mem size >= thID*MAX_TOKEN_LEN*MAX_TOKENS*3
+ */
 __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, int batch_size, bool hasSamp){
     long thID =  threadIdx.x + blockIdx.x * blockDim.x;
     bool find1 = false;
@@ -192,7 +218,7 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
             int el = 0;
             while (cuda_strncmp(&(params->int_name[el*16]), key, MAX_TOKEN_LEN) != 0 && el < NUM_KEYS_MAP1) ++el;
             if (el < NUM_KEYS_MAP1) {
-                if(cuda_strncmp(&(params->int_name[el*16]), "TSA", MAX_TOKEN_LEN)==0){ //TODO tmp implementation per TSA
+                if(cuda_strncmp(&(params->int_name[el*16]), "TSA", MAX_TOKEN_LEN)==0){
                     if(!cuda_strncmp(value, "SNV", MAX_TOKEN_LEN)){
                         params->in_int[el*params->numLines+thID] = 0;
                     }else if(!cuda_strncmp(value, "INS", MAX_TOKEN_LEN) || !cuda_strncmp(value, "insertion", MAX_TOKEN_LEN)){
@@ -332,6 +358,22 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
 
 }
 
+/**
+ * @brief Main parsing kernel that processes VCF lines in batches
+ *
+ * @param params [in,out] Structure containing all parsing parameters and data
+ * @param my_mem [in] Device memory for temporary string operations
+ * @param batch_size [in] Number of lines to process per batch
+ * @param hasSamp [in] Flag indicating presence of sample data
+ *
+ * @details 
+ *  1. Calculates required iterations based on total lines and batch size
+ *  2. Processes each batch using get_vcf_line
+ *  3. Handles memory management for temporary operations
+ *
+ * @note Uses batch processing to handle large files efficiently
+ * @warning Ensure my_mem is large enough for all concurrent threads
+ */
 __global__ void kernel (KernelParams* params, char* my_mem, int batch_size, bool hasSamp)
 {
     int num_iteration = (params->numLines + batch_size - 1)/batch_size;

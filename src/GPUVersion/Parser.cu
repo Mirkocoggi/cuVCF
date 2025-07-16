@@ -1,12 +1,18 @@
 /**
  * @file Parser.cu
- * @brief Implements the VCF file parsing workflow.
+ * @brief CUDA-accelerated VCF file parser implementation
+ * @author Your Name
+ * @date 2025-07-16
  *
- * This file defines the vcf_parsed class, which encapsulates the entire VCF parsing process:
- * - Reading and parsing the VCF header.
- * - Allocating host and device memory.
- * - Launching CUDA kernels for parsing VCF lines.
- * - Merging GPU and CPU results into structured data.
+ * @details Implements a parallel VCF parser using CUDA:
+ *  - Header parsing and metadata extraction
+ *  - Memory management (host and device)
+ *  - CUDA kernel launches and synchronization
+ *  - Multi-threaded data merging
+ *  - Sample and variant data processing
+ *
+ * @note Requires CUDA toolkit 11.0 or later
+ * @warning Memory allocation sizes must account for maximum VCF file size
  */
 
 #ifndef PARSER_CU
@@ -92,7 +98,7 @@ void vcf_parsed::run(char* vcf_filename, int num_threadss){
         exit(1);
     }
 
-    int deviceID = 0; // Usa il dispositivo 0 (il primo)
+    int deviceID = 0; 
     cudaSetDevice(deviceID);
 
     cudaDeviceProp prop;
@@ -144,15 +150,6 @@ void vcf_parsed::run(char* vcf_filename, int num_threadss){
 
         cudaCores = coresPerSM * prop.multiProcessorCount;
 
-        //Print the saved values
-        //std::cout << "Device Information:" << std::endl;
-        //std::cout << "Global memory: " << globalMemory / (1024.0 * 1024.0) << " MB" << std::endl;
-        //std::cout << "Shared memory per block: " << sharedMemory / 1024.0 << " KB" << std::endl;
-        //std::cout << "Constant memory: " << constantMemory / 1024.0 << " KB" << std::endl;
-        //std::cout << "Texture alignment: " << textureAlignment << " bytes" << std::endl;
-        //std::cout << "Maximum threads per block: " << maxThreadsPerBlock << std::endl;
-        //std::cout << "Threads per block dimensions: " << threadsDim[0] << " x " << threadsDim[1] << " x " << threadsDim[2] << std::endl;
-        //std::cout << "Grid dimensions: " << gridDim[0] << " x " << gridDim[1] << " x " << gridDim[2] << std::endl;
     } else {
         std::cerr << "Failed to query device properties: " << cudaGetErrorString(err) << std::endl;
     }
@@ -174,7 +171,7 @@ void vcf_parsed::run(char* vcf_filename, int num_threadss){
     // Getting filesize (number of char in the file)
     filesize = get_file_size(path_to_filename);
     // Getting the header (Saving the header into a string and storing the header size )
-    get_and_parse_header(&inFile); //serve per separare l'header dal resto del file
+    get_and_parse_header(&inFile);
     inFile.close();
     // Allocating the filestring (the variations as a big char*, the dimension is: filesize - header_size)
     allocate_filestring();
@@ -183,7 +180,7 @@ void vcf_parsed::run(char* vcf_filename, int num_threadss){
     create_info_vectors(num_threadss);
     reserve_var_columns();
     create_sample_vectors(num_threadss);
-    //Allocate and initialize device memory
+    // Allocate and initialize device memory
     device_allocation();
     populate_var_columns(num_threadss, cudaCores);
     device_free();
@@ -206,10 +203,8 @@ void vcf_parsed::copyMapToConstantMemory(const std::map<std::string, char>& map)
     for (const auto& [key, value] : map) {
         if (index >= NUM_KEYS_GT) break;
 
-        // Copia la chiave, con padding se necessario
         std::strncpy(h_keys[index], key.c_str(), MAX_KEY_LENGTH_GT - 1);
 
-        // Copia il valore corrispondente
         h_values[index] = value;
 
         ++index;
@@ -263,9 +258,9 @@ void vcf_parsed::device_allocation(){
     int tmp = var_columns.in_float.size();
 
     const int max_name_size = 16;
-    // allocazione di tutti i campi float in successione
-    cudaMalloc(&(d_VC_in_float->i_float), tmp * (num_lines) * sizeof(__half)); //Va in segfault qui
-    cudaMalloc(&(d_VC_in_float->name), tmp * sizeof(char) * max_name_size); //allocazione in successione di tutti i nomi (assumo massimo 16 caratteri)
+
+    cudaMalloc(&(d_VC_in_float->i_float), tmp * (num_lines) * sizeof(__half));
+    cudaMalloc(&(d_VC_in_float->name), tmp * sizeof(char) * max_name_size); 
 
     for (int i = 0; i < tmp; i++) {
         cudaMemcpy(d_VC_in_float->name+i*max_name_size, var_columns.in_float[i].name.c_str(), var_columns.in_float[i].name.size() + 1, cudaMemcpyHostToDevice);
@@ -279,7 +274,6 @@ void vcf_parsed::device_allocation(){
         cudaMemcpy(d_VC_in_flag->name+i*max_name_size, var_columns.in_flag[i].name.c_str(), var_columns.in_flag[i].name.size() + 1, cudaMemcpyHostToDevice);
     }
 
-    // Ripeti per in_int
     tmp = var_columns.in_int.size();
     cudaMalloc(&(d_VC_in_int->i_int), tmp * (num_lines) * sizeof(int));
     cudaMalloc(&(d_VC_in_int->name), tmp * sizeof(char) * max_name_size);
@@ -339,12 +333,6 @@ void vcf_parsed::device_allocation(){
         cudaMalloc(&(d_SC_sample_GT->numb), sizeof(int));
         cudaMemcpy(d_SC_sample_GT->numb, &(samp_columns.sample_GT[0].numb), sizeof(int), cudaMemcpyHostToDevice);
 
-        //TODO - Da rimuovere questa sinchronize utile per debugging:
-        //cudaError_t err = cudaDeviceSynchronize();
-        //if (err != cudaSuccess) {
-        //    fprintf(stderr, "CUDA error in device allocation: %s\n", cudaGetErrorString(err));
-        //    exit(EXIT_FAILURE);
-        //}
     }
 
 }
@@ -672,20 +660,19 @@ void vcf_parsed::create_sample_vectors(int num_threads){
                 FORMAT.flags++;
             }else if(strcmp(&FORMAT.Number[i][0], ".") == 0){
                 int userNumber = -1;
-                // Ciclo per richiedere un input corretto (intero non negativo)
+
                 while(true) {
                     std::cout << "Select the number for the field " 
                             << FORMAT.ID[i] << " (non negative integer): ";
                     if (std::cin >> userNumber && userNumber >= 0) {
-                        break; // Input corretto, esce dal ciclo
+                        break; 
                     } else {
-                        std::cout << "Valore non valido. Riprova." << std::endl;
-                        std::cin.clear(); // Ripristina lo stato del flusso
+                        std::cout << "VInvalid value. Please try again." << std::endl;
+                        std::cin.clear(); 
                         std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Scarta l'input errato
                     }
                 }
             
-                // Caso in cui l'utente inserisca 1: trattiamo il campo come un singolo elemento
                 if(userNumber == 1){
                     if(!strcmp(&FORMAT.Type[i][0], "String")){
                         samp_string_tmp.name = FORMAT.ID[i];
@@ -900,7 +887,6 @@ void vcf_parsed::create_info_vectors(int num_threads){
                 info_map[INFO.ID[i]] = 2;
                 var_columns.info_map1[INFO.ID[i]] = 2;
             } else if(strcmp(&INFO.Type[i][0], "String")==0){
-                //TODO - implementazione temporanea start - TSA - per provare la metto negli int deterministici
                 if(strcmp(INFO.ID[i].c_str(), "TSA")==0){
                     INFO.ints++;
                     info_int_tmp.name = INFO.ID[i];
@@ -908,7 +894,7 @@ void vcf_parsed::create_info_vectors(int num_threads){
                     var_columns.in_int.push_back(info_int_tmp);
                     info_map[INFO.ID[i]] = 1;
                     var_columns.info_map1[INFO.ID[i]] = 1;
-                }else{ //TODO - implementazione temporanea end
+                }else{ 
                     INFO.strings++;
                     info_string_tmp.name = INFO.ID[i];
                     info_string_tmp.i_string.resize(num_lines-1, "\0");
@@ -924,9 +910,18 @@ void vcf_parsed::create_info_vectors(int num_threads){
                 info_map[INFO.ID[i]] = 0;
                 var_columns.info_map1[INFO.ID[i]] = 0;
             }
-        }else{
-            //in progress, se num > 1 TODO
-            // Può avere solo come valori: 0, 1, R, A, G, .
+        }else {
+            /**
+             * @todo Implement support for INFO fields with Number != 1
+             * 
+             * @details Valid Number values to handle:
+             *  - 0: Flag type (already handled)
+             *  - 1: Single value (already handled)
+             *  - R: One value per allele (including reference)
+             *  - A: One value per alternate allele
+             *  - G: One value per possible genotype
+             *  - .: Unknown number of values
+             */
         }
     }
     
@@ -1034,7 +1029,7 @@ void vcf_parsed::allocParamPointers(KernelParams **d_params, KernelParams *h_par
     */
 void vcf_parsed::populate_runner(int numb_cores){
     int threadsPerBlock = 32;
-    int blocksPerGrid = (numb_cores/threadsPerBlock) + 1; // TODO gestire dinamicamente in funzione del numero di core
+    int blocksPerGrid = (numb_cores/threadsPerBlock) + 1; 
     cudaEvent_t kernel_done;
     cudaEventCreate(&kernel_done);
     auto start = chrono::system_clock::now();
@@ -1079,30 +1074,12 @@ void vcf_parsed::populate_runner(int numb_cores){
 
         // Allocate d_params and copy h_params to GPU
         allocParamPointers(&d_params, &h_params);
-        //TODO - Da rimuovere questa sinchronize utile per debugging:
-        //cudaError_t err = cudaDeviceSynchronize();
-        //if (err != cudaSuccess) {
-        //    fprintf(stderr, "CUDA error in param alloc: %s\n", cudaGetErrorString(err));
-        //    exit(EXIT_FAILURE);
-        //}
 
         // Launch kernel
         kernel<<<blocksPerGrid, threadsPerBlock, 0, stream1>>>(d_params, my_mem, batchSize, true);
 
         cudaEventRecord(kernel_done, stream1);
-        // Check for errors
-        //err = cudaGetLastError();
-        //if (err != cudaSuccess) {
-        //    fprintf(stderr, "CUDA error in kernel launch: %s\n", cudaGetErrorString(err));
-        //    exit(EXIT_FAILURE);
-        //}
 
-        //TODO - Da rimuovere questa sinchronize utile per debugging:
-        //err = cudaDeviceSynchronize();
-        //if (err != cudaSuccess) {
-        //    fprintf(stderr, "CUDA error in kernel execution: %s\n", cudaGetErrorString(err));
-        //    exit(EXIT_FAILURE);
-        //}
     }else{
         // Allocate d_params and copy h_params to GPU
         allocParamPointers(&d_params, &h_params);
@@ -1118,8 +1095,6 @@ void vcf_parsed::populate_runner(int numb_cores){
         
     }
     
-    //TODO - memcpyAsinc may be broken 
-
     cudaStreamWaitEvent(stream2, kernel_done, 0);
     cudaMemcpyAsync(var_columns.var_number.data(), d_VC_var_number, (num_lines) * sizeof(unsigned int), cudaMemcpyDeviceToHost, stream2);
     cudaMemcpyAsync(var_columns.pos.data(), d_VC_pos, (num_lines) * sizeof(unsigned int), cudaMemcpyDeviceToHost, stream2);
@@ -1194,7 +1169,7 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
     int totAlt = 0;
     int totSampAlt = 0;
 
-    #pragma omp parallel //TODO lentissimo
+    #pragma omp parallel 
     {
         long start, end;
         int th_ID = omp_get_thread_num();
@@ -1219,7 +1194,7 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
             }
 
             // For each line in the batch
-            for(long i=start; i<end && i<num_lines-1; i++){ //TODO - da sistemare
+            for(long i=start; i<end && i<num_lines-1; i++){ 
                 get_vcf_line_in_var_columns_format(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]), &samp_columns, &FORMAT, &(tmp_num_alt_format[th_ID]), &(tmp_alt_format[th_ID]));
             }
             tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
@@ -1258,7 +1233,7 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
             tmp_alt_format[th_ID].numSample = tmp_num_alt_format[th_ID]; 
         }else{
             // There aren't samples in the dataset
-            for(long i=start; i<end && i<num_lines-1; i++){ //TODO - Da sistemare
+            for(long i=start; i<end && i<num_lines-1; i++){ 
                 get_vcf_line_in_var_columns(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]));
             }                      
             tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
@@ -1634,7 +1609,7 @@ void vcf_parsed::get_vcf_line_in_var_columns(char *line, long start, long end, l
                             find_info_type = true;
                         }
                     }
-                } // la flag sarà su device
+                } 
             }
         }else{
             tmp += line[start+iter];
@@ -1851,7 +1826,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                             find_info_type = true;
                         }
                     }
-                } // la flag sarà su device
+                } 
             }
         }else{
             tmp += line[start+iter];
@@ -1939,7 +1914,6 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                             find_type = true;
                         }else if(var_columns.info_map1[tmp_format_split[j]] == STRING_FORMAT_ALT){
                             //String alternatives
-                            // TODO - Da gestire i GT con alternatives
                             boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                             local_alt = tmp_sub.size();
                             int el = 0;

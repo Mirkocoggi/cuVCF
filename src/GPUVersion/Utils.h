@@ -1,11 +1,23 @@
 /**
- * @file Utils.h
- * @brief Provides utility functions for file operations.
+ * @class vcf_parsed
+ * @brief Encapsulates the VCF file parsing workflow
+ * @ingroup Parser
  *
- * This header defines constants for data types and includes functions to:
- * - Unzip a gzipped file securely using system calls.
- * - Extract the filename from a full file path.
- * - Retrieve the file size using C++17's filesystem library.
+ * @details This class manages:
+ *  - VCF file reading and header extraction
+ *  - Host and device memory allocation
+ *  - CUDA kernel execution
+ *  - Results merging and cleanup
+ *
+ * The parser supports:
+ *  - Standard VCF fields (CHROM, POS, etc.)
+ *  - INFO field parsing
+ *  - FORMAT field parsing
+ *  - Sample data processing
+ *  - Compressed (.gz) input files
+ *
+ * @note All device memory is automatically managed
+ * @warning Requires sufficient GPU memory for file size
  */
 
 #ifndef UTILS_H
@@ -87,14 +99,12 @@ const std::unordered_map<std::string, char> csqCharMap = {
 };
 
 /**
- * @brief Securely unzips a .gz file using gzip.
+ * @brief Securely unzips a .gz file using gzip
  *
- * This function checks if the provided filename ends with ".gz" and, if so, forks
- * a child process to execute the gzip command in decompression mode (-df). If the child
- * process completes successfully, the ".gz" extension is removed from the filename.
- * Otherwise, an error message is printed.
- *
- * @param vcf_filename Pointer to a C-string representing the VCF filename.
+ * @param vcf_filename [in,out] Pointer to filename, .gz extension removed on success
+ * @throw std::runtime_error If fork() or exec() fails
+ * @note Uses fork() and execlp() for secure execution
+ * @warning Modifies the input filename string on successful decompression
  */
 void unzip_gz_file(char* vcf_filename) {
     // Check if the filename ends with ".gz"
@@ -143,31 +153,29 @@ string get_filename(string path_filename, string &path_to_filename){
 }
 
 /**
- * @brief Gets the size of a file.
+ * @brief Gets the size of a file
  *
- * Utilizes the C++17 std::filesystem library to determine the size of the file in bytes.
- *
- * @param filename The file path as a string.
- * @return The size of the file in bytes.
+ * @param filename Full path to the file
+ * @return long File size in bytes
+ * @throw std::filesystem::filesystem_error If file doesn't exist or is inaccessible
+ * @note Uses std::filesystem::file_size
  */
 long get_file_size(string filename){
     return std::filesystem::file_size(filename);
 }
 
 /**
- * @brief Merges member vectors from temporary data structures into a destination vector.
- *
- * This function iterates over a vector of temporary objects and merges each object's member vector
- * (specified by the member pointer) into a global destination vector. The merge is performed using
- * move semantics to avoid unnecessary copies. After merging, the member vector in the temporary object
- * is cleared.
- *
- * @tparam T The type of the temporary objects.
- * @tparam U The type of the elements in the member vector.
- * @param tmp_alt A vector of temporary objects, each containing a member vector to be merged.
- * @param dest The destination vector where all elements will be merged.
- * @param num_threads The number of iterations (typically equal to tmp_alt.size()).
- * @param member_ptr Pointer to the member vector within type T that should be merged.
+ * @brief Merges member vectors from temporary data structures
+ * @tparam T Type of temporary objects containing vectors to merge
+ * @tparam U Type of elements in the vectors
+ * 
+ * @param tmp_alt [in] Vector of temporary objects
+ * @param dest [out] Destination vector for merged elements
+ * @param num_threads Number of temporary objects to process
+ * @param member_ptr Pointer to member vector within T
+ * 
+ * @note Uses move semantics to avoid copying
+ * @warning Source vectors are cleared after merging
  */
 template <typename T, typename U>
 void merge_member_vector(

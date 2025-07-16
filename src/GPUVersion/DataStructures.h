@@ -1,9 +1,19 @@
 /**
  * @file DataStructures.h
- * @brief Contains fundamental data structures used for VCF parsing and GPU processing.
- *
- * This file defines several structures used to pass parameters to CUDA kernels,
- * as well as to store VCF header information and parsed data for both host and device.
+ * @brief Contains fundamental data structures used for VCF parsing and GPU processing
+ * @author Your Name
+ * @date 2025-07-16
+ * 
+ * @details This file defines the core data structures used throughout the VCF parser:
+ * - Host and device structures for INFO fields (flag, string, float, int)
+ * - Sample-related structures for genotype and format fields
+ * - Parameter structures for CUDA kernel execution
+ * - Header element structures for VCF metadata
+ * 
+ * The structures are designed to efficiently handle both CPU and GPU processing,
+ * with separate versions optimized for each platform.
+ * 
+ * @note All device-side structures use raw pointers instead of STL containers
  */
 
 #ifndef DATASTRUCTURES_H
@@ -21,11 +31,16 @@ using namespace std;
 
 /**
  * @struct KernelParams
- * @brief Structure containing parameters and pointers for CUDA kernel execution.
- *
- * This structure holds pointers to arrays representing a VCF line,
- * variant numbers, positions, quality scores, and various info fields.
- * It also contains pointers to sample-specific data and parameters.
+ * @brief Structure containing parameters and pointers for CUDA kernel execution
+ * @details This structure serves as a container for all data needed by CUDA kernels:
+ *   - Raw VCF line data and indices
+ *   - Variant metadata (numbers, positions, quality)
+ *   - INFO field arrays (float, flag, int)
+ *   - Sample data arrays
+ *   - Genotype information
+ * 
+ * @note All pointers in this structure refer to device memory
+ * @warning Memory management (allocation/deallocation) must be handled externally
  */
  struct KernelParams {
     char *line;                   ///< Pointer to the VCF line.
@@ -91,9 +106,9 @@ struct info_string {
 
 /**
  * @struct info_float
- * @brief Structure to store float information from VCF INFO fields.
- *
- * Contains a vector of half-precision floats and the corresponding field name.
+ * @brief Structure to store float information from VCF INFO fields
+ * @see info_float_d For the device-side version of this structure
+ * @see KernelParams For how these values are passed to CUDA kernels
  */
 struct info_float {
     vector<__half> i_float;   ///< Vector storing float values (half precision).
@@ -102,9 +117,8 @@ struct info_float {
 
 /**
  * @struct info_float_d
- * @brief Device-side version of info_float.
- *
- * Contains a pointer to an array of half-precision floats and a pointer to the field name.
+ * @brief Device-side version of info_float
+ * @see info_float For the host-side version of this structure
  */
 struct info_float_d {
     __half *i_float;  ///< Pointer to device float array.

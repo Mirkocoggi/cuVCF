@@ -1,13 +1,23 @@
 /**
  * @file main.cu
- * @brief Entry point for the VCF parser application.
+ * @brief Entry point for the GPU-accelerated VCF parser
+ * @author Your Name
+ * @date 2025-07-16
  *
- * This file sets up the CUDA device, processes command-line arguments to obtain the
- * VCF file path (-v) and the number of threads (-t) for parallel processing, and
- * invokes the VCF parser workflow through the vcf_parsed class.
+ * @details Main application that:
+ *  - Sets up CUDA device and environment
+ *  - Processes command-line arguments
+ *  - Initializes and runs the VCF parser
+ *  - Manages resource cleanup
  *
  * Usage:
  *   ./VCFparser -v <vcf_filename> -t <num_threads>
+ *
+ * Arguments:
+ *   -v : Path to input VCF file (required)
+ *   -t : Number of CPU threads for parallel processing (required)
+ *
+ * @note CUDA device 0 is used by default
  */
 
 #include "Parser.cu"        
@@ -31,7 +41,20 @@
 using namespace std;
 
 
-
+/**
+ * @brief Program entry point
+ * 
+ * @param argc Number of command-line arguments
+ * @param argv Array of command-line argument strings
+ * @return int Exit status (0 for success, non-zero for errors)
+ *
+ * @details Program workflow:
+ *  1. Sets up CUDA device
+ *  2. Processes command-line arguments
+ *  3. Initializes VCF parser
+ *  4. Runs parsing operation
+ *  5. Cleans up resources
+ */
 int main(int argc, char *argv[]){
 
     cudaSetDevice(0);  // Use device 0
@@ -65,14 +88,6 @@ int main(int argc, char *argv[]){
     
     vcf_parsed vcf;
     vcf.run(vcf_filename, num_threadss);
-
-    //vcf.print_header();
-    //cout << "Start printing:" << endl;
-    //vcf.print_header();
-    //vcf.var_columns.print(10);
-    //vcf.alt_columns.print(10);
-    //vcf.samp_columns.print(10); //TOTO: controlla come riprendi i dati da GPU
-    //vcf.alt_sample.print(10);
 
     return 0;
 }

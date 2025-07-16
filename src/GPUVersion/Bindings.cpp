@@ -3,25 +3,32 @@
 #include <pybind11/stl_bind.h>
 #include <cuda_fp16.h>
 #include <pybind11/numpy.h>
-#include <cstring> // per std::strcpy
+#include <cstring>
 
-#include "Parser.h"      // Contiene la definizione di vcf_parsed e la funzione run (in Parser.cu)
-#include "DataFrames.h"  // Contiene le classi: var_columns_df, alt_columns_df, sample_columns_df, alt_format_df
+#include "Parser.h"      // Contains vcf_parsed definition and run function (in Parser.cu)
+#include "DataFrames.h"  // Contains classes: var_columns_df, alt_columns_df, sample_columns_df, alt_format_df
 #include "DataStructures.h"
 
 namespace py = pybind11;
 
-//------------------------------------------------------------------------------
-// GTWrapper
-//------------------------------------------------------------------------------
+/**
+ * @class GTWrapper
+ * @brief Wrapper class for genotype values with string-to-char mapping
+ */
 class GTWrapper {
     public:
-        char gt_value;  // Valore char usato per rappresentare il genotype
-        static std::map<std::string, char> GTMap;  // Mappa condivisa per la conversione
-    
+        /** @brief Character value representing the genotype */
+        char gt_value;
+        
+        /** @brief Shared map for string-to-char conversion */
+        static std::map<std::string, char> GTMap;
+        
         GTWrapper(char value) : gt_value(value) {}
-    
-        // Ritorna la stringa associata a gt_value tramite GTMap
+        
+        /**
+         * @brief Converts the stored genotype value back to its string representation
+         * @return String representation of the genotype
+         */
         std::string to_string() const {
             for (const auto& pair : GTMap) {
                 if (pair.second == gt_value) {
@@ -32,7 +39,6 @@ class GTWrapper {
         }
     };
     
-    // Inizializzazione della mappa statica
     std::map<std::string, char> GTWrapper::GTMap;
     
     void init_GTMap() {
@@ -61,9 +67,7 @@ class GTWrapper {
             .def("__repr__", &GTWrapper::to_string);
     }
     
-//------------------------------------------------------------------------------
-// half_wrapper per __half di CUDA
-//------------------------------------------------------------------------------
+
     struct half_wrapper {
         __half value;
         half_wrapper() : value(__float2half(0.0f)) {}
@@ -78,7 +82,6 @@ class GTWrapper {
         py::bind_vector<std::vector<half_wrapper>>(m, "VectorHalf");
     }
     
-    // Helper: converte std::vector<__half> in std::vector<half_wrapper>
     std::vector<half_wrapper> convert_half_vector(const std::vector<__half>& src) {
         std::vector<half_wrapper> result;
         result.reserve(src.size());
@@ -88,7 +91,6 @@ class GTWrapper {
         return result;
     }
     
-    // Helper: Setter che converte da vector<half_wrapper> a vector<__half>
     void set_half_vector(std::vector<__half>& dest, const std::vector<half_wrapper>& src) {
         dest.clear();
         for (const auto &hw : src) {
@@ -96,62 +98,61 @@ class GTWrapper {
         }
     }
     
-//---------------------------------------------------------------------
-// Helper: converte std::vector<__half> in un py::array_t<uint16_t>
-// con gestione della memoria tramite capsule per mantenere la validità
-//---------------------------------------------------------------------
+/**
+ * @brief Converts a vector of CUDA half values to a NumPy array of uint16
+ * 
+ * @param vec Vector of CUDA half-precision values
+ * @return py::array_t<uint16_t> NumPy array containing the raw bits of half values
+ * 
+ * @details Creates a memory-managed NumPy array from half-precision values,
+ * preserving the bit representation for Python-side processing
+ */
 py::array_t<uint16_t> half_vector_to_uint16(const std::vector<__half>& vec) {
-    // Alloca una copia su heap dei dati raw
+    // Allocate heap storage for raw data
     auto* raw = new std::vector<uint16_t>();
     raw->reserve(vec.size());
+
+    // Convert each half value to its raw bits
     for (const __half &h : vec) {
-        // Raccogli i 16 bit che rappresentano il valore half
         uint16_t bits = *reinterpret_cast<const uint16_t*>(&h);
         raw->push_back(bits);
     }
-    // Crea una capsule che si occuperà di deallocare raw quando l'array non sarà più usato
+
+    // Create capsule for memory management
     py::capsule free_when_done(raw, [](void *f) {
         auto* ptr = reinterpret_cast<std::vector<uint16_t>*>(f);
         delete ptr;
     });
-    // Crea l'array NumPy basato sui dati raw.
+
+    // Create and return NumPy array
     return py::array_t<uint16_t>(
         { raw->size() },            // shape
         { sizeof(uint16_t) },       // strides
-        raw->data(),                // puntatore ai dati
-        free_when_done              // oggetto base che gestisce la deallocazione
+        raw->data(),                // data pointer
+        free_when_done              // memory management
     );
 }
 
-//------------------------------------------------------------------------------
-// get_var_columns_data, costruttore df1
-//------------------------------------------------------------------------------
 py::dict get_var_columns_data(const var_columns_df &df) {
     py::dict d;
 
     // var_number (unsigned int vector)
     d["var_number"] = py::array_t<unsigned int>(df.var_number.size(), df.var_number.data());
     
-    // chrom (se usi vector<char>, potresti voler convertire ogni elemento in stringa)
-    // Qui ad esempio lo trattiamo come un array di char
     d["chrom"] = py::array_t<char>(df.chrom.size(), df.chrom.data());
     
-    // pos
     d["pos"] = py::array_t<unsigned int>(df.pos.size(), df.pos.data());
     
-    // id, ref e filter sono vettori di stringhe
     d["id"] = py::cast(df.id);
     d["ref"] = py::cast(df.ref);
     d["filter"] = py::cast(df.filter);
     
-    // qual: converti il vector<__half> in un array di uint16_t
     d["qual"] = half_vector_to_uint16(df.qual);
 
     for (const auto &info : df.in_float) {
         d[info.name.c_str()] = half_vector_to_uint16(info.i_float);
     }
 
-    // Gestione delle flag: inserisci solo se almeno un valore è 1
     for (const auto &info : df.in_flag) {
         if (std::any_of(info.i_flag.begin(), info.i_flag.end(), [](auto val) { return val == 1; })) {
             d[info.name.c_str()] = py::cast(info.i_flag);
@@ -167,23 +168,18 @@ py::dict get_var_columns_data(const var_columns_df &df) {
     return d;
 }
 
-//------------------------------------------------------------------------------
-// get_alt_columns_data, costruttore df2
-//------------------------------------------------------------------------------
+
 py::dict get_alt_columns_data(const alt_columns_df &df) {
     py::dict d;
 
-    // Aggiungi i campi base
     d["var_id"] = py::array_t<unsigned int>(df.var_id.size(), df.var_id.data());
     d["alt_id"] = py::array_t<unsigned char>(df.alt_id.size(), df.alt_id.data());
-    // Il vettore di stringhe 'alt' viene convertito usando py::cast
     d["alt"] = py::cast(df.alt);
 
     for (const auto &info : df.alt_float) {
         d[info.name.c_str()] = half_vector_to_uint16(info.i_float);
     }
     
-    // Inserisci flag solo se contiene almeno un 1
     for (const auto &info : df.alt_flag) {
         if (std::any_of(info.i_flag.begin(), info.i_flag.end(), [](auto val) { return val == 1; })) {
             d[info.name.c_str()] = py::cast(info.i_flag);
@@ -200,25 +196,19 @@ py::dict get_alt_columns_data(const alt_columns_df &df) {
     return d;
 }
 
-//----------------------------------------------------------------------
-// Funzione helper per sample_columns_df (df3)
-//----------------------------------------------------------------------
 py::dict get_sample_columns_data(const sample_columns_df &df) {
     py::dict d;
     
-    // Campi base (var_id e samp_id)
     d["var_id"] = py::array_t<unsigned int>(df.var_id.size(), df.var_id.data());
 
     d["samp_id"] = py::array_t<unsigned short>(df.samp_id.size(), df.samp_id.data());
     
-    // Per ciascun elemento in samp_float: converti il vector<__half> in array di uint16_t
     for (const auto &s : df.samp_float) {
         if (!s.i_float.empty()) {
             d[s.name.c_str()] = half_vector_to_uint16(s.i_float);
         }
     }
     
-    // Per samp_flag inseriamo solo se esiste almeno un 1
     for (const auto &s : df.samp_flag) {
         if (!s.i_flag.empty() &&
             std::any_of(s.i_flag.begin(), s.i_flag.end(), [](auto val) { return val == 1; })) {
@@ -237,7 +227,6 @@ py::dict get_sample_columns_data(const sample_columns_df &df) {
         }
     }
     
-    // Per sample_GT, aggiungi ogni vettore con chiavi separate ("GT0", "GT1", ...)
     int i = 0;
     for (const auto &gt_struct : df.sample_GT) {
         if (!gt_struct.GT.empty()) {
@@ -250,24 +239,19 @@ py::dict get_sample_columns_data(const sample_columns_df &df) {
     return d;
 }
 
-//----------------------------------------------------------------------
-// Funzione helper per alt_format_df (df4)
-//----------------------------------------------------------------------
 py::dict get_alt_format_data(const alt_format_df &df) {
     py::dict d;
     
-    // Campi base
     d["var_id"] = py::array_t<unsigned int>(df.var_id.size(), df.var_id.data());
     d["samp_id"] = py::array_t<unsigned short>(df.samp_id.size(), df.samp_id.data());
     d["alt_id"] = py::array_t<char>(df.alt_id.size(), df.alt_id.data());
     
-    // Per ogni vettore di samp_float in alt_format_df
     for (const auto &s : df.samp_float) {
         if (!s.i_float.empty()) {
             d[s.name.c_str()] = half_vector_to_uint16(s.i_float);
         }
     }
-    // Per samp_flag: inserisci solo se contiene almeno un 1
+
     for (const auto &s : df.samp_flag) {
         if (!s.i_flag.empty() &&
             std::any_of(s.i_flag.begin(), s.i_flag.end(), [](auto val) { return val == 1; })) {
@@ -285,7 +269,6 @@ py::dict get_alt_format_data(const alt_format_df &df) {
         }
     }
     
-    // Per sample_GT, se presente, aggiungi il vettore con chiave "GT"
     if (!df.sample_GT.GT.empty()) {
         d["GT"] = py::cast(df.sample_GT.GT);
     }
@@ -293,14 +276,22 @@ py::dict get_alt_format_data(const alt_format_df &df) {
     return d;
 }
 
-//------------------------------------------------------------------------------
-// Modulo di binding
-//------------------------------------------------------------------------------
-
+/**
+ * @brief Binds VCF data structures to Python
+ * 
+ * Creates Python bindings for the following C++ classes:
+ * - var_columns_df: Core variant data
+ * - alt_columns_df: Alternative allele data
+ * - sample_columns_df: Sample-specific data
+ * - alt_format_df: Alternative format data
+ * 
+ * Each class is exposed with its members and methods to Python,
+ * with proper type conversion between C++ and Python types.
+ */
 PYBIND11_MODULE(GPUParser, m) {
     m.doc() = "Python bindings for CUDA-accelerated VCF parser using pybind11";
     py::bind_map<std::map<std::string, char>>(m, "FilterMap");
-    // Bind half_wrapper
+
     py::class_<half_wrapper>(m, "half")
         .def(py::init<>())
         .def(py::init<float>())
@@ -310,7 +301,6 @@ PYBIND11_MODULE(GPUParser, m) {
         });
     bind_vector_half(m);
 
-    // Inizializza e bind GTWrapper
     init_GTMap();
     bind_GTWrapper(m);
     m.attr("GTMapGlobal") = py::cast(&GTWrapper::GTMap);
@@ -381,7 +371,6 @@ PYBIND11_MODULE(GPUParser, m) {
         .def_readwrite("strings", &header_element::strings)
         .def_readwrite("flags", &header_element::flags);
 
-    // Bind delle classi in DataFrames.h
     py::class_<var_columns_df>(m, "var_columns_df")
         .def(py::init<>())
         .def_readwrite("var_number", &var_columns_df::var_number)
@@ -445,17 +434,15 @@ PYBIND11_MODULE(GPUParser, m) {
         .def_readwrite("sample_GT", &alt_format_df::sample_GT)
         .def("print", &alt_format_df::print, py::arg("n"), "Print alternative formatted columns");
 
-    // Bind della classe vcf_parsed (definita in Parser.cu)
     py::class_<vcf_parsed>(m, "vcf_parsed")
         .def(py::init<>())
         .def("run", [](vcf_parsed &self, const std::string &vcf_filename, int num_threadss) {
-            // Converte la stringa in char* e chiama run
             char* c_vcf_filename = new char[vcf_filename.size() + 1];
             std::strcpy(c_vcf_filename, vcf_filename.c_str());
             self.run(c_vcf_filename, num_threadss);
             delete[] c_vcf_filename;
         }, py::arg("vcf_filename"), py::arg("num_threadss"),
-           "Esegue il parsing del file VCF con il numero specificato di thread")
+           "Parses the VCF file using the specified number of threads")
         .def_readwrite("id", &vcf_parsed::id)
         .def_readwrite("header", &vcf_parsed::header)
         .def_readwrite("INFO", &vcf_parsed::INFO)
@@ -466,19 +453,16 @@ PYBIND11_MODULE(GPUParser, m) {
         .def_readwrite("alt_sample", &vcf_parsed::alt_sample)
         .def("print_header", &vcf_parsed::print_header);
 
-    // Bind della funzione helper per ottenere un dizionario NumPy dalla struttura var_columns_df
-    m.def("get_var_columns_data", &get_var_columns_data, 
-        "Restituisce un dict di NumPy arrays con i dati della struttura var_columns_df");
-    
-    // Bind della funzione helper per ottenere un dizionario NumPy dalla struttura alt_columns_df
-    m.def("get_alt_columns_data", &get_alt_columns_data, 
-        "Restituisce un dict di NumPy arrays con i dati della struttura alt_columns_df");
-  
-    // Bind per la funzione helper per sample_columns_df (df3)
-    m.def("get_sample_columns_data", &get_sample_columns_data,
-        "Restituisce un dict di NumPy arrays con i dati della struttura sample_columns_df");
+        m.def("get_var_columns_data", &get_var_columns_data, 
+            "Returns a dict of NumPy arrays containing var_columns_df structure data");
 
-    // Bind per la funzione helper per alt_format_df (df4)
-    m.def("get_alt_format_data", &get_alt_format_data,
-            "Restituisce un dict di NumPy arrays con i dati della struttura alt_format_df");
+        m.def("get_alt_columns_data", &get_alt_columns_data, 
+            "Returns a dict of NumPy arrays containing alt_columns_df structure data");
+
+        m.def("get_sample_columns_data", &get_sample_columns_data,
+            "Returns a dict of NumPy arrays containing sample_columns_df structure data");
+
+        m.def("get_alt_format_data", &get_alt_format_data,
+            "Returns a dict of NumPy arrays containing alt_format_df structure data");
+
 }

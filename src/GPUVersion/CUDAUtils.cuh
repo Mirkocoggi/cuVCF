@@ -1,7 +1,16 @@
 /**
  * @file CUDAUtils.cuh
- * @brief Provides device-side string manipulation and numeric conversion utilities, as well as
- *        constant/device memory mappings for specific keys and values.
+ * @brief CUDA device-side utilities for VCF parsing
+ * @author Your Name
+ * @date 2025-07-16
+ * 
+ * @details Provides CUDA device-side utilities including:
+ *  - String manipulation functions
+ *  - Numeric conversion functions
+ *  - Constant/device memory mappings for genotype and INFO fields
+ *  - String splitting and comparison utilities
+ * 
+ * All functions are designed to run on the GPU and avoid dynamic memory allocation.
  */
 
 #ifndef CUDA_UTILS_CUH
@@ -15,14 +24,18 @@ using namespace std;
 
 /// Maximum number of keys in the GT map.
 #define NUM_KEYS_GT 244
+
 /// Maximum length for each key in the GT map.
 #define MAX_KEY_LENGTH_GT 5
-/// Maximum number of tokens to split.
+
+/// Maximum number of tokens when splitting strings.
 #define MAX_TOKENS 4
-/// Maximum length for each token.
+
+/// Maximum length for each token after splitting.
 #define MAX_TOKEN_LEN 32
-/// MAximum length for the temporary string
-#define MAX_TMP_LEN 128
+
+/// Maximum length for temporary string buffers.
+#define MAX_TMP_LEN 128  // Fixed typo: "MAximum" -> "Maximum"
 
 /**
  * @brief Constant memory holding the GT keys.
@@ -209,9 +222,11 @@ __device__ unsigned long cuda_stoul(const char *str) {
 }
 
 /**
- * @brief Retrieves the value corresponding to a GT key from d_keys_gt and d_values_gt.
- * @param key Pointer to the key string.
- * @return The associated value if found, or -1 otherwise.
+ * @brief Retrieves a value from the GT map using constant memory
+ * @param key Key to look up
+ * @return Corresponding value or -1 if not found
+ * @note Uses constant memory for optimal cache performance when all threads
+ *       access the same key simultaneously
  */
 __device__ int getValueFromKeyGT(const char* key) {
     for (int i = 0; i < NUM_KEYS_GT; ++i) {
@@ -266,12 +281,12 @@ __device__ int split(const char *str, char delimiter, char* split_array) {
 }
 
 /**
- * @brief Converts a string to half precision (16-bit) after checking if the string is valid.
- *
- * If the string contains invalid characters (non-digit, non-decimal point, or non-minus),
- * it returns 0.0f as a default value.
- * @param tmp Pointer to the input string.
- * @return The corresponding half precision value, or 0.0f if invalid.
+/**
+ * @brief Converts a string to half precision floating point
+ * @param tmp Input string to convert
+ * @return half precision float value
+ * @warning This function runs on the GPU and may produce slightly different results
+ *          compared to CPU-side conversion due to rounding differences
  */
 __device__ half safeStof(const char* tmp) {
     float value = 0.0f;
@@ -293,10 +308,10 @@ __device__ half safeStof(const char* tmp) {
     return __float2half(value);
 }
 
-//TODO: da controllare:
-/// Numero di chiavi per la mappa PolyPhen.
+//TODO: needs verification:
+/// Number of keys in the PolyPhen map
 #define NUM_KEYS_POLYPHEN 4
-/// Lunghezza massima di ogni chiave per la mappa PolyPhen (includendo il terminatore null).
+/// Maximum length of each key in the PolyPhen map (including null terminator)
 #define MAX_KEY_LENGTH_POLYPHEN 20
 
 /// Numero di chiavi per la mappa CSQ.
@@ -305,8 +320,12 @@ __device__ half safeStof(const char* tmp) {
 #define MAX_KEY_LENGTH_CSQ 32
 
 /**
- * @brief Memoria costante contenente le chiavi per la mappa PolyPhen.
- * Ogni chiave è una stringa lunga fino a MAX_KEY_LENGTH_POLYPHEN caratteri.
+ * @brief Constant memory array of PolyPhen prediction keys
+ * @details Maps PolyPhen-2 predictions to numeric values:
+ *  - "" (empty): 0
+ *  - "benign": 1
+ *  - "possibly_damaging": 2
+ *  - "probably_damaging": 3
  */
 __constant__ char d_polyphen_keys[NUM_KEYS_POLYPHEN][MAX_KEY_LENGTH_POLYPHEN] = {
     "",
@@ -322,8 +341,9 @@ __constant__ char d_polyphen_keys[NUM_KEYS_POLYPHEN][MAX_KEY_LENGTH_POLYPHEN] = 
 __constant__ char d_polyphen_values[NUM_KEYS_POLYPHEN] = {0, 1, 2, 3};
 
 /**
- * @brief Memoria costante contenente le chiavi per la mappa CSQ.
- * Ogni chiave è una stringa lunga fino a MAX_KEY_LENGTH_CSQ caratteri.
+ * @brief Constant memory array of CSQ (Consequence) type keys
+ * @details Maps sequence ontology terms to numeric values for efficient storage
+ * @see https://www.ensembl.org/info/genome/variation/prediction/predicted_data.html
  */
 __constant__ char d_csq_keys[NUM_KEYS_CSQ][MAX_KEY_LENGTH_CSQ] = {
     "synonymous_variant",

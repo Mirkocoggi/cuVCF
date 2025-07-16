@@ -76,13 +76,13 @@ public:
         std::cout << "VarID\tChrom\tPos\tID\tRef\tQUAL\tFilter\tFlag\t\tInt\t\tFloat\t\tString" << std::endl;
         long iter = (num_lines > static_cast<long>(id.size())) ? id.size() : num_lines;
         for (long i = 0; i < iter; i++) {
-            // Stampa VarID (presumibilmente var_number)
+            // Print VarID (presumably var_number)
             if (i < static_cast<long>(var_number.size()))
                 std::cout << var_number[i] << "\t";
             else
                 std::cout << "nan\t";
             
-            // Stampa Chrom: costruiamo la chiave da un singolo carattere
+            // Print Chrom: build key from single character
             if (i < static_cast<long>(chrom.size())) {
                 unsigned char code = chrom[i];
                 bool found = false;
@@ -146,11 +146,6 @@ public:
             } else {
                 std::cout << "nan\t";
             }
-            
-            
-            // Stampa i campi dei vettori info: Flag, Int, Float e String
-            // Si assume che ogni vettore info_xxx abbia la stessa dimensione (almeno per indice i)
-            // e che il campo 'name' contenga il nome della colonna.
             
             // Flag
             for (size_t j = 0; j < in_flag.size(); j++) {
@@ -283,7 +278,7 @@ class alt_columns_df //DF2
      * @param batch_size The batch size used for processing.
      */
     void clone(alt_columns_df ref, header_element INFO, long batch_size){
-        int numAlt = INFO.alt_values;//sigsegv
+        int numAlt = INFO.alt_values;
         var_id.resize(numAlt, 0);
         alt.resize(numAlt, "\0");
         alt_id.resize(numAlt, (char)0);
@@ -487,10 +482,13 @@ class sample_columns_df //aka df3
 /**
  * @class alt_format_df
  * @brief Data frame for formatted alternative allele data for samples.
- *
- * This class stores formatted alternative allele information for samples,
+ * 
+ * @details This class stores formatted alternative allele information for samples,
  * including variant IDs, sample IDs, alternative allele IDs, and associated
- * sample float, flag, string, and integer data.
+ * sample data (float, flag, string, int). It provides methods for initialization,
+ * data management and printing.
+ *
+ * @note The class name "df4" is deprecated and should not be used
  */
 class alt_format_df //aka df4 in progress
 {
@@ -673,8 +671,8 @@ class alt_format_df //aka df4 in progress
      * @param n Number of entries to print.
      */
     void print(int n){
+        // Print header row with column names
         cout << "VarID\tSampID\talt_id\tFloat\t\tInt\t\tStr\t\tGT" << endl;
-
         int iter = (n>samp_id.size()) ? samp_id.size() : n;
 
         for(int i=0; i<iter; i++){
