@@ -1,0 +1,14 @@
+EVA_4
+E_Multiple_observations
+TSA=SNV
+
+mypos > 1780000
+mypos > 1780000 AND mypos < 1800000
+
+NOT E_Multiple_observations AND TSA=SNV
+mypos > 1780000 AND E_Multiple_observations
+mypos > 1780000 AND mypos < 1800000 AND E_Multiple_observations
+mypos > 1780000 AND TSA=SNV
+mypos > 1780000 AND mypos < 1800000 AND TSA=SNV
+EVA_4 AND mypos > 1780000 AND TSA=SNV
+EVA_4 AND mypos > 1780000 AND mypos < 1800000 AND TSA=SNV

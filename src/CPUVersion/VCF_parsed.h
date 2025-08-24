@@ -1,0 +1,944 @@
+/**
+ * @file VCF_parsed.h
+ * @brief Multi-threaded CPU implementation for parsing and processing VCF files.
+ *
+ * This header defines the main structures and functions for parsing Variant Call Format (VCF) files
+ * using multi-threading on the CPU. It provides the core logic for reading, decompressing, and
+ * extracting variant, sample, and alternative data from VCF files, supporting both compressed (.gz)
+ * and uncompressed formats.
+ *
+ * Key features:
+ *   - Efficient multi-threaded parsing and memory management for large VCF files.
+ *   - Support for both INFO and FORMAT fields, including alternative alleles and sample data.
+ *   - Integration with custom dataframes for column-oriented storage.
+ *   - Utility functions for file handling, header parsing, and data extraction.
+ *
+ * @note All code paths are CPU-only; no CUDA or GPU dependencies are required.
+ *       Designed for compatibility with pybind11 bindings and downstream Python analysis.
+ */
+
+#ifndef VCF_PARSED_H
+#define VCF_PARSED_H
+#include <chrono>
+#include <boost/algorithm/string.hpp>
+#include <Imath/half.h>
+#include <omp.h>
+#include <fstream>
+#include <filesystem>
+#include <sys/wait.h>
+#include <unistd.h>
+#include "VCFparser_mt_col_struct.h"
+#include "VCF_var.h"
+#include "VCF_var_columns_df.h"
+#include <thread>
+#include <functional>
+#include <future>
+using Imath::half;
+
+/**
+ * @brief Merges member vectors from temporary data structures into a destination vector.
+ *
+ * This function iterates over a vector of temporary objects and merges each object's member vector
+ * (specified by the member pointer) into a global destination vector. The merge is performed using
+ * move semantics to avoid unnecessary copies. After merging, the member vector in the temporary object
+ * is cleared.
+ *
+ * @tparam T The type of the temporary objects.
+ * @tparam U The type of the elements in the member vector.
+ * @param tmp_alt A vector of temporary objects, each containing a member vector to be merged.
+ * @param dest The destination vector where all elements will be merged.
+ * @param num_threads The number of iterations (typically equal to tmp_alt.size()).
+ * @param member_ptr Pointer to the member vector within type T that should be merged.
+ */
+template <typename T, typename U>
+void merge_member_vector(
+    std::vector<T>& tmp_alt,
+    std::vector<U>& dest,
+    int num_threads,
+    std::vector<U> T::* member_ptr
+) {
+    for (int i = 0; i < num_threads; i++) {
+        dest.insert(
+            dest.end(),
+            std::make_move_iterator((tmp_alt[i].*member_ptr).begin()),
+            std::make_move_iterator((tmp_alt[i].*member_ptr).end())
+        );
+        (tmp_alt[i].*member_ptr).clear();
+    }
+}
+
+/**
+ * @brief Merges nested member vectors from temporary data structures into corresponding destination vectors.
+ *
+ * This function handles cases where each temporary object contains an outer vector (e.g., representing
+ * multiple alternative fields) and each element of that outer vector is itself a vector that needs to be merged.
+ * For every temporary object and for each element in the outer vector (up to num_nested elements), the function
+ * moves the contents of the nested vector into the corresponding nested vector in the destination object and clears
+ * the source nested vector afterwards.
+ *
+ * @tparam T The type of the temporary objects.
+ * @tparam S The type of the elements in the outer vector (e.g., a structure representing a field group).
+ * @tparam V The type of the elements in the inner (nested) vectors.
+ * @param tmp_alt A vector of temporary objects containing nested member vectors.
+ * @param dest The destination vector (global) where the nested vectors will be merged.
+ * @param num_threads The number of temporary objects (typically equal to tmp_alt.size()).
+ * @param num_nested The number of elements in the outer vector (e.g., the number of alternative fields).
+ * @param outer_member_ptr Pointer to the outer vector member within the temporary object T.
+ * @param inner_member_ptr Pointer to the inner vector member within the outer element S.
+ */
+template <typename T, typename S, typename V>
+void merge_nested_member_vector(
+    std::vector<T>& tmp_alt,
+    std::vector<S>& dest,
+    int num_threads,
+    int num_nested,
+    std::vector<S> T::* outer_member_ptr,
+    std::vector<V> S::* inner_member_ptr
+) {
+    for (int i = 0; i < num_threads; i++) {
+        for (int j = 0; j < num_nested; j++) {
+            (dest[j].*inner_member_ptr).insert(
+                (dest[j].*inner_member_ptr).end(),
+                std::make_move_iterator(((tmp_alt[i].*outer_member_ptr)[j].*inner_member_ptr).begin()),
+                std::make_move_iterator(((tmp_alt[i].*outer_member_ptr)[j].*inner_member_ptr).end())
+            );
+            ((tmp_alt[i].*outer_member_ptr)[j].*inner_member_ptr).clear();
+        }
+    }
+}
+
+class vcf_parsed
+{
+public:
+    int id;
+    string filename;
+    string path_to_filename;
+    string header;
+    header_element INFO;
+    map<string,int> info_map; //Flag=0, Int=1, Float=2, String=3;
+    header_element FORMAT;
+    char *filestring;
+    int header_size=0;
+    long filesize;
+    long variants_size;
+    long num_lines=0;
+    unsigned int *new_lines_index;
+    bool samplesON = false;
+    bool hasDetSamples = false;
+    var_columns_df var_columns;
+    alt_columns_df alt_columns;
+    sample_columns_df samp_columns;
+    alt_format_df alt_sample;
+
+    void unzip_gz_file(char* vcf_filename) {
+        // Check the extension ".gz"
+        if (strcmp(vcf_filename + strlen(vcf_filename) - 3, ".gz") == 0) {
+            pid_t pid = fork();
+            if (pid == 0) {
+                // Child proces
+                execlp("gzip", "gzip", "-df", vcf_filename, nullptr);
+                // If execlp fails
+                cout<< "ERROR: Failed to execute gzip command" << std::endl;
+                exit(EXIT_FAILURE);
+            } else if (pid > 0) {
+                // Parent proces waits for the child proces
+                int status;
+                waitpid(pid, &status, 0);
+                if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+                    // Remove ".gz" from the filename
+                    char* mutable_vcf_filename = const_cast<char*>(vcf_filename);
+                    mutable_vcf_filename[strlen(vcf_filename) - 3] = '\0';
+                } else {
+                    cout<< "ERROR: cannot unzip file" << std::endl;
+                }
+            } else {
+                // Error in the fork() call
+                cout<< "ERROR: Failed to fork process" << std::endl;
+            }
+        }
+    }
+
+    void run(char* vcf_filename, int num_threadss){
+        string filename = vcf_filename; 
+        int cont=0;
+        string line;
+        vcf_parsed vcf;
+        // Setting number of threads
+        omp_set_num_threads(num_threadss);
+        // Open input file, gzip -df compressed_file1.gz
+        if(!strcmp((vcf_filename + strlen(vcf_filename) - 3), ".gz")){
+            unzip_gz_file(vcf_filename);
+        }
+        
+        ifstream inFile(filename);
+        if(!inFile){
+            cout << "ERROR: cannot open file " << filename << endl;
+        }
+        // Saving filename
+        get_filename(filename);
+        
+        // Getting filesize (number of char in the file)
+        auto before = chrono::system_clock::now();
+        get_file_size(filename);
+        auto after = chrono::system_clock::now();
+        auto get_file_size = std::chrono::duration<double>(after - before).count();
+        // Getting the header (Saving the header into a string and storing the header size )
+        before = chrono::system_clock::now();
+        get_and_parse_header(&inFile); //serve per separare l'header dal resto del file
+        //vcf.print_header();
+        after = chrono::system_clock::now();
+        auto get_header = std::chrono::duration<double>(after - before).count();
+        inFile.close();
+        // Allocating the filestring (the variations as a big char*, the dimension is: filesize - header_size)
+        allocate_filestring();
+        // Populate filestring and getting the number of lines (num_lines), saving the starting char index of each lines
+        before = chrono::system_clock::now();
+        find_new_lines_index(filename, num_threadss);
+        after = chrono::system_clock::now();
+        auto find_new_lines = std::chrono::duration<double>(after - before).count();
+        auto populate_var_struct = std::chrono::duration<double>(after - before).count();
+        before = chrono::system_clock::now();
+        create_info_vectors(num_threadss);
+        reserve_var_columns();
+        create_sample_vectors(num_threadss);
+        after = chrono::system_clock::now();
+        auto reserve_var_columns = std::chrono::duration<double>(after - before).count();
+        before = chrono::system_clock::now();
+        populate_var_columns(num_threadss);
+        after = chrono::system_clock::now();
+        auto populate_var_columns = std::chrono::duration<double>(after - before).count();
+        
+        // Uncomment the following lines for debugging purposes
+        //cout << "Get file size: " << get_file_size << " s" << endl;
+        //cout << "get_header: " << get_header << " s" << endl;
+        //cout << "find_new_lines: " << find_new_lines << " s" << endl;
+        //cout << "populate_var_struct: " << populate_var_struct << " s" << endl;
+        //cout << "reserve: " << reserve_var_columns << " s" << endl;
+        //cout << "populate_var_columns: " << populate_var_columns << " s" << endl;
+        free(filestring);
+        free(new_lines_index);
+    }
+
+    void get_filename(string path_filename){
+        vector<string> line_el;
+        path_to_filename = path_filename;
+        boost::split(line_el, path_filename, boost::is_any_of("/"));
+        filename = line_el[line_el.size()-1];
+    }
+    
+    void get_file_size(string filename){
+        filesize = filesystem::file_size(filename);
+    }
+    
+    void get_header(ifstream *file){
+        string line;
+        //removing the header and storing it in vcf.header
+        while (getline(*file, line) && line[0]=='#' && line[1]=='#'){
+            header.append(line + '\n');
+            header_size += line.length() + 1;
+        }
+        header_size += line.length() + 1;
+        //cout << "\nheader char: " << to_string(header_size) << endl;
+        variants_size = filesize - header_size; // New size without the header
+        //cout<<"filesize: "<<filesize<<" variants_size: "<<variants_size<<endl;
+    }
+    
+    void print_header(){
+        cout << "VCF header:\n" << header << endl;
+    }
+    
+    void get_and_parse_header(ifstream *file){
+        string line;
+        vector<string> line_el;     //all the characteristics together
+        vector<string> line_el1;    //each characteristic
+        vector<string> line_el2;    //keys and values
+        // removing the header and storing it in vcf.header
+        
+        while (getline(*file, line) && line[0]=='#' && line[1]=='#'){
+            header.append(line + '\n');
+            header_size += line.length() + 1;
+            bool Info = (line[2]=='I');
+            bool Format = (line[2]=='F' && line[3]=='O');
+            
+            if(Info || Format){
+                boost::split(line_el, line, boost::is_any_of("><"));
+                boost::split(line_el1, line_el[1], boost::is_any_of(","));
+                for(int i=0; i<3; i++){
+                    boost::split(line_el2, line_el1[i], boost::is_any_of("="));
+                    if(Info){
+                        if(i==0) INFO.ID.push_back(line_el2[1]);
+                        if(i==1) INFO.Number.push_back(line_el2[1]);
+                        if(i==1 && line_el2[1] == "A") INFO.alt_values++;
+                        if(i==2) INFO.Type.push_back(line_el2[1]);
+                    }
+                    if(Format){
+                        if(i==0){
+                            if(line_el2[1] == "GT"){
+                                FORMAT.hasGT = true;
+                                boost::split(line_el2, line_el1[1], boost::is_any_of("="));
+                                FORMAT.numGT = line_el2[1][0];
+                                i+=3;
+                            }else{
+                                FORMAT.ID.push_back(line_el2[1]);
+                            }
+                        } 
+                        if(i==1) FORMAT.Number.push_back(line_el2[1]);
+                        if(i==1 && line_el2[1] == "A"){
+                            FORMAT.alt_values++;
+                        }else{
+                            hasDetSamples = true;
+                        }
+                        if(i==2) FORMAT.Type.push_back(line_el2[1]);
+                    }
+                }
+            }
+        }
+
+        vector<string> tmp_split;
+        boost::split(tmp_split, line, boost::is_any_of("\t "));
+        if(tmp_split.size() > 9){
+            samplesON = true;
+            samp_columns.numSample = tmp_split.size() - 9;
+            alt_sample.numSample = samp_columns.numSample;
+
+            for(int i = 0; i < samp_columns.numSample; i++){
+                samp_columns.sampNames.insert(std::make_pair(tmp_split[9+i], i));
+                alt_sample.sampNames.insert(std::make_pair(tmp_split[9+i], i));
+            }
+
+        }else{
+            samp_columns.numSample = 0;
+        }
+        
+        INFO.total_values = INFO.ID.size();
+        INFO.no_alt_values = INFO.total_values - INFO.alt_values;
+
+        header_size += line.length() + 1;
+
+        variants_size = filesize - header_size; // New size without the header
+    }   
+    
+    void allocate_filestring(){
+        filestring = (char*)malloc(variants_size+1);
+    }
+  
+    // This function identifies the indices of new line characters in the file and populates the `new_lines_index` array.
+    // It also fills the 'filestring' variable (if applicable).
+    void find_new_lines_index(string w_filename, int num_threads){
+        // Allocate memory for the `new_lines_index` array. The size is exaggerated (assuming every character is a new line).
+        // The first element is set to 0, indicating the start of the first line.
+        num_lines++; // Increment the line counter to account for the first line.
+        long tmp_num_lines[num_threads]; // Temporary array to store the number of lines found by each thread.
+        
+        auto before = chrono::system_clock::now();
+        long batch_infile = (variants_size - 1 + num_threads)/num_threads; // Number of characters each thread will process        
+#pragma omp parallel
+        {
+            int thr_ID = omp_get_thread_num();
+            ifstream infile(w_filename); // Open the same file with an ifstream in each thread
+            infile.seekg((header_size + thr_ID*batch_infile), ios::cur); // Move each thread's file pointer to its starting position
+            long start, end;
+            start = thr_ID*batch_infile; // Starting position of the current thread’s batch
+            end = start + batch_infile; // Ending position of the batch for the current thread
+            
+            tmp_num_lines[thr_ID] = 0;
+            if(thr_ID==0){
+                tmp_num_lines[0] = 1;
+            } 
+
+            for(long i=start; i<end && i<variants_size; i++){
+                filestring[i] = infile.get();
+                if(filestring[i]=='\n'){
+                    tmp_num_lines[thr_ID] = tmp_num_lines[thr_ID] + 1;
+                }
+            }
+        }
+        while(filestring[variants_size-1]=='\n'){
+            variants_size--;
+        }
+
+        if (variants_size == 0 || filestring[variants_size-1] != '\n')
+            {
+                filestring[variants_size] = '\n';
+                ++variants_size;
+            }
+
+        auto after = chrono::system_clock::now();
+        auto filestring_time = std::chrono::duration<double>(after - before).count();
+        
+        before = chrono::system_clock::now();
+        num_lines = tmp_num_lines[0];
+        for(int i=1; i<num_threads; i++){
+            num_lines= num_lines + tmp_num_lines[i];
+        }
+        new_lines_index = (unsigned int*)malloc(sizeof(unsigned int)*(num_lines+1));
+        new_lines_index[0] = 0;
+        #pragma omp parallel
+        {
+            int thr_ID = omp_get_thread_num();
+            long start, end;
+            start = thr_ID*batch_infile; // Starting position of the current thread’s batch
+            end = std::min(start + batch_infile, variants_size);  // Ending position of the batch for the current thread
+            long startNLI = 1;
+            if(thr_ID!=0){
+                for(int i=0; i<thr_ID; i++){
+                    startNLI = startNLI + tmp_num_lines[i];
+                }
+                startNLI--;
+            }
+            long lineCount = 0;
+            for(long i=start; i<end && i<variants_size; i++){
+                if(filestring[i]=='\n'&& filestring[i+1]!='\n'){
+                    new_lines_index[startNLI+lineCount] = i+1;
+                    lineCount++;
+                }
+            }
+        }
+        
+        after = chrono::system_clock::now();
+        auto f_new_lines = std::chrono::duration<double>(after - before).count(); 
+    }
+    
+    void create_sample_vectors(int num_threads){
+        long batch_size = (num_lines-2+num_threads)/num_threads;
+        samp_Flag samp_flag_tmp;
+        samp_Float samp_float_tmp;
+        samp_Int samp_int_tmp;
+        samp_String samp_string_tmp;
+
+        samp_Float samp_alt_float_tmp;
+        samp_Int samp_alt_int_tmp;
+        samp_String samp_alt_string_tmp;
+
+        int numIter = FORMAT.ID.size();
+
+        if(numIter == 0 ) return; //if no sample available
+
+        if(FORMAT.hasGT && FORMAT.numGT == 'A'){
+            alt_sample.initMapGT();
+            alt_sample.sample_GT.numb = -1;
+        }else if(FORMAT.hasGT){
+            int iter = FORMAT.numGT - '0';
+            samp_columns.initMapGT();
+            for(int i=0; i<iter; i++){ //create a vector of vectors
+                samp_GT tmp;
+                tmp.numb = iter;
+                tmp.GT.resize((num_lines-1)*samp_columns.numSample, (char)0);
+                samp_columns.sample_GT.push_back(tmp);
+            }   
+        }
+
+        for(int i = 0; i < numIter; i++){
+            if(strcmp(&FORMAT.Number[i][0], "A") != 0){
+                // Without Alternatives
+                if(strcmp(&FORMAT.Number[i][0], "1")==0){ 
+                    //Number = 1
+                    if(!strcmp(&FORMAT.Type[i][0], "String")){
+                        samp_string_tmp.name = FORMAT.ID[i];
+                        samp_columns.samp_string.push_back(samp_string_tmp);
+                        samp_columns.samp_string.back().i_string.resize((num_lines-1)*samp_columns.numSample, "\0");
+                        samp_columns.samp_string.back().numb = std::stoi(FORMAT.Number[i]);
+                        info_map[FORMAT.ID[i]] = 8;
+                        var_columns.info_map1[FORMAT.ID[i]] = 8;
+                        FORMAT.strings++;                        
+                    }else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
+                        samp_int_tmp.name = FORMAT.ID[i];
+                        samp_columns.samp_int.push_back(samp_int_tmp);
+                        samp_columns.samp_int.back().i_int.resize((num_lines-1)*samp_columns.numSample, 0);
+                        samp_columns.samp_int.back().numb = std::stoi(FORMAT.Number[i]);
+                        info_map[FORMAT.ID[i]] = 9;
+                        var_columns.info_map1[FORMAT.ID[i]] = 9;
+                        FORMAT.ints++;
+                    }else if(!strcmp(&FORMAT.Type[i][0], "Float")){
+                        samp_float_tmp.name = FORMAT.ID[i];
+                        samp_columns.samp_float.push_back(samp_float_tmp);
+                        samp_columns.samp_float.back().i_float.resize((num_lines-1)*samp_columns.numSample, 0);
+                        samp_columns.samp_float.back().numb = std::stoi(FORMAT.Number[i]);
+                        info_map[FORMAT.ID[i]] = 10;
+                        var_columns.info_map1[FORMAT.ID[i]] = 10;
+                        FORMAT.floats++;
+                    }
+                }else if(strcmp(&FORMAT.Number[i][0], "0")==0){ 
+                    //Number = 0; so it's a flag
+                    samp_flag_tmp.name = FORMAT.ID[i];
+                    samp_columns.samp_flag.push_back(samp_flag_tmp);
+                    samp_columns.samp_flag.back().i_flag.resize((num_lines-1)*samp_columns.numSample, 0);
+                    samp_columns.samp_flag.back().numb = std::stoi(FORMAT.Number[i]);
+                    info_map[FORMAT.ID[i]] = 11;
+                    var_columns.info_map1[FORMAT.ID[i]] = 11;
+                    FORMAT.flags++;
+                }else{ 
+                    //Number > 1
+                    if(!strcmp(&FORMAT.Type[i][0], "String")){
+                        for(int j = 0; j < std::stoi(FORMAT.Number[i]); j++){
+                            samp_string_tmp.name = FORMAT.ID[i] + std::to_string(j);
+                            samp_columns.samp_string.push_back(samp_string_tmp);
+                            samp_columns.samp_string.back().i_string.resize((num_lines-1)*samp_columns.numSample, "\0");
+                            samp_columns.samp_string.back().numb = std::stoi(FORMAT.Number[i]);
+                            info_map[FORMAT.ID[i]+std::to_string(j)] = 8;
+                            var_columns.info_map1[FORMAT.ID[i]+std::to_string(j)] = 8;
+                            FORMAT.strings++;
+                        }
+                    }else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
+                        for(int j = 0; j < std::stoi(FORMAT.Number[i]); j++){
+                            samp_int_tmp.name = FORMAT.ID[i] + std::to_string(j);
+                            samp_columns.samp_int.push_back(samp_int_tmp);
+                            samp_columns.samp_int.back().i_int.resize((num_lines-1)*samp_columns.numSample, 0);
+                            samp_columns.samp_int.back().numb = std::stoi(FORMAT.Number[i]);
+                            info_map[FORMAT.ID[i]+std::to_string(j)] = 9;
+                            var_columns.info_map1[FORMAT.ID[i]+std::to_string(j)] = 9;
+                            FORMAT.ints++;
+                        }
+                    }else if(!strcmp(&FORMAT.Type[i][0], "Float")){
+                        for(int j = 0; j < std::stoi(FORMAT.Number[i]); j++){
+                            samp_float_tmp.name = FORMAT.ID[i] + std::to_string(j);
+                            samp_columns.samp_float.push_back(samp_float_tmp);
+                            samp_columns.samp_float.back().i_float.resize((num_lines-1)*samp_columns.numSample, 0);
+                            samp_columns.samp_float.back().numb = std::stoi(FORMAT.Number[i]);
+                            info_map[FORMAT.ID[i]+std::to_string(j)] = 10;
+                            var_columns.info_map1[FORMAT.ID[i]+std::to_string(j)] = 10;
+                            FORMAT.floats++;
+                        }
+                    }
+                }
+            }else{
+                //Alternatives
+                if(!strcmp(&FORMAT.Type[i][0], "String")){ 
+                    samp_alt_string_tmp.name = FORMAT.ID[i];
+                    alt_sample.samp_string.push_back(samp_alt_string_tmp);
+                    alt_sample.samp_string.back().numb = -1;
+                    info_map[FORMAT.ID[i]] = 11;
+                    var_columns.info_map1[FORMAT.ID[i]] = 11;
+                    FORMAT.strings_alt++;
+                }else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
+                    samp_alt_int_tmp.name = FORMAT.ID[i];
+                    alt_sample.samp_int.push_back(samp_alt_int_tmp);
+                    alt_sample.samp_int.back().numb = -1;
+                    info_map[FORMAT.ID[i]] = 12;
+                    var_columns.info_map1[FORMAT.ID[i]] = 12;
+                    FORMAT.ints_alt++;
+                }else if(!strcmp(&FORMAT.Type[i][0], "Float")){
+                    samp_alt_float_tmp.name = FORMAT.ID[i];
+                    alt_sample.samp_float.push_back(samp_alt_float_tmp);
+                    alt_sample.samp_float.back().numb = -1;
+                    info_map[FORMAT.ID[i]] = 13;
+                    var_columns.info_map1[FORMAT.ID[i]] = 13;
+                    FORMAT.floats_alt++;
+                }
+            }
+        }
+
+        samp_columns.samp_flag.resize(FORMAT.flags);
+        samp_columns.samp_int.resize(FORMAT.ints);
+        samp_columns.samp_float.resize(FORMAT.floats);
+        samp_columns.samp_string.resize(FORMAT.strings);
+
+        if(hasDetSamples){
+            samp_columns.var_id.resize((num_lines-1)*samp_columns.numSample, 0);
+            samp_columns.samp_id.resize((num_lines-1)*samp_columns.numSample, static_cast<unsigned short>(0));
+        }
+
+        alt_sample.samp_flag.resize(FORMAT.flags_alt);
+        alt_sample.samp_int.resize(FORMAT.ints_alt);
+        alt_sample.samp_float.resize(FORMAT.floats_alt);
+        alt_sample.samp_string.resize(FORMAT.strings_alt);
+        alt_sample.var_id.resize((num_lines-1)* alt_sample.numSample, 0);
+        alt_sample.samp_id.resize((num_lines-1)*alt_sample.numSample, static_cast<unsigned short>(0));
+
+    }
+    
+    void create_info_vectors(int num_threads){
+        long batch_size = (num_lines-2+num_threads)/num_threads;
+        info_flag info_flag_tmp;
+        info_float info_float_tmp;
+        info_int info_int_tmp;
+        info_string info_string_tmp;
+        
+        info_float alt_float_tmp;
+        info_int alt_int_tmp;
+        info_string alt_string_tmp;
+        for(int i=0; i<INFO.total_values; i++){
+            if(strcmp(&INFO.Number[i][0], "A") == 0){ 
+                // Alternatives
+                if(strcmp(&INFO.Type[i][0], "Integer")==0){
+                    INFO.ints_alt++;
+                    alt_int_tmp.name = INFO.ID[i];
+                    alt_columns.alt_int.push_back(alt_int_tmp);
+                    info_map[INFO.ID[i]] = 4;
+                    var_columns.info_map1[INFO.ID[i]] = 4;
+                }
+                if(strcmp(&INFO.Type[i][0], "Float")==0){
+                    INFO.floats_alt++;
+                    alt_float_tmp.name = INFO.ID[i];
+                    alt_columns.alt_float.push_back(alt_float_tmp);
+                    info_map[INFO.ID[i]] = 5;
+                    var_columns.info_map1[INFO.ID[i]] = 5;
+                }
+                if(strcmp(&INFO.Type[i][0], "String")==0){
+                    INFO.strings_alt++;
+                    alt_string_tmp.name = INFO.ID[i];
+                    alt_columns.alt_string.push_back(alt_string_tmp);
+                    info_map[INFO.ID[i]] = 6;
+                    var_columns.info_map1[INFO.ID[i]] = 6;
+                }
+                if(strcmp(&INFO.Type[i][0], "Flag")==0){ 
+                    INFO.flags_alt++;
+                    info_map[INFO.ID[i]] = 7;
+                }
+            }else if((strcmp(&INFO.Number[i][0], "1") == 0)||(strcmp(&INFO.Number[i][0], "0") == 0)){
+                // Without Alternatives and number = 1 or a flag
+                if(strcmp(&INFO.Type[i][0], "Integer")==0){
+                    INFO.ints++;
+                    info_int_tmp.name = INFO.ID[i];
+                    info_int_tmp.i_int.resize(num_lines-1, 0);
+                    var_columns.in_int.push_back(info_int_tmp);
+                    info_map[INFO.ID[i]] = 1;
+                    var_columns.info_map1[INFO.ID[i]] = 1;
+                } else if(strcmp(&INFO.Type[i][0], "Float")==0){
+                    INFO.floats++;
+                    info_float_tmp.name = INFO.ID[i];
+                    info_float_tmp.i_float.resize(num_lines-1, 0);
+                    var_columns.in_float.push_back(info_float_tmp);
+                    info_map[INFO.ID[i]] = 2;
+                    var_columns.info_map1[INFO.ID[i]] = 2;
+                } else if(strcmp(&INFO.Type[i][0], "String")==0){
+                    INFO.strings++;
+                    info_string_tmp.name = INFO.ID[i];
+                    info_string_tmp.i_string.resize(num_lines-1, "\0");
+                    var_columns.in_string.push_back(info_string_tmp);
+                    info_map[INFO.ID[i]] = 3;
+                    var_columns.info_map1[INFO.ID[i]] = 3;
+                } else if(strcmp(&INFO.Type[i][0], "Flag")==0){
+                    INFO.flags++;
+                    info_flag_tmp.name = INFO.ID[i];
+                    info_flag_tmp.i_flag.resize(num_lines-1, 0);
+                    var_columns.in_flag.push_back(info_flag_tmp);
+                    info_map[INFO.ID[i]] = 0;
+                    var_columns.info_map1[INFO.ID[i]] = 0;
+                }
+            } else {
+                // TODO: Handle cases where INFO.Number > 1 or is one of: 0, 1, R, A, G, .
+                // Only the following values are allowed for INFO.Number: 0, 1, R, A, G, .
+                // Implement logic for multi-valued fields.
+            }
+        }
+        
+        var_columns.in_flag.resize(INFO.flags);
+        var_columns.in_int.resize(INFO.ints);
+        var_columns.in_float.resize(INFO.floats);
+        var_columns.in_string.resize(INFO.strings);
+        alt_columns.alt_int.resize(INFO.ints_alt);
+        alt_columns.alt_float.resize(INFO.floats_alt);
+        alt_columns.alt_string.resize(INFO.strings_alt);
+    }
+    
+    void print_info_map(){
+        for(const auto& element : info_map){
+            cout<<element.first<<": "<<element.second<<endl;
+        }
+    }
+    
+    void print_info(){
+        cout<<"Flags size: "<<var_columns.in_flag.size()<<endl;
+        for(int i=0; i<var_columns.in_flag.size(); i++){
+            cout<<var_columns.in_flag[i].name<<": ";
+            for(int j=0; j<10; j++){
+                cout<<var_columns.in_flag[i].i_flag[j]<<" ";
+            }
+            cout<<" size: "<<var_columns.in_flag[i].i_flag.size();
+            cout<<endl;
+        }
+        cout<<endl;
+        cout<<"Floats size: "<<var_columns.in_float.size()<<endl;
+        for(int i=0; i<var_columns.in_float.size(); i++){
+            cout<<var_columns.in_float[i].name<<": ";
+            for(int j=0; j<10; j++){
+                cout<<var_columns.in_float[i].i_float[j]<<" ";
+            }
+            cout<<" size: "<<var_columns.in_float[i].i_float.size();
+            cout<<endl;
+        }
+        cout<<endl;
+        cout<<"Strings size: "<<var_columns.in_string.size()<<endl;
+        for(int i=0; i<var_columns.in_string.size(); i++){
+            cout<<var_columns.in_string[i].name<<": ";
+            for(int j=0; j<10; j++){
+                cout<<var_columns.in_string[i].i_string[j]<<" ";
+            }
+            cout<<" size: "<<var_columns.in_string[i].i_string.size();
+            cout<<endl;
+        }
+        cout<<endl;
+        cout<<"Ints size: "<<var_columns.in_int.size()<<endl;
+        for(int i=0; i<var_columns.in_int.size(); i++){
+            cout<<var_columns.in_int[i].name<<": ";
+            for(int j=0; j<10; j++){
+                cout<<var_columns.in_int[i].i_int[j]<<" ";
+            }
+            cout<<" size: "<<var_columns.in_int[i].i_int.size();
+            cout<<endl;
+        }
+    }
+    
+    void reserve_var_columns(){
+        var_columns.var_number.resize(num_lines-1);
+        var_columns.chrom.resize(num_lines-1);
+        var_columns.id.resize(num_lines-1);
+        var_columns.pos.resize(num_lines-1);
+        var_columns.ref.resize(num_lines-1); 
+        var_columns.qual.resize(num_lines-1);
+        var_columns.filter.resize(num_lines-1);
+    }
+    
+    void populate_var_columns(int num_threads){
+        std::size_t totAlt      = 0;
+        std::size_t totSampAlt  = 0;
+
+        std::vector<alt_format_df> tmp_alt_format(num_threads);
+        std::vector<int> tmp_num_alt_format(num_threads);
+
+        std::vector<alt_columns_df> tmp_alt(num_threads);
+        std::vector<int> tmp_num_alt(num_threads);
+
+        long batch_size = (num_lines-2+num_threads)/num_threads;        
+        
+#pragma omp parallel 
+        {
+            long start, end;
+            int th_ID = omp_get_thread_num();
+            // Temporary structure of the thread with alternatives.
+            tmp_alt[th_ID].init(alt_columns, INFO, batch_size);
+            
+            tmp_num_alt[th_ID] = 0;
+            
+            start = th_ID*batch_size; // Starting point of the thread's batch
+            end = start + batch_size; // Ending point of the thread's batch
+            
+            if(samplesON){
+                // There are samples in the dataset
+                tmp_alt_format[th_ID].init(alt_sample, FORMAT, batch_size);
+                tmp_num_alt_format[th_ID] = 0;
+                tmp_alt_format[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, 0);
+                tmp_alt_format[th_ID].alt_id.resize(batch_size*2*samp_columns.numSample, 0);
+                tmp_alt_format[th_ID].samp_id.resize(batch_size*2*samp_columns.numSample, static_cast<unsigned short>(0));
+                if(FORMAT.hasGT && FORMAT.numGT == 'A'){
+                    tmp_alt_format[th_ID].sample_GT.GT.resize(batch_size*2*samp_columns.numSample, (char)0),
+                    tmp_alt_format[th_ID].initMapGT();
+                }
+                
+                // For each line in the batch
+                for(long i=start; i<end && i<num_lines-1; i++){ 
+                    //var_columns.var_number[i] = i; -> on the device
+                    var_columns.get_vcf_line_in_var_columns_format(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]), &samp_columns, &FORMAT, &(tmp_num_alt_format[th_ID]), &(tmp_alt_format[th_ID]));
+                }
+                
+                tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
+                tmp_alt[th_ID].alt_id.resize(tmp_num_alt[th_ID]);
+                tmp_alt[th_ID].alt.resize(tmp_num_alt[th_ID]);
+
+                // For each integer variable
+                for(int i=0; i<INFO.ints_alt; i++){
+                    tmp_alt[th_ID].alt_int[i].i_int.resize(tmp_num_alt[th_ID]);
+                }
+                // For each float variable
+                for(int i=0; i<INFO.floats_alt; i++){
+                    tmp_alt[th_ID].alt_float[i].i_float.resize(tmp_num_alt[th_ID]);
+                }
+                // For each string variable
+                for(int i=0; i<INFO.strings_alt; i++){
+                    tmp_alt[th_ID].alt_string[i].i_string.resize(tmp_num_alt[th_ID]);
+                }
+
+                tmp_alt[th_ID].numAlt = tmp_num_alt[th_ID];
+                tmp_alt_format[th_ID].var_id.resize(tmp_num_alt_format[th_ID]);
+                tmp_alt_format[th_ID].alt_id.resize(tmp_num_alt_format[th_ID]);
+                tmp_alt_format[th_ID].samp_id.resize(tmp_num_alt_format[th_ID]);
+
+                // For each integer variable
+                for(int i=0; i<FORMAT.ints_alt; i++){
+                   tmp_alt_format[th_ID].samp_int[i].i_int.resize(tmp_num_alt_format[th_ID]);
+                }
+                // For each float variable
+                for(int i=0; i<FORMAT.floats_alt; i++){
+                    tmp_alt_format[th_ID].samp_float[i].i_float.resize(tmp_num_alt_format[th_ID]);
+                }
+                // For each string variable
+                for(int i=0; i<FORMAT.strings_alt; i++){
+                    tmp_alt_format[th_ID].samp_string[i].i_string.resize(tmp_num_alt_format[th_ID]);
+                }
+
+                tmp_alt_format[th_ID].numSample = tmp_num_alt_format[th_ID]; 
+
+            }else{
+                // There aren't samples in the dataset
+                for(long i=start; i<end && i<num_lines-1; i++){
+                    //var_columns.var_number[i] = i; -> on the device
+                    var_columns.get_vcf_line_in_var_columns(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]));
+                }
+
+                tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
+                tmp_alt[th_ID].alt_id.resize(tmp_num_alt[th_ID]);
+                tmp_alt[th_ID].alt.resize(tmp_num_alt[th_ID]);
+                
+                // For each integer variable
+                for(int i=0; i<INFO.ints_alt; i++){
+                tmp_alt[th_ID].alt_int[i].i_int.resize(tmp_num_alt[th_ID]);
+                }
+                // For each float variable
+                for(int i=0; i<INFO.floats_alt; i++){
+                tmp_alt[th_ID].alt_float[i].i_float.resize(tmp_num_alt[th_ID]);
+                }
+                // For each string variable
+                for(int i=0; i<INFO.strings_alt; i++){
+                tmp_alt[th_ID].alt_string[i].i_string.resize(tmp_num_alt[th_ID]);
+                }
+
+                tmp_alt[th_ID].numAlt = tmp_num_alt[th_ID];
+            }         
+        }
+
+        // Merge results in parallel
+        std::thread t1(merge_member_vector<alt_columns_df, unsigned int>, std::ref(tmp_alt),
+                std::ref(alt_columns.var_id), num_threads, &alt_columns_df::var_id);
+
+        std::thread t2(merge_member_vector<alt_columns_df, char>, std::ref(tmp_alt),
+                    std::ref(alt_columns.alt_id), num_threads, &alt_columns_df::alt_id);
+        
+        std::thread t3(merge_member_vector<alt_columns_df, string>, std::ref(tmp_alt),
+                    std::ref(alt_columns.alt), num_threads, &alt_columns_df::alt);
+
+        std::thread t4(merge_nested_member_vector<alt_columns_df, info_int, int>, 
+            std::ref(tmp_alt), std::ref(alt_columns.alt_int), num_threads, INFO.ints_alt, &alt_columns_df::alt_int, &info_int::i_int);
+
+        std::thread t5(merge_nested_member_vector<alt_columns_df, info_float, Imath::half>, 
+            std::ref(tmp_alt), std::ref(alt_columns.alt_float), num_threads, INFO.floats_alt, &alt_columns_df::alt_float, &info_float::i_float);
+
+        std::thread t6(merge_nested_member_vector<alt_columns_df, info_string, string>, 
+            std::ref(tmp_alt), std::ref(alt_columns.alt_string), num_threads, INFO.strings_alt, &alt_columns_df::alt_string, &info_string::i_string);
+
+        std::thread t_sum([&]() {
+            int somma = 0;
+            for (int i = 0; i < num_threads; i++) {
+                somma += tmp_num_alt[i];
+            }
+            totAlt = somma;
+        });
+
+        if (samplesON) {
+            std::thread t7(merge_member_vector<alt_format_df, unsigned int>, std::ref(tmp_alt_format),
+                    std::ref(alt_sample.var_id), num_threads, &alt_format_df::var_id);
+
+            std::thread t8(merge_member_vector<alt_format_df, char>, std::ref(tmp_alt_format),
+                std::ref(alt_sample.alt_id), num_threads, &alt_format_df::alt_id);
+
+            std::thread t9(merge_member_vector<alt_format_df, unsigned short>, std::ref(tmp_alt_format),
+                    std::ref(alt_sample.samp_id), num_threads, &alt_format_df::samp_id);
+
+            std::thread t10(merge_nested_member_vector<alt_format_df, samp_String, string>, std::ref(tmp_alt_format),
+                    std::ref(alt_sample.samp_string), num_threads, FORMAT.strings_alt, &alt_format_df::samp_string, 
+                    &samp_String::i_string);
+            
+            std::thread t11(merge_nested_member_vector<alt_format_df, samp_Int, int>, std::ref(tmp_alt_format),
+                    std::ref(alt_sample.samp_int), num_threads, FORMAT.ints_alt, &alt_format_df::samp_int, 
+                    &samp_Int::i_int);
+
+            std::thread t12(merge_nested_member_vector<alt_format_df, samp_Float, Imath::half>, std::ref(tmp_alt_format),
+                    std::ref(alt_sample.samp_float), num_threads, FORMAT.floats_alt, &alt_format_df::samp_float, 
+                    &samp_Float::i_float);
+
+            std::thread t_sum_samp([&]() {
+                int somma = 0;
+                for (int i = 0; i < num_threads; i++) {
+                    somma += tmp_num_alt_format[i];
+                } 
+                totSampAlt = somma;
+            });
+
+            t7.join();
+            t8.join();
+            t9.join();
+            t10.join();
+            t11.join();
+            t12.join();
+            t_sum_samp.join();
+        }
+
+        t1.join();
+        t2.join();
+        t3.join();
+        t4.join();
+        t5.join();
+        t6.join();
+        t_sum.join();
+
+        //Here finish the parallel part and we merge the threads results
+
+        alt_columns.numAlt = totAlt;
+        alt_sample.numSample = totSampAlt;
+        {
+            auto fut1 = std::async(std::launch::async, [&]() {
+                alt_columns.var_id.resize(totAlt);
+                alt_columns.alt_id.resize(totAlt);
+                alt_columns.alt.resize(totAlt);
+            });
+            
+            auto fut2 = std::async(std::launch::async, [&]() {
+                for (int j = 0; j < INFO.ints_alt; j++) {
+                    alt_columns.alt_int[j].i_int.resize(totAlt);
+                }
+            });
+            
+            auto fut3 = std::async(std::launch::async, [&]() {
+                for (int j = 0; j < INFO.floats_alt; j++) {
+                    alt_columns.alt_float[j].i_float.resize(totAlt);
+                }
+            });
+            
+            auto fut4 = std::async(std::launch::async, [&]() {
+                for (int j = 0; j < INFO.strings_alt; j++) {
+                    alt_columns.alt_string[j].i_string.resize(totAlt);
+                }
+            });
+            
+            fut1.get();
+            fut2.get();
+            fut3.get();
+            fut4.get();
+        }
+
+        if (samplesON) {
+            auto fut1 = std::async(std::launch::async, [&]() {
+                alt_sample.var_id.resize(totSampAlt);
+                alt_sample.samp_id.resize(totSampAlt);
+                alt_sample.alt_id.resize(totSampAlt);
+            });
+            
+            auto fut2 = std::async(std::launch::async, [&]() {
+                for (int j = 0; j < FORMAT.ints_alt; j++) {
+                    alt_sample.samp_int[j].i_int.resize(totSampAlt);
+                }
+            });
+            
+            auto fut3 = std::async(std::launch::async, [&]() {
+                for (int j = 0; j < FORMAT.floats_alt; j++) {
+                    alt_sample.samp_float[j].i_float.resize(totSampAlt);
+                }
+            });
+            
+            auto fut4 = std::async(std::launch::async, [&]() {
+                for (int j = 0; j < FORMAT.strings_alt; j++) {
+                    alt_sample.samp_string[j].i_string.resize(totSampAlt);
+                }
+            });
+            
+            fut1.get();
+            fut2.get();
+            fut3.get();
+            fut4.get();
+        }        
+    }
+
+};
+
+
+#endif
