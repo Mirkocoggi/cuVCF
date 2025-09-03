@@ -15,14 +15,14 @@ GPUFLAGS        = -O3 -std=c++17 -arch=sm_89
 DEBUG_CXXFLAGS  = -O0 -g -std=c++17 -fsanitize=address,undefined
 DEBUG_GPUFLAGS  = -G -g -O0 -lineinfo -std=c++17 -arch=sm_89
 
-# Librerie comuni
-LIBS = -lz -I/usr/include/Imath -lImath        # aggiungi -lHalf se serve
+# Common Libraries
+LIBS = -lz -I/usr/include/Imath -lImath        
 
 # Toolchain
 CXX  = g++
 NVCC = nvcc
 
-# Cartella di output
+# Output folder
 BIN_DIR = bin
 $(BIN_DIR):
 	@mkdir -p $@

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-./TestFiltriNoSamp_FELIS.bash > out.log 2>&1
-./TestFiltriNoSamp_DANIO.bash >> out.log 2>&1
-./TestFiltriNoSamp_BOS.bash >> out.log 2>&1
-./TesterFiltriSamp.bash >> out.log 2>&1
+./TestFilterNoSamp_FELIS.bash > out.log 2>&1
+./TestFilterNoSamp_DANIO.bash >> out.log 2>&1
+./TestFilterNoSamp_BOS.bash >> out.log 2>&1
+./TesterFilterSamp.bash >> out.log 2>&1

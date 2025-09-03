@@ -6,69 +6,69 @@ sed '/^##INFO=<ID=mypos,/ s/Type=String/Type=Integer/' ../data/IRBT_annotated.vc
 sed -E 's/(mypos=[0-9]+)(:[0-9]+)+/\1/g' ../data/IRBT_annotated_new.vcf > ../data/IRBT_annotated_new_fixed.vcf
 
 filter_expr="AC > 8"
-echo "Esecuzione filtro: $filter_expr" > ../result/Vcflib_result_IRBT.txt
-echo "Esecuzione filtro: $filter_expr" > ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" > ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" > ../result/Vcflib_result_IRBT.txt
 start=$(date +%s%N)
 vcffilter -f "AC > 8" ../data/IRBT.vcf  > output.vcf
 vcffilter -f "AC > 8" ../data/IRBT.vcf  > output.vcf
 end=$(date +%s%N)
 runtime_ns=$((end - start))
 runtime_sec=$(echo "scale=3; $runtime_ns/1000000000" | bc -l)
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
 
 
 filter_expr="AC > 8 & AF > 0.5"
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
 start=$(date +%s%N)
 vcffilter -f "AC > 8 & AF > 0.5" ../data/IRBT.vcf  > output.vcf
 vcffilter -f "AC > 8 & AF > 0.5" ../data/IRBT.vcf  > output.vcf
 end=$(date +%s%N)
 runtime_ns=$((end - start))
 runtime_sec=$(echo "scale=3; $runtime_ns/1000000000" | bc -l)
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
 
 
 filter_expr="GT = 1|1"
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
 start=$(date +%s%N)
 vcffilter -g "GT = 1|1" ../data/IRBT.vcf  > output.vcf
 vcffilter -g "GT = 1|1" ../data/IRBT.vcf  > output.vcf
 end=$(date +%s%N)
 runtime_ns=$((end - start))
 runtime_sec=$(echo "scale=3; $runtime_ns/1000000000" | bc -l)
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
 
-#NOTA - AD[0] > 3 - fatto con escamotage
+#NOTA - AD[0] > 3 - automatically read the first element the others are omitted
 filter_expr="AD > 3"
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
 start=$(date +%s%N)
 vcffilter -g "AD > 3" ../data/IRBT.vcf  > output.vcf
 vcffilter -g "AD > 3" ../data/IRBT.vcf  > output.vcf
 end=$(date +%s%N)
 runtime_ns=$((end - start))
 runtime_sec=$(echo "scale=3; $runtime_ns/1000000000" | bc -l)
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
 
 #NOTA - AD[0] > 3 & AD[1] < 10 - test failed
 
 filter_expr="AC > 8 & GT = 1|1"
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
 start=$(date +%s%N)
 vcffilter -f "AC > 8" ../data/IRBT.vcf > output.vcf
 vcffilter -f "AC > 8" ../data/IRBT.vcf > output.vcf
@@ -77,14 +77,14 @@ end=$(date +%s%N)
 rm output1.vcf
 runtime_ns=$((end - start))
 runtime_sec=$(echo "scale=3; $runtime_ns/1000000000" | bc -l)
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
 
 filter_expr="AC > 8 & AF > 0.5 & GT = 1|1"
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
 start=$(date +%s%N)
 vcffilter -f "AC > 8 & AF > 0.5" ../data/IRBT.vcf  > output.vcf
 vcffilter -f "AC > 8 & AF > 0.5" ../data/IRBT.vcf  > output.vcf
@@ -93,15 +93,15 @@ end=$(date +%s%N)
 rm output1.vcf
 runtime_ns=$((end - start))
 runtime_sec=$(echo "scale=3; $runtime_ns/1000000000" | bc -l)
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
 
-#NOTA - AD[0] > 3 - fatto con escamotage
+#NOTA - AD[0] > 3 - automatically read the first element the others are omitted
 filter_expr="AC > 8 & AD > 3"
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
 start=$(date +%s%N)
 vcffilter -f "AC > 8" ../data/IRBT.vcf > output.vcf
 vcffilter -f "AC > 8" ../data/IRBT.vcf > output.vcf
@@ -110,17 +110,17 @@ end=$(date +%s%N)
 rm output1.vcf
 runtime_ns=$((end - start))
 runtime_sec=$(echo "scale=3; $runtime_ns/1000000000" | bc -l)
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
 
 #NOTA - AC > 8 & AD[0] > 3 & AD[1] < 10 - test failed
 
-#NOTA - AD[0] > 3 - fatto con escamotage
+#NOTA - AD[0] > 3 - automatically read the first element the others are omitted
 filter_expr="AC > 8 & AF > 0.5 & AD > 3"
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
 start=$(date +%s%N)
 vcffilter -f "AC > 8 & AF > 0.5" ../data/IRBT.vcf > output.vcf
 vcffilter -f "AC > 8 & AF > 0.5" ../data/IRBT.vcf > output.vcf
@@ -129,34 +129,34 @@ end=$(date +%s%N)
 rm output1.vcf
 runtime_ns=$((end - start))
 runtime_sec=$(echo "scale=3; $runtime_ns/1000000000" | bc -l)
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
 
 #NOTA - AC > 8 & AF > 0.5 & AD[0] > 3 & AD[1] < 10 - test failed
 
-#NOTA - AD[0] > 3 - fatto con escamotage - output non corretto ma runna FAILED?
+#NOTA - AD[0] > 3 - automatically read the first element the others are omitted 
 filter_expr="AD > 3 & GT = 1|1"
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
 start=$(date +%s%N)
 vcffilter -g "GT = 1|1 & AD > 3" ../data/IRBT.vcf  > output.vcf
 vcffilter -g "GT = 1|1 & AD > 3" ../data/IRBT.vcf  > output.vcf
 end=$(date +%s%N)
 runtime_ns=$((end - start))
 runtime_sec=$(echo "scale=3; $runtime_ns/1000000000" | bc -l)
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
 
 #NOTA - AD[0] > 3 & AD[1] < 10 & GT = 1|1 - test failed
 
-#NOTA - AD[0] > 3 - fatto con escamotage - output non corretto ma runna FAILED?
+#NOTA - AD[0] > 3 - automatically read the first element the others are omitted 
 filter_expr="AC > 8 & GT = 1|1 & AD > 3"
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
 start=$(date +%s%N)
 vcffilter -f "AC > 8" ../data/IRBT.vcf > output.vcf
 vcffilter -f "AC > 8" ../data/IRBT.vcf > output.vcf
@@ -165,17 +165,17 @@ end=$(date +%s%N)
 rm output1.vcf
 runtime_ns=$((end - start))
 runtime_sec=$(echo "scale=3; $runtime_ns/1000000000" | bc -l)
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
 
 #NOTA - AC > 8 & AD[0] > 3 & AD[1] < 10 & GT = 1|1 - test failed
 
-#NOTA - AD[0] > 3 - fatto con escamotage - output non corretto ma runna FAILED?
+#NOTA - AD[0] > 3 - automatically read the first element the others are omitted 
 filter_expr="AC > 8 & AF > 0.5 & GT = 1|1 & AD > 3"
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
-echo "Esecuzione filtro: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
+echo "Filter executed: $filter_expr" >> ../result/Vcflib_result_IRBT.txt
 start=$(date +%s%N)
 vcffilter -f "AC > 8 & AF > 0.5" ../data/IRBT.vcf > output.vcf
 vcffilter -f "AC > 8 & AF > 0.5" ../data/IRBT.vcf > output.vcf
@@ -184,9 +184,9 @@ end=$(date +%s%N)
 rm output1.vcf
 runtime_ns=$((end - start))
 runtime_sec=$(echo "scale=3; $runtime_ns/1000000000" | bc -l)
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
-echo "Tempo: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
+echo "Time: ${runtime_sec} s" >> ../result/Vcflib_result_IRBT.txt
 echo "" >> ../result/Vcflib_result_IRBT.txt
 
 #NOTA - AC > 8 & AF > 0.5 & GT = 1|1 & AD[0] > 3 & AD[1] < 10 - test failed

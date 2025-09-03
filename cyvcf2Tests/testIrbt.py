@@ -20,13 +20,6 @@ if not os.path.exists(GZ_VCF + ".tbi"):
 VCF_IN = GZ_VCF
 
 def _parse_info_numeric(val, cast):
-    """
-    Restituisce una lista di valori cast-ati:
-      • val = None           → []
-      • val = int/float      → [cast(val)]
-      • val = '3,15,8'       → [3,15,8]
-      • val = b'3,15,8'      → idem
-    """
     if val is None:
         return []
     if isinstance(val, (int, float)):
@@ -53,10 +46,6 @@ def gt_1_1(v):
     return g[0] == 1 and g[1] == 1
 
 def ad_values(v):
-    """
-    Ritorna (AD0, AD1) per il sample 0 oppure (None, None)
-    AD è un ndarray shape (n_samples, n_subfields)
-    """
     ad = v.format("AD")
     if ad is None or ad.size == 0:
         return None, None
@@ -121,11 +110,11 @@ def main():
     with open(RES_TXT, "w") as fh:
         for lab, fn in TESTS:
             dt = bench(lab, fn)
-            entry = f"Esecuzione filtro: {lab}\nTempo: {dt:.9f} s\n\n"
+            entry = f"Filter executed: {lab}\nTime: {dt:.9f} s\n\n"
             fh.write(entry)
             print(entry, end="")
 
-    print(f"\nTempistiche scritte in {RES_TXT}")
+    print(f"\nResults written at {RES_TXT}")
 
 if __name__ == "__main__":
     main()

@@ -70,11 +70,11 @@ def main():
     with open(RES_TXT, "w") as fh:
         for lab, fn in TESTS:
             elapsed = bench(lab, fn)
-            line = f"Esecuzione filtro: {lab}\nTempo: {elapsed:.9f} s\n\n"
+            line = f"Filter executed: {lab}\nTime: {elapsed:.9f} s\n\n"
             fh.write(line)
             print(line, end="")
 
-    print(f"\nTempistiche scritte in {RES_TXT}")
+    print(f"\nResults saved in {RES_TXT}")
 
 if __name__ == "__main__":
     main()

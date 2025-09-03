@@ -13,7 +13,7 @@ RES=../result/Bcftools_result_bos.txt
 
 run () {
     local label=$1 expr=$2
-    echo "Esecuzione filtro: $label" | tee -a "$RES"
+    echo "Filter executed: $label" | tee -a "$RES"
 
     local t0=$(date +%s%N)  
     bcftools view -i "$expr" -Ou "$VCF" > /dev/null
@@ -23,7 +23,7 @@ run () {
     local runtime_s
     runtime_s=$(awk 'BEGIN{printf "%.9f", ARGV[1]/1e9}' "$runtime_ns")
 
-    echo "Tempo: ${runtime_s} s" | tee -a "$RES"
+    echo "Time: ${runtime_s} s" | tee -a "$RES"
     echo >> "$RES"
 }
 
@@ -56,4 +56,4 @@ run "EVA_4 && POS>200k && TSA=SNV" \
 run "EVA_4 && 200k<POS<300k && TSA=SNV" \
     'INFO/EVA_4=1 && POS>200000 && POS<300000 && INFO/TSA=="SNV"'
 
-echo "Risultati salvati in $RES"
+echo "Results saved in $RES"

@@ -8,15 +8,7 @@ import math
 import gc
 
 def save_cudf_to_csv_in_chunks(df, filename, npartitions=10, index=False):
-    """
-    Salva il DataFrame cuDF in un unico file CSV, scrivendo i dati a chunk.
-    
-    Parameters:
-        df (cudf.DataFrame): DataFrame da salvare.
-        filename (str): Nome del file CSV finale.
-        npartitions (int): Numero di chunk in cui suddividere il DataFrame.
-        index (bool): Se salvare o meno l'indice nel CSV.
-    """
+
     n_rows = len(df)
     chunk_size = math.ceil(n_rows / npartitions)
     
@@ -49,7 +41,7 @@ df2 = cudf.DataFrame(data2)
 df3 = cudf.DataFrame(data3)
 df4 = cudf.DataFrame(data4)
 
-print("Dataframe creati")
+print("Dataframes created")
 
 filter_map = vcf.GTMapGlobal
 ref_value = filter_map["1|1"]
@@ -58,7 +50,7 @@ ref_value = filter_map["1|1"]
 start_run = time.perf_counter()
 df22 = df2[df2["AC"] > 8]
 end_run = time.perf_counter()
-print(f"Filter AC>8: {end_run - start_run:.4f} secondi")
+print(f"Filter AC>8: {end_run - start_run:.4f} seconds")
 print(len(df2))
 print(len(df22))
 del df22
@@ -72,7 +64,7 @@ start_run = time.perf_counter()
 df22 = df2[mask.get()]
 df22 = df22[df22["AC"] > 8]
 end_run = time.perf_counter()
-print(f"Filter AC > 8 & AF > 0.5: {end_run - start_run:.4f} secondi")
+print(f"Filter AC > 8 & AF > 0.5: {end_run - start_run:.4f} seconds")
 print(len(df2))
 print(len(df22))
 del df22
@@ -82,7 +74,7 @@ gc.collect()
 start_run = time.perf_counter()
 df33 = df3[df3["GT0"] == ref_value]
 end_run = time.perf_counter()
-print(f"Filter GT = 1|1: {end_run - start_run:.4f} secondi")
+print(f"Filter GT = 1|1: {end_run - start_run:.4f} seconds")
 print(len(df3))
 print(len(df33))
 del df33
@@ -92,7 +84,7 @@ gc.collect()
 start_run = time.perf_counter()
 df33 = df3[df3["AD0"] > 3]
 end_run = time.perf_counter()
-print(f"Filter AD[0] > 3: {end_run - start_run:.4f} secondi")
+print(f"Filter AD[0] > 3: {end_run - start_run:.4f} seconds")
 print(len(df3))
 print(len(df33))
 del df33
@@ -102,7 +94,7 @@ gc.collect()
 start_run = time.perf_counter()
 df33 = df3[(df3["AD0"] > 3) & (df3["AD1"] < 10)]
 end_run = time.perf_counter()
-print(f"Filter AD[0] > 3 & AD[1] < 10: {end_run - start_run:.4f} secondi")
+print(f"Filter AD[0] > 3 & AD[1] < 10: {end_run - start_run:.4f} seconds")
 print(len(df3))
 print(len(df33))
 del df33
@@ -114,7 +106,7 @@ df33 = df3[df3["GT0"] == ref_value]
 df22 = df2[df2["AC"] > 8]
 df33 = df33[df33["var_id"].isin(df22["var_id"])]
 end_run = time.perf_counter()
-print(f"Filter GT = 1|1 & AC>8: {end_run - start_run:.4f} secondi")
+print(f"Filter GT = 1|1 & AC>8: {end_run - start_run:.4f} seconds")
 print(len(df3))
 print(len(df33))
 del df33
@@ -131,7 +123,7 @@ df22 = df2[mask.get()]
 df22 = df22[df22["AC"] > 8]
 df33 = df33[df33["var_id"].isin(df22["var_id"])]
 end_run = time.perf_counter()
-print(f"Filter GT = 1|1 & AC>8 & AF > 0.5: {end_run - start_run:.4f} secondi")
+print(f"Filter GT = 1|1 & AC>8 & AF > 0.5: {end_run - start_run:.4f} seconds")
 print(len(df3))
 print(len(df33))
 del df33
@@ -144,7 +136,7 @@ df22 = df2[df2["AC"] > 8]
 df33 = df3[df3["AD0"] > 3]
 df33 = df33[df33["var_id"].isin(df22["var_id"])]
 end_run = time.perf_counter()
-print(f"Filter AD[0] > 3 & AC>8: {end_run - start_run:.4f} secondi")
+print(f"Filter AD[0] > 3 & AC>8: {end_run - start_run:.4f} seconds")
 print(len(df3))
 print(len(df33))
 del df33
@@ -157,7 +149,7 @@ df22 = df2[df2["AC"] > 8]
 df33 = df3[(df3["AD0"] > 3) & (df3["AD1"] < 10)]
 df33 = df33[df33["var_id"].isin(df22["var_id"])]
 end_run = time.perf_counter()
-print(f"Filter AC > 8 & AD[0] > 3 & AD[1] < 10: {end_run - start_run:.4f} secondi")
+print(f"Filter AC > 8 & AD[0] > 3 & AD[1] < 10: {end_run - start_run:.4f} seconds")
 print(len(df3))
 print(len(df33))
 del df33
@@ -174,7 +166,7 @@ df22 = df22[df22["AC"] > 8]
 df33 = df3[df3["AD0"] > 3]
 df33 = df33[df33["var_id"].isin(df22["var_id"])]
 end_run = time.perf_counter()
-print(f"Filter AC > 8 & AF > 0.5 & AD[0] > 3: {end_run - start_run:.4f} secondi")
+print(f"Filter AC > 8 & AF > 0.5 & AD[0] > 3: {end_run - start_run:.4f} seconds")
 print(len(df3))
 print(len(df33))
 del df33
@@ -191,7 +183,7 @@ df22 = df22[df22["AC"] > 8]
 df33 = df3[(df3["AD0"] > 3) & (df3["AD1"] < 10)]
 df33 = df33[df33["var_id"].isin(df22["var_id"])]
 end_run = time.perf_counter()
-print(f"Filter AC > 8 & AF > 0.5 & AD[0] > 3 & AD[1] < 10: {end_run - start_run:.4f} secondi")
+print(f"Filter AC > 8 & AF > 0.5 & AD[0] > 3 & AD[1] < 10: {end_run - start_run:.4f} seconds")
 print(len(df3))
 print(len(df33))
 del df33
@@ -202,7 +194,7 @@ gc.collect()
 start_run = time.perf_counter()
 df33 = df3[(df3["GT0"] == ref_value) & (df3["AD0"] > 3)]
 end_run = time.perf_counter()
-print(f"Filter AD[0] > 3 & GT = 1|1: {end_run - start_run:.4f} secondi")
+print(f"Filter AD[0] > 3 & GT = 1|1: {end_run - start_run:.4f} seconds")
 print(len(df3))
 print(len(df33))
 del df33
@@ -212,7 +204,7 @@ gc.collect()
 start_run = time.perf_counter()
 df33 = df3[(df3["GT0"] == ref_value) & (df3["AD0"] > 3) & (df3["AD1"] < 10)]
 end_run = time.perf_counter()
-print(f"Filter AD[0] > 3 & AD[1] < 10 & GT = 1|1: {end_run - start_run:.4f} secondi")
+print(f"Filter AD[0] > 3 & AD[1] < 10 & GT = 1|1: {end_run - start_run:.4f} seconds")
 print(len(df3))
 print(len(df33))
 del df33
@@ -224,7 +216,7 @@ df22 = df2[df2["AC"] > 8]
 df33 = df3[(df3["GT0"] == ref_value) & (df3["AD0"] > 3)]
 df33 = df33[df33["var_id"].isin(df22["var_id"])]
 end_run = time.perf_counter()
-print(f"Filter AC > 8 & GT = 1|1 & AD[0] > 3: {end_run - start_run:.4f} secondi")
+print(f"Filter AC > 8 & GT = 1|1 & AD[0] > 3: {end_run - start_run:.4f} seconds")
 print(len(df3))
 print(len(df33))
 del df33
@@ -237,7 +229,7 @@ df22 = df2[df2["AC"] > 8]
 df33 = df3[(df3["GT0"] == ref_value) & (df3["AD0"] > 3) & (df3["AD1"] < 10)]
 df33 = df33[df33["var_id"].isin(df22["var_id"])]
 end_run = time.perf_counter()
-print(f"Filter AC > 8 & AD[0] > 3 & AD[1] < 10 & GT = 1|1: {end_run - start_run:.4f} secondi")
+print(f"Filter AC > 8 & AD[0] > 3 & AD[1] < 10 & GT = 1|1: {end_run - start_run:.4f} seconds")
 print(len(df3))
 print(len(df33))
 del df33
@@ -254,7 +246,7 @@ df22 = df22[df22["AC"] > 8]
 df33 = df3[(df3["GT0"] == ref_value) & (df3["AD0"] > 3)]
 df33 = df33[df33["var_id"].isin(df22["var_id"])]
 end_run = time.perf_counter()
-print(f"Filter AAC > 8 & AF > 0.5 & GT = 1|1 & AD > 3: {end_run - start_run:.4f} secondi")
+print(f"Filter AAC > 8 & AF > 0.5 & GT = 1|1 & AD > 3: {end_run - start_run:.4f} seconds")
 print(len(df3))
 print(len(df33))
 del df33
@@ -271,7 +263,7 @@ df22 = df22[df22["AC"] > 8]
 df33 = df3[(df3["GT0"] == ref_value) & (df3["AD0"] > 3) & (df3["AD1"] < 10)]
 df33 = df33[df33["var_id"].isin(df22["var_id"])]
 end_run = time.perf_counter()
-print(f"Filter AAC > 8 & AF > 0.5 & GT = 1|1 & AD > 3: {end_run - start_run:.4f} secondi")
+print(f"Filter AAC > 8 & AF > 0.5 & GT = 1|1 & AD > 3: {end_run - start_run:.4f} seconds")
 print(len(df3))
 print(len(df33))
 del df33

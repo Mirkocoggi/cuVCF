@@ -14,12 +14,12 @@ mkdir -p ../result
 
 run () {
     local label=$1 expr=$2
-    echo "Esecuzione filtro: $label" | tee -a "$RES"
+    echo "Filter executed: $label" | tee -a "$RES"
 
     local t0=$(date +%s%N)
     bcftools view -i "$expr" -Ou "$VCF" > /dev/null
     local ns=$(( $(date +%s%N) - t0 ))
-    printf "Tempo: %.9f s\n\n" "$(awk "BEGIN{print $ns/1e9}")" \
+    printf "Time: %.9f s\n\n" "$(awk "BEGIN{print $ns/1e9}")" \
         | tee -a "$RES"
 }
 
@@ -53,4 +53,4 @@ run "AC>8 && AF>0.5 && GT=1|1 && AD0>3 (sample0)" \
 run "AC>8 && AF>0.5 && GT=1|1 && AD0>3 && AD1<10 (sample0)" \
     'INFO/AC>8 && INFO/AF>0.5 && FMT/GT="1|1" && FMT/AD[0:0]>3 && FMT/AD[0:1]<10'
 
-echo "Risultati salvati in $RES"
+echo "Results saved in $RES"

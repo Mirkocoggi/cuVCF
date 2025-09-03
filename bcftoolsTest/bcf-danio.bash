@@ -62,7 +62,7 @@ def main():
     with open(RES_TXT, "w") as fh:
         for lab, fn in TESTS:
             t = bench(lab, fn)
-            line = f"Esecuzione filtro: {lab}\nTempo: {t:.9f} s\n\n"
+            line = f"Filter executed: {lab}\nTime: {t:.9f} s\n\n"
             fh.write(line)
             print(line, end="")
 
