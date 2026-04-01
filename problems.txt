@@ -1,0 +1,9 @@
+Nel file csv c'è un altro nome del campo info
+TSA nell'header è string invece nel csv è int
+in df3 e df4 viene aggiunto sample name
+problema GT in df3 o df4
+riga 54 df1 IRBT id doppio
+chiedere se nel csv gli info sono float e se devo codificarli
+
+pos 34272 3 valori AD
+GT .|. campi missing di AD

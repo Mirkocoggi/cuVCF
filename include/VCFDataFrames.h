@@ -20,11 +20,6 @@ struct samp_String {
     int numb;
 };
 
-struct samp_GT {
-    std::vector<char> GT;
-    int numb=0;    
-};
-
 // ===================================================================
 // DATAFRAME CLASSES
 // ===================================================================
@@ -35,13 +30,13 @@ struct samp_GT {
 class var_columns_df {
 public:
     std::vector<unsigned int> var_number;
-    std::vector<char> chrom;                         
+    std::vector<std::string> chrom;                         
     std::vector<unsigned int> pos;
     std::vector<std::string> id;
     std::vector<std::string> ref;
     std::vector<float> qual;                         
 
-    std::vector<char> filter;
+    std::vector<std::string> filter;
     std::vector<info_string> in_string;
 
     /*// Dictionaries for decoding (ID to String)
@@ -68,42 +63,8 @@ class sample_columns_df {
 public:
     int numSample = 0;                                         
     std::vector<unsigned int> var_id;                      
-    std::vector<unsigned short> samp_id;                   
-    std::vector<samp_GT> sample_GT;                         
+    std::vector<unsigned short> samp_id;                                      
     std::vector<samp_String> samp_string;
-
-    /*// Dictionary for sample decoding (ID to String)
-    std::vector<std::string> samp_names;                   
-    */
-
-    std::map<std::string, char> GTMap;                      
-
-    // Initialize the genotype mapping table
-    void initMapGT() {
-        int value = 0;
-        for (int i = 0; i < 11; ++i) {
-            for (int j = 0; j < 11; ++j) {
-                std::string key = std::to_string(i) + "|" + std::to_string(j);
-                GTMap[key] = value;
-                value++;
-            }
-        }
-        for (int i = 0; i < 11; ++i) {
-            for (int j = 0; j < 11; ++j) {
-                std::string key = std::to_string(i) + "/" + std::to_string(j);
-                GTMap[key] = value;
-                value++;
-            }
-        }
-    }
-
-    // Retrieve original genotype string from char ID
-    std::string getGTStringFromChar(char gtChar) const {
-        for (const auto& pair : GTMap) {
-            if (pair.second == gtChar) return pair.first;
-        }
-        return ".";
-    }
 };
 
 // -------------------------------------------------------------------
@@ -113,39 +74,10 @@ class alt_format_df {
 public:
     std::vector<unsigned int> var_id;        
     std::vector<unsigned short> samp_id;     
-    std::vector<char> alt_id;                 
-    samp_GT sample_GT;                         
-    std::vector<samp_String> samp_string;
-
-    std::map<std::string, char> GTMap;                      
+    std::vector<char> alt_id;                              
+    std::vector<samp_String> samp_string;           
     int numSample = 0;
 
-    // Initialize the genotype mapping table
-    void initMapGT() {
-        int value = 0;
-        for (int i = 0; i < 11; ++i) {
-            for (int j = 0; j < 11; ++j) {
-                std::string key = std::to_string(i) + "|" + std::to_string(j);
-                GTMap[key] = value;
-                value++;
-            }
-        }
-        for (int i = 0; i < 11; ++i) {
-            for (int j = 0; j < 11; ++j) {
-                std::string key = std::to_string(i) + "/" + std::to_string(j);
-                GTMap[key] = value;
-                value++;
-            }
-        }
-    }
-
-    // Retrieve original genotype string from char ID
-    std::string getGTStringFromChar(char gtChar) const {
-        for (const auto& pair : GTMap) {
-            if (pair.second == gtChar) return pair.first;
-        }
-        return ".";
-    }
 };
 
 #endif

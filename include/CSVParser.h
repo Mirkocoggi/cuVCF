@@ -11,6 +11,7 @@
 
 #include <string>
 #include <vector>
+#include <map>
 #include "VCFDataFrames.h"
 
 /*
@@ -26,6 +27,13 @@ private:
     std::string df2_path;   // CSV for DF2 (alternative alleles)
     std::string df3_path;   // CSV for DF3 (sample data)
     std::string df4_path;   // CSV for DF4 (sample × allele data)
+    std::string header_path; // TXT for Header
+
+    /*
+     * Reads the VCF header file, accumulates the raw text for verbatim output,
+     * and builds the field_types map by parsing ##INFO and ##FORMAT meta-lines.
+     */
+    void parseHeader();
 
     /*
      * Reads the DF1 CSV file and fills the given var_columns_df structure.
@@ -62,7 +70,27 @@ private:
      */
     std::vector<std::string> splitLine(const std::string& line, char delimiter);
 
+    /*
+     * Strips trailing digits from a field name (e.g. "AD0" -> "AD", "PL12" -> "PL")
+     */
+    std::string stripTrailingDigits(const std::string& field_name);
+
+    /*
+     * Strips type prefix from CSV field name (e.g. "flag_SOMATIC" -> "SOMATIC")
+     */
+    std::string stripTypePrefix(const std::string& name);
+
+    /*
+     * Merges split FORMAT fields (e.g. AD0, AD1 → AD) by concatenating values with comma
+     */
+    void mergeFields(sample_columns_df& df3);  
+
 public:
+
+    std::string header_text;
+    std::map<std::string, std::string> field_types;
+    std::vector<std::string> samp_names;
+
     
     /*
      * Constructor: stores the paths to the four CSV files.
@@ -70,7 +98,8 @@ public:
     CSVParser(const std::string& df1_path,
               const std::string& df2_path,
               const std::string& df3_path,
-              const std::string& df4_path);
+              const std::string& df4_path,
+              const std::string& header_path);
 
     /*
      * Loads all four dataframes by calling the private parse methods in sequence.

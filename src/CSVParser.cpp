@@ -2,7 +2,32 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
-#include <boost/algorithm/string.hpp>
+#include <cctype>
+
+// Parse the VCF header file: accumulate raw text and build the field type map
+void CSVParser::parseHeader(){
+    std::ifstream file(header_path);
+    if(!file) throw std::runtime_error("Header not found: " + header_path);
+
+    std::string line;
+    while (std::getline(file, line)){
+        // Accumulate every line for verbatim output
+        header_text += line + "\n";
+
+        // Extract ID and Type from ##INFO and ##FORMAT meta-lines
+        if(line.find("##INFO=")==0 || line.find("##FORMAT=")==0){
+            size_t id_pos = line.find("ID=");
+            size_t id_end = line.find(",", id_pos);
+            std::string id = line.substr(id_pos + 3, id_end - id_pos - 3);
+
+            size_t type_pos = line.find("Type=");
+            size_t type_end = line.find(",", type_pos);
+            std::string type = line.substr(type_pos + 5, type_end - type_pos - 5);
+
+            field_types[id] = type;
+        }
+    }
+}
 
 // Parse DF1: Core variant info and INFO fields
 void CSVParser::parseDF1(var_columns_df& df1) {
@@ -16,31 +41,36 @@ void CSVParser::parseDF1(var_columns_df& df1) {
     // Init dynamic INFO containers (starts at col 7)
     for(size_t i = 7; i < headers.size(); i++) {
         info_string tmp_info;
-        tmp_info.name = headers[i];
+        tmp_info.name = stripTypePrefix(headers[i]);
         df1.in_string.push_back(tmp_info);
     }    
 
     // Read variant records
     while (std::getline(file, line)) {
         std::vector<std::string> row = splitLine(line, ',');
-        if (row.size() != headers.size()) throw std::runtime_error("Line size mismatch in DF1");
+        if (row.size() != headers.size()) 
+            throw std::runtime_error("Line size mismatch in DF1 at line " + std::to_string(df1.var_number.size() + 2) 
+            + " (expected " + std::to_string(headers.size()) + ", got " + std::to_string(row.size()) + ")");
         
         // Populate core fixed fields
         df1.var_number.push_back(std::stoul(row[0]));              
-        df1.chrom.push_back(static_cast<char>(std::stoi(row[1])));  
+        df1.chrom.push_back(row[1]);
         df1.pos.push_back(std::stoul(row[2]));                     
         
-        // Handle ID, REF, FILTER, QUAL
+        // Handle ID, REF, QUAL, FILTER
         std::string id_val = (row[3].empty() || row[3] == " ") ? "." : row[3];
         df1.id.push_back(id_val);
         
         df1.ref.push_back(row[4]);                                 
 
-        char filter_val = (row[5].empty() || row[5] == " ") ? -1 : row[5][0];
-        df1.filter.push_back(filter_val);
-
-        float qual_val = (row[6].empty() || row[6] == " ") ? -1.0f : std::stof(row[6]);
+        float qual_val = -1.0f;
+        if (!row[5].empty() && row[5] != " " && row[5] != ".") {
+            try { qual_val = std::stof(row[5]); }
+            catch (const std::exception&) { qual_val = -1.0f; } // valore non numerico (es. "NA")
+        }
         df1.qual.push_back(qual_val);
+
+        df1.filter.push_back(row[6]);
 
         // Distribute dynamic INFO fields
         for(size_t i = 7; i < row.size(); i++) {   
@@ -61,7 +91,7 @@ void CSVParser::parseDF2(alt_columns_df& df2) {
     // Init dynamic ALT string fields (starts at col 3)
     for(size_t i = 3; i < headers.size(); i++) {
         info_string tmp_info_alt;
-        tmp_info_alt.name = headers[i];
+        tmp_info_alt.name = stripTypePrefix(headers[i]);
         df2.alt_string.push_back(tmp_info_alt);
     }    
 
@@ -91,16 +121,11 @@ void CSVParser::parseDF3(sample_columns_df& df3) {
     if (!std::getline(file, line)) return;
     std::vector<std::string> headers = splitLine(line, ',');
 
-    // Ensure sample_GT vector has at least one element for indexing
-    if (df3.sample_GT.empty()) {
-        samp_GT initial_gt;
-        df3.sample_GT.push_back(initial_gt);
-    }
-
     // Init dynamic format containers (starts at col 3)
-    for(size_t i = 3; i < headers.size(); i++) {
+    size_t data_start = (headers.size() > 2 && headers[2] == "sample_name") ? 3 : 2;
+    for(size_t i = data_start; i < headers.size(); i++) {
         samp_String tmp_format;
-        tmp_format.name = headers[i];
+        tmp_format.name = stripTypePrefix(headers[i]);
         df3.samp_string.push_back(tmp_format);
     }    
 
@@ -116,18 +141,21 @@ void CSVParser::parseDF3(sample_columns_df& df3) {
         unsigned short current_samp_id = static_cast<unsigned short>(std::stoi(row[1]));
         df3.samp_id.push_back(current_samp_id);
 
+        // Collect unique sample names in order
+        if(headers[2] == "sample_name"){
+            if(current_samp_id >= static_cast<unsigned short>(samp_names.size())){
+                samp_names.push_back(row[2]);
+            }
+        }
+
         // Update total sample count
         if (current_samp_id >= df3.numSample) {
             df3.numSample = current_samp_id + 1;
         }
 
-        // Extract raw byte for Genotype (GT0) at col 2
-        char gt_char = row[2].empty() ? (char)0 : row[2][0];
-        df3.sample_GT[0].GT.push_back(gt_char); 
-
         // Distribute remaining dynamic fields
-        for(size_t i = 3; i < row.size(); i++) {
-            df3.samp_string[i - 3].i_string.push_back(row[i]);
+        for(size_t i = data_start; i < row.size(); i++) {
+            df3.samp_string[i - data_start].i_string.push_back(row[i]);
         }
     }
 }
@@ -141,10 +169,27 @@ void CSVParser::parseDF4(alt_format_df& df4) {
     if (!std::getline(file, line)) return;
     std::vector<std::string> headers = splitLine(line, ',');
 
-    // Init dynamic format containers (starts at col 3, no GT present)
-    for(size_t i = 3; i < headers.size(); i++) {
+    size_t data_start = 0;
+    for(size_t i = 0; i < headers.size(); i++){
+        if(headers[i] == "var_id" || headers[i] == "samp_id" || 
+           headers[i] == "sample_name" || headers[i] == "alt_id"){
+            data_start = i + 1;
+        } else {
+            break;
+        }
+    }
+
+    // Find key column positions by name
+    size_t samp_id_col = 0, alt_id_col = 0;
+    for(size_t i = 0; i < headers.size(); i++){
+        if(headers[i] == "samp_id")    samp_id_col = i;
+        if(headers[i] == "alt_id")     alt_id_col  = i;
+    }
+
+    // Init dynamic format containers (starts after key columns)
+    for(size_t i = data_start; i < headers.size(); i++) {
         samp_String tmp_format;
-        tmp_format.name = headers[i];
+        tmp_format.name = stripTypePrefix(headers[i]);
         df4.samp_string.push_back(tmp_format);
     }    
 
@@ -155,12 +200,12 @@ void CSVParser::parseDF4(alt_format_df& df4) {
 
         // Populate 3 fixed key columns
         df4.var_id.push_back(std::stoul(row[0]));
-        df4.samp_id.push_back(static_cast<unsigned short>(std::stoi(row[1])));
-        df4.alt_id.push_back(static_cast<char>(std::stoi(row[2])));
+        df4.samp_id.push_back(static_cast<unsigned short>(std::stoi(row[samp_id_col])));
+        df4.alt_id.push_back(static_cast<char>(std::stoi(row[alt_id_col])));
 
         // Distribute dynamic fields
-        for(size_t i = 3; i < row.size(); i++) {
-            df4.samp_string[i - 3].i_string.push_back(row[i]);
+        for(size_t i = data_start; i < row.size(); i++) {
+            df4.samp_string[i - data_start].i_string.push_back(row[i]);
         }
     }
 }
@@ -174,8 +219,68 @@ std::vector<std::string> CSVParser::splitLine(const std::string& line, char deli
     }
 
     std::vector<std::string> tokens;
-    boost::split(tokens, clean_line, boost::is_any_of(std::string(1, delimiter)));
+    std::string current;
+    bool in_quotes = false;
+
+    for (size_t i = 0; i < clean_line.size(); i++) {
+        char c = clean_line[i];
+        if (c == '"') {
+            in_quotes = !in_quotes;
+        } else if (c == delimiter && !in_quotes) {
+            tokens.push_back(current);
+            current.clear();
+        } else {
+            current += c;
+        }
+    }
+    tokens.push_back(current);
+
     return tokens;
+}
+
+// Strips trailing digits from a field name (e.g. "AD0" -> "AD", "PL12" -> "PL")
+std::string CSVParser::stripTrailingDigits(const std::string& field_name){
+    std::string result = field_name;
+    while (!result.empty() && std::isdigit(result.back())) {
+        result.pop_back();
+    }
+    return result;
+}
+
+// Strips type prefix from CSV field name (e.g. "flag_SOMATIC" -> "SOMATIC")
+std::string CSVParser::stripTypePrefix(const std::string& name) {
+    size_t underscore = name.find('_');
+    if(underscore != std::string::npos){
+        std::string prefix = name.substr(0, underscore);
+        if(prefix == "flag" || prefix == "float" || prefix == "int" ||
+           prefix == "string" || prefix == "char"){
+            return name.substr(underscore + 1);
+        }
+    }
+    return name;
+}
+
+// Merges split FORMAT fields (e.g. AD0, AD1 → AD) by concatenating values with comma
+void CSVParser::mergeFields(sample_columns_df& df3){
+
+    if(df3.samp_string.empty()) return;
+    
+    // First, clean all names
+    for(size_t i = 0; i < df3.samp_string.size(); i++){
+        df3.samp_string[i].name = stripTrailingDigits(df3.samp_string[i].name);
+    }
+
+    // Then merge consecutive fields with same name, backwards
+    for(size_t i = df3.samp_string.size() - 1; i > 0; i--){
+        if(df3.samp_string[i].name == df3.samp_string[i-1].name){
+            // Concatenate each value with comma
+            for(size_t j = 0; j < df3.samp_string[i-1].i_string.size(); j++){
+                df3.samp_string[i-1].i_string[j] += "," + df3.samp_string[i].i_string[j];
+            }
+            // Remove the merged field
+            df3.samp_string.erase(df3.samp_string.begin() + i);
+        }
+    }
 }
 
 // Constructor
@@ -183,11 +288,13 @@ CSVParser::CSVParser(
     const std::string& df1_path,
     const std::string& df2_path,
     const std::string& df3_path,
-    const std::string& df4_path
+    const std::string& df4_path,
+    const std::string& header_path
 ) : df1_path(df1_path),
     df2_path(df2_path),
     df3_path(df3_path),
-    df4_path(df4_path) {}
+    df4_path(df4_path),
+    header_path(header_path) {}
 
 // Orchestrator: Init maps and load all DFs
 void CSVParser::loadAll(var_columns_df& df1,
@@ -195,12 +302,11 @@ void CSVParser::loadAll(var_columns_df& df1,
                         sample_columns_df& df3,
                         alt_format_df& df4){
     
-    // Init hardcoded genotype dictionaries
-    df3.initMapGT();
-    df4.initMapGT();
 
+    parseHeader();
     parseDF1(df1);
     parseDF2(df2);
     parseDF3(df3);
+    mergeFields(df3);
     parseDF4(df4);
 }
