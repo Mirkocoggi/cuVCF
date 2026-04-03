@@ -1,2 +1,5 @@
 build/
-#data/
+data/danio_rerio/alt_columns.csv
+data/danio_rerio/alt_format.csv
+data/danio_rerio/sample_columns.csv
+data/danio_rerio/variant_columns.csv
