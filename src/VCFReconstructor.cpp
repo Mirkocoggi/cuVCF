@@ -1,4 +1,5 @@
 #include "VCFReconstructor.h"
+#include "Utils.h"
 #include <fstream>
 #include <sstream>
 #include <cstring>
@@ -43,39 +44,32 @@ void VCFReconstructor::run(const var_columns_df& df1, const alt_columns_df& df2,
     }
 
     vcf_file << header_text;
-    vcf_file << "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT";
-    for(size_t i = 0; i < samp_names.size(); i++) {
-        vcf_file << "\t" << samp_names[i];
-    }
+    vcf_file << "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO";
+    if(df3.numSample > 0){
+        vcf_file << "\tFORMAT";
+        for(size_t i = 0; i < samp_names.size(); i++) {
+            vcf_file << "\t" << samp_names[i];
+        }
+    } 
     vcf_file << "\n";
 
     size_t fsize = df1.var_number.size();
 
+    gt_in_df4 = false;
     bool gt_in_df3 = false;
-    // Check if GT is present in df3
-    for(size_t i = 0; i < df3.samp_string.size(); i++) {
-        if((df3.samp_string[i].name == "GT" || df3.samp_string[i].name == "GT0")) {
-            gt_in_df3 = true;
-            break;
+    if(df3.numSample > 0){
+        gt_in_df3 = !df3.samp_string.empty() && isGTField(df3.samp_string[0].name);
+        if(!gt_in_df3){
+            gt_in_df4 = !df4.samp_string.empty() && isGTField(df4.samp_string[0].name);
         }
     }
 
-    // Check if GT is present in df4
-    bool gt_in_df4 = false;
-    if(!gt_in_df3){
-        for(size_t i = 0; i < df4.samp_string.size(); i++) {
-            if(df4.samp_string[i].name == "GT" || df4.samp_string[i].name == "GT0") {
-                gt_in_df4 = true;
-                break;
-            }
-        }
-    }
-
-    bool has_gt = gt_in_df3 || gt_in_df4;
-
+    has_gt = gt_in_df3 || gt_in_df4;
+    df4_start = (!df4.samp_string.empty() && isGTField(df4.samp_string[0].name)) ? 1 : 0;
+    
     // Iterate through all variants and format each line
     for(size_t i = 0; i < fsize; i++) {
-        std::string line = formatVariant(i, df1, df2, df3, df4, gt_in_df4, has_gt);
+        std::string line = formatVariant(i, df1, df2, df3, df4);
         vcf_file << line << "\n";
     }
     
@@ -83,7 +77,7 @@ void VCFReconstructor::run(const var_columns_df& df1, const alt_columns_df& df2,
 }
 
 // Formats a single variant record into a valid VCF string
-std::string VCFReconstructor::formatVariant(int index, const var_columns_df& df1, const alt_columns_df& df2, const sample_columns_df& df3, const alt_format_df& df4, bool gt_in_df4, bool has_gt) {
+std::string VCFReconstructor::formatVariant(int index, const var_columns_df& df1, const alt_columns_df& df2, const sample_columns_df& df3, const alt_format_df& df4) {
     std::stringstream ss;
     unsigned int current_var_id = df1.var_number[index];
 
@@ -206,95 +200,86 @@ std::string VCFReconstructor::formatVariant(int index, const var_columns_df& df1
     if(first_info) ss << "."; // Empty INFO block indicator
     ss << "\t";
 
-    // --- 6. FORMAT ---
-    // Construct the FORMAT template string (e.g., GT:AD:DP)
-    std::string format_str = "";
-    if(has_gt) format_str = "GT";  
+    if(df3.numSample > 0){
+        // --- 6. FORMAT ---
+        std::string format_str = "";
 
-    // Append DF3 format keys
-    for(size_t col = 0; col < df3.samp_string.size(); col++){
-        if(df3.samp_string[col].name == "GT" || df3.samp_string[col].name == "GT0") continue;
-        if(!format_str.empty()) format_str += ":";
-        format_str += df3.samp_string[col].name;
-    }    
-
-    // Append DF4 format keys
-    for(size_t col = 0; col < df4.samp_string.size(); col++){
-        if(df4.samp_string[col].name == "GT" || df4.samp_string[col].name == "GT0") continue;
-        if(!format_str.empty()) format_str += ":";
-        format_str += df4.samp_string[col].name;   
-    }
-
-    ss << format_str << "\t";
-
-    // --- 7. SAMPLES ---
-    // Find starting index for current variant in DF4
-    int start_df4 = -1;
-    for(size_t i = 0; i < df4.var_id.size(); i++){
-        if(df4.var_id[i] == current_var_id){
-            start_df4 = i;
-            break;
+        // If GT is in DF4, it must come first but DF3 is iterated first — prepend it
+        if(gt_in_df4 && !df4.samp_string.empty() && isGTField(df4.samp_string[0].name)){
+            format_str += df4.samp_string[0].name;
         }
-    }
 
-    // Iterate through all samples to build their specific data strings
-    for(int i = 0; i < df3.numSample; i++){
-        size_t df3_idx = (static_cast<size_t>(index) * df3.numSample) + i;
+        for(size_t col = 0; col < df3.samp_string.size(); col++){
+            if(!format_str.empty()  ) format_str += ":";
+            format_str += df3.samp_string[col].name;
+        }
 
-        // Initialize GT from DF3 or empty if GT lives in DF4
-        std::string sample_data = "";
-        if(has_gt){
-            if(gt_in_df4){
-                sample_data = "";
-            } else {
-                for(size_t col = 0; col < df3.samp_string.size(); col++){
-                    if(df3.samp_string[col].name == "GT" || df3.samp_string[col].name == "GT0"){
-                        sample_data = df3.samp_string[col].i_string[df3_idx];
-                        break;
-                    }
-                }
+        // Start from 1 if GT was already prepended from DF4
+        for(size_t col = df4_start; col < df4.samp_string.size(); col++){
+            if(!format_str.empty()) format_str += ":";
+            format_str += df4.samp_string[col].name;
+        }
+
+        ss << format_str << "\t";
+
+        // --- 7. SAMPLES ---
+        // Find starting index for current variant in DF4
+        int start_df4 = -1;
+        for(size_t i = 0; i < df4.var_id.size(); i++){
+            if(df4.var_id[i] == current_var_id){
+                start_df4 = i;
+                break;
             }
         }
 
-        // Gather DF4 data in a single pass: GT and all other per-allele fields
-        std::vector<std::string> df4_fields(df4.samp_string.size(), "");
+        // Iterate through all samples to build their specific data strings
+        for(int i = 0; i < df3.numSample; i++){
+            size_t df3_idx = (static_cast<size_t>(index) * df3.numSample) + i;
+            std::string sample_data = "";
 
-        if(start_df4 != -1){
-            size_t j = static_cast<size_t>(start_df4);
-            while(j < df4.var_id.size() && df4.var_id[j] == current_var_id){
-                if(df4.samp_id[j] == static_cast<unsigned short>(i)){
-                    for(size_t col = 0; col < df4.samp_string.size(); col++){
-                        if(df4.samp_string[col].name == "GT" || df4.samp_string[col].name == "GT0"){
-                            // GT is the same for all alleles, take first occurrence
-                            if(gt_in_df4 && sample_data.empty())
-                                sample_data = df4.samp_string[col].i_string[j];
-                        } else {
+            // GT from DF4 (first, if applicable)
+            if(gt_in_df4 && start_df4 != -1){
+                size_t j = static_cast<size_t>(start_df4);
+                while(j < df4.var_id.size() && df4.var_id[j] == current_var_id){
+                    if(df4.samp_id[j] == static_cast<unsigned short>(i)){
+                        sample_data = df4.samp_string[0].i_string[j];
+                        break;
+                    }
+                    j++;
+                }
+            }
+
+            // All DF3 fields in order (GT is first if it lives here)
+            for(size_t col = 0; col < df3.samp_string.size(); col++){
+                if(!sample_data.empty()) sample_data += ":";
+                sample_data += df3.samp_string[col].i_string[df3_idx];
+            }
+
+            // DF4 per-allele fields (skip index 0 if it was GT)
+            std::vector<std::string> df4_fields(df4.samp_string.size(), "");
+            if(start_df4 != -1){
+                size_t j = static_cast<size_t>(start_df4);
+                while(j < df4.var_id.size() && df4.var_id[j] == current_var_id){
+                    if(df4.samp_id[j] == static_cast<unsigned short>(i)){
+                        for(size_t col = 0; col < df4.samp_string.size(); col++){
                             if(!df4_fields[col].empty()) df4_fields[col] += ",";
                             df4_fields[col] += df4.samp_string[col].i_string[j];
                         }
                     }
+                    j++;
                 }
-                j++;
             }
-        }
 
-        // Append sample-level data from DF3
-        for(size_t col = 0; col < df3.samp_string.size(); col++){
-            if(df3.samp_string[col].name == "GT" || df3.samp_string[col].name == "GT0") continue;
-            if(!sample_data.empty()) sample_data += ":";
-            sample_data += df3.samp_string[col].i_string[df3_idx];
-        }
+            for(size_t col = df4_start; col < df4_fields.size(); col++){
+                sample_data += ":";
+                sample_data += (df4_fields[col].empty() ? "." : df4_fields[col]);
+            }
 
-        // Append per-allele data from DF4
-        for(size_t col = 0; col < df4_fields.size(); col++){
-            if(df4.samp_string[col].name == "GT" || df4.samp_string[col].name == "GT0") continue;
-            sample_data += ":";
-            sample_data += (df4_fields[col].empty() ? "." : df4_fields[col]);
+            ss << sample_data;
+            if(i < df3.numSample - 1) ss << "\t";
         }
-
-        ss << sample_data;
-        if(i < df3.numSample - 1) ss << "\t";
     }
+
 
     return ss.str();
 }

@@ -8,11 +8,11 @@
 int main() {
     // Initialize the parser with the input file paths
     CSVParser parser(
-        "data/bos_taurus/df1.csv", 
-        "data/bos_taurus/df2.csv",    
-        "data/bos_taurus/df3.csv", 
-        "data/bos_taurus/df4.csv",
-        "data/bos_taurus/bos_taurus_header.txt"
+        "data/IRBT/df1.csv", 
+        "data/IRBT/df2.csv",    
+        "data/IRBT/df3.csv", 
+        "data/IRBT/df4.csv",
+        "data/IRBT/irbt_header.txt"
     );
 
     // Create empty dataframe structures

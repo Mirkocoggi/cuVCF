@@ -29,6 +29,10 @@ private:
     std::map<std::string, std::string> field_types;
     std::vector<std::string> samp_names;
 
+    bool gt_in_df4;
+    bool has_gt;
+    size_t df4_start;   
+
     float decode_fp16(uint16_t h);
 
     // Formats a single VCF row by joining data from the DataFrames
@@ -36,9 +40,7 @@ private:
                               const var_columns_df& df1, 
                               const alt_columns_df& df2, 
                               const sample_columns_df& df3, 
-                              const alt_format_df& df4, 
-                              bool gt_in_df4,
-                              bool has_gt);
+                              const alt_format_df& df4);
 };
 
 #endif
