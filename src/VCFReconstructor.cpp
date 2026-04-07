@@ -15,26 +15,6 @@ VCFReconstructor::VCFReconstructor(const std::string& output_vcf_path,
                                    field_types(field_types),
                                    samp_names(samp_names) {}
    
-// Decodes a half-precision float (fp16) to a standard single-precision float (fp32)
-float VCFReconstructor::decode_fp16(uint16_t h) {
-    // Extract sign, exponent, and mantissa bits
-    uint16_t sign = (h >> 15) & 0x0001;
-    uint16_t exponent = (h >> 10) & 0x001F;
-    uint16_t mantissa = h & 0x03FF;
-
-    // Special case: Zero
-    if (exponent == 0) return 0.0f;
-
-    // Special case: Infinity or NaN
-    if (exponent == 31) return 0.0f;
-
-    // Reconstruct fp32 bit representation
-    uint32_t f_bits = (sign << 31) | ((exponent + 127 - 15) << 23) | (mantissa << 13);
-    
-    float f;
-    std::memcpy(&f, &f_bits, sizeof(float));
-    return f;
-}
 
 // Main execution method: iterates over variants and writes them to the output file
 void VCFReconstructor::run(const var_columns_df& df1, const alt_columns_df& df2, const sample_columns_df& df3, const alt_format_df& df4) {
@@ -66,8 +46,26 @@ void VCFReconstructor::run(const var_columns_df& df1, const alt_columns_df& df2,
 
     has_gt = gt_in_df3 || gt_in_df4;
     df4_start = (!df4.samp_string.empty() && isGTField(df4.samp_string[0].name)) ? 1 : 0;
+
+    // Build FORMAT string once
+    format_str = "";
+    if(df3.numSample > 0){
+        if(gt_in_df4 && !df4.samp_string.empty() && isGTField(df4.samp_string[0].name)){
+            format_str += df4.samp_string[0].name;
+        }
+        for(size_t col = 0; col < df3.samp_string.size(); col++){
+            if(!format_str.empty()) format_str += ":";
+            format_str += df3.samp_string[col].name;
+        }
+        for(size_t col = df4_start; col < df4.samp_string.size(); col++){
+            if(!format_str.empty()) format_str += ":";
+            format_str += df4.samp_string[col].name;
+        }
+    }
     
     // Iterate through all variants and format each line
+    df2_cursor = 0;
+    df4_cursor = 0;
     for(size_t i = 0; i < fsize; i++) {
         std::string line = formatVariant(i, df1, df2, df3, df4);
         vcf_file << line << "\n";
@@ -93,15 +91,17 @@ std::string VCFReconstructor::formatVariant(int index, const var_columns_df& df1
     bool first_alt = true;
     std::vector<size_t> alt_indices; // Track DF2 indices for later use in INFO fields
 
-    for(size_t i = 0; i < df2.var_id.size(); i++) {
-        if(df2.var_id[i] == current_var_id){
-            if(!first_alt) alt_string += ",";
-            alt_string += df2.alt[i];
-            first_alt = false;
-            alt_indices.push_back(i);
-        } else if(df2.var_id[i] > current_var_id){
-            break; // Stop searching since var_id is sorted
-        }
+    while(df2_cursor < df2.var_id.size() && df2.var_id[df2_cursor] < current_var_id){
+        df2_cursor++;
+    }
+
+    size_t j = df2_cursor ;
+    while(j < df2.var_id.size() && df2.var_id[j] == current_var_id){
+        if(!first_alt) alt_string += ",";
+        alt_string += df2.alt[j];
+        first_alt = false;
+        alt_indices.push_back(j);
+        j++;
     }
 
     if(alt_string.empty()) alt_string = ".";
@@ -111,9 +111,6 @@ std::string VCFReconstructor::formatVariant(int index, const var_columns_df& df1
     if(df1.qual[index] == -1.0f){
         ss << ".\t";
     } else {
-        //uint16_t raw_fp16 = static_cast<uint16_t>(df1.qual[index]);
-        //ss << decode_fp16(raw_fp16) << "\t";
-
         ss << df1.qual[index] << "\t";
     }
 
@@ -140,15 +137,6 @@ std::string VCFReconstructor::formatVariant(int index, const var_columns_df& df1
             std::string contribution = "";
             if(type == "Flag"){
                 if(val == "1") contribution = field_name;
-            } else if(type == "Float"){
-                try {
-                    //uint16_t raw_fp16 = static_cast<uint16_t>(std::stoul(val));
-                    //contribution = field_name + "=" + std::to_string(decode_fp16(raw_fp16));
-
-                    contribution = field_name + "=" + val;
-                } catch(const std::exception&) {
-                    contribution = field_name + "=" + val;
-                }
             } else {
                 contribution = field_name + "=" + val;
             }
@@ -176,16 +164,10 @@ std::string VCFReconstructor::formatVariant(int index, const var_columns_df& df1
             std::string alt_val = df2.alt_string[col].i_string[alt_indices[idx]];
             if(alt_val.empty()) alt_val = ".";
 
-            if(type == "Float" && alt_val != "."){
-                try {
-                    //alt_val = std::to_string(decode_fp16(static_cast<uint16_t>(std::stoul(alt_val))));
-                } catch(const std::exception&) {}
-            } 
-
-           if(idx > 0) val_str += ",";
-           val_str += alt_val;
+            if(idx > 0) val_str += ",";
+            val_str += alt_val;
            
-           if(alt_val != ".") has_data = true;
+            if(alt_val != ".") has_data = true;
         }
 
 
@@ -202,35 +184,17 @@ std::string VCFReconstructor::formatVariant(int index, const var_columns_df& df1
 
     if(df3.numSample > 0){
         // --- 6. FORMAT ---
-        std::string format_str = "";
-
-        // If GT is in DF4, it must come first but DF3 is iterated first — prepend it
-        if(gt_in_df4 && !df4.samp_string.empty() && isGTField(df4.samp_string[0].name)){
-            format_str += df4.samp_string[0].name;
-        }
-
-        for(size_t col = 0; col < df3.samp_string.size(); col++){
-            if(!format_str.empty()  ) format_str += ":";
-            format_str += df3.samp_string[col].name;
-        }
-
-        // Start from 1 if GT was already prepended from DF4
-        for(size_t col = df4_start; col < df4.samp_string.size(); col++){
-            if(!format_str.empty()) format_str += ":";
-            format_str += df4.samp_string[col].name;
-        }
-
         ss << format_str << "\t";
 
         // --- 7. SAMPLES ---
-        // Find starting index for current variant in DF4
-        int start_df4 = -1;
-        for(size_t i = 0; i < df4.var_id.size(); i++){
-            if(df4.var_id[i] == current_var_id){
-                start_df4 = i;
-                break;
-            }
+        // Advance DF4 cursor to current variant
+        while(df4_cursor < df4.var_id.size() && df4.var_id[df4_cursor] < current_var_id){
+            df4_cursor++;
         }
+        int start_df4 = (df4_cursor < df4.var_id.size() && df4.var_id[df4_cursor] < current_var_id) 
+                        ? static_cast<int>(df4_cursor) : -1;
+        
+            
 
         // Iterate through all samples to build their specific data strings
         size_t df3_col_start = (has_gt && !gt_in_df4) ? 1 : 0;
@@ -260,7 +224,6 @@ std::string VCFReconstructor::formatVariant(int index, const var_columns_df& df1
 
             if(sample_data == ".|." || sample_data == "./."){
                 ss << sample_data;
-                if(i < df3.numSample - 1) ss << "\t";
                 continue;
             }
 
@@ -291,7 +254,6 @@ std::string VCFReconstructor::formatVariant(int index, const var_columns_df& df1
             }
 
             ss << sample_data;
-            if(i < df3.numSample - 1) ss << "\t";
         }
     }
 

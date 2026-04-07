@@ -1,6 +1,8 @@
 #include <iostream>
 #include <algorithm>
 #include <chrono>
+#include <sys/resource.h>
+
 #include "CSVParser.h"
 #include "VCFDataFrames.h"
 #include "VCFReconstructor.h"
@@ -45,6 +47,9 @@ int main() {
     // Run the reconstruction pipeline
     try {
 
+        struct rusage usage_before;
+        getrusage(RUSAGE_SELF, &usage_before);
+
         auto start = std::chrono::high_resolution_clock::now();
 
         reconstructor.run(df1, df2, df3, df4);
@@ -52,8 +57,12 @@ int main() {
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
+        struct rusage usage_after;
+        getrusage(RUSAGE_SELF, &usage_after);
 
         std::cout << "VCF file reconstructed successfully in " << duration.count() << " ms." << std::endl;
+        std::cout <<"Peak RSS: " << usage_after.ru_maxrss << " KB" << std::endl;
+        std::cout << "Memory delta: " << (usage_after.ru_maxrss - usage_before.ru_maxrss) << " KB" << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "Fatal error in Reconstructor: " << e.what() << std::endl;
     }

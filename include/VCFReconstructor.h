@@ -28,12 +28,13 @@ private:
     std::string header_text;
     std::map<std::string, std::string> field_types;
     std::vector<std::string> samp_names;
+    std::string format_str;
 
+    size_t df2_cursor;
+    size_t df4_cursor;
     bool gt_in_df4;
     bool has_gt;
     size_t df4_start;   
-
-    float decode_fp16(uint16_t h);
 
     // Formats a single VCF row by joining data from the DataFrames
     std::string formatVariant(int index, 
