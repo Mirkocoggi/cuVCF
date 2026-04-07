@@ -233,7 +233,11 @@ std::string VCFReconstructor::formatVariant(int index, const var_columns_df& df1
         }
 
         // Iterate through all samples to build their specific data strings
+        size_t df3_col_start = (has_gt && !gt_in_df4) ? 1 : 0;
         for(int i = 0; i < df3.numSample; i++){
+
+            if(i>0) ss<<"\t";
+
             size_t df3_idx = (static_cast<size_t>(index) * df3.numSample) + i;
             std::string sample_data = "";
 
@@ -249,8 +253,19 @@ std::string VCFReconstructor::formatVariant(int index, const var_columns_df& df1
                 }
             }
 
-            // All DF3 fields in order (GT is first if it lives here)
-            for(size_t col = 0; col < df3.samp_string.size(); col++){
+            // GT from DF3 (position 0)
+            if(!gt_in_df4 && has_gt){
+                sample_data = df3.samp_string[0].i_string[df3_idx];
+            }
+
+            if(sample_data == ".|." || sample_data == "./."){
+                ss << sample_data;
+                if(i < df3.numSample - 1) ss << "\t";
+                continue;
+            }
+
+            // Remaining DF3 fields (skip position 0 if it was GT)
+            for(size_t col = df3_col_start; col < df3.samp_string.size(); col++){
                 if(!sample_data.empty()) sample_data += ":";
                 sample_data += df3.samp_string[col].i_string[df3_idx];
             }

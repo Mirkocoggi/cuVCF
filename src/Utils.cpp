@@ -69,6 +69,9 @@ void mergeFields(sample_columns_df& df3){
         if(df3.samp_string[i].name == df3.samp_string[i-1].name){
             // Concatenate each value with comma
             for(size_t j = 0; j < df3.samp_string[i-1].i_string.size(); j++){
+                if(df3.samp_string[i].i_string[j] == "."){
+                    continue;
+                }
                 df3.samp_string[i-1].i_string[j] += "," + df3.samp_string[i].i_string[j];
             }
             // Remove the merged field
