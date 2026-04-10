@@ -63,6 +63,7 @@ private:
     std::map<char, std::string> inv_chrom_map;  ///< Decodes compact chromosome char keys back to original strings.
     std::map<char, std::string> inv_filter_map; ///< Decodes compact filter char keys back to original strings.
     std::vector<std::string> ordered_samp_names;///< List of sample names, strictly ordered by their numerical IDs.
+    std::map<std::string, std::string> format_numbers; ///< Maps FORMAT field IDs to their 'Number' attribute (e.g., "GT" -> "1").
 
     /**
      * @brief Builds inverse mapping dictionaries for encoded fields (CHROM and FILTER).
@@ -80,6 +81,18 @@ private:
      * @param df3 Reference to DF3 containing the sample name to ID mapping.
      */
     void buildSampleNames(const sample_columns_df& df3);
+
+    /**
+     * @brief Parses the VCF header to extract FORMAT field definitions.
+     *
+     * Scans the header text for ##FORMAT lines and extracts the ID and Number
+     * attributes to build a lookup map.
+     *
+     * @param header_text The raw VCF header text.
+     * @return A map where keys are FORMAT field IDs (e.g., "GT") and values are
+     *         their corresponding Number values (e.g., "1", "A", "R").
+     */
+    std::map<std::string, std::string> parseFormatNumbers(const std::string& header_text);
 
     /**
      * @brief Formats a single variant row into a standard VCF string format.

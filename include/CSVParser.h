@@ -24,8 +24,6 @@ class CSVParser {
 public:
     std::string header_text;
     std::map<std::string, std::string> field_types;
-    header_element INFO;
-    header_element FORMAT;
 
     CSVParser(const std::string& df1_path,
                    const std::string& df2_path,

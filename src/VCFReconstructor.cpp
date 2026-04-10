@@ -36,6 +36,32 @@ void VCFReconstructor::buildSampleNames(const sample_columns_df& df3) {
     }
 }
 
+std::map<std::string, std::string> VCFReconstructor::parseFormatNumbers(const std::string& header_text) {
+    std::map<std::string, std::string> result;
+    std::istringstream stream(header_text);
+    std::string line;
+    
+    while (std::getline(stream, line)) {
+        if (line.substr(0, 8) != "##FORMAT") continue;
+        
+        // Extract ID
+        size_t id_pos = line.find("ID=");
+        size_t num_pos = line.find("Number=");
+        if (id_pos == std::string::npos || num_pos == std::string::npos) continue;
+        
+        size_t id_start = id_pos + 3;
+        size_t id_end = line.find_first_of(",", id_start);
+        std::string id = line.substr(id_start, id_end - id_start);
+        
+        size_t num_start = num_pos + 7;
+        size_t num_end = line.find_first_of(",", num_start);
+        std::string number = line.substr(num_start, num_end - num_start);
+        
+        result[id] = number;
+    }
+    return result;
+}
+
 void VCFReconstructor::run(const var_columns_df& df1,
                             const alt_columns_df& df2,
                             const sample_columns_df& df3,
@@ -49,6 +75,7 @@ void VCFReconstructor::run(const var_columns_df& df1,
     // 1. Setup lookup tables
     buildInverseMaps(df1);
     buildSampleNames(df3);
+    format_numbers = parseFormatNumbers(header_text);
 
     // 2. Write the static header and standard columns
     vcf_file << header_text;
@@ -385,14 +412,38 @@ std::string VCFReconstructor::formatVariant(int index,
                     std::string base = stripTrailingDigits(df3.samp_int[col].name);
                     if (!sample_data.empty()) sample_data += ":";
 
+                    // Count how many columns belong to this group
+                    size_t group_start = col;
+                    size_t group_end = col;
+                    while (group_end < df3.samp_int.size() &&
+                        stripTrailingDigits(df3.samp_int[group_end].name) == base)
+                        group_end++;
+                    size_t group_size = group_end - group_start;
+
+                    // Compute how many values to actually print
+                    size_t limit;
+                    if (group_size > 1) {
+                        std::string number = format_numbers.count(base) ? format_numbers[base] : "R";
+                        size_t real_values = (number == "A") ? alt_indices.size()
+                                                             : alt_indices.size() + 1;
+                        limit = std::min(group_size, real_values);
+                    } else {
+                        limit = 1;
+                    }
+
                     std::string group_val = "";
-                    while (col < df3.samp_int.size() && stripTrailingDigits(df3.samp_int[col].name) == base) {
-                        int v = df3.samp_int[col].i_int[df3_idx];
-                        if (v != -1) {
-                            if (!group_val.empty()) group_val += ",";
-                            group_val += std::to_string(v);
+                    size_t printed = 0;
+                    while (col < df3.samp_int.size() &&
+                        stripTrailingDigits(df3.samp_int[col].name) == base) {
+                        if (printed < limit) {
+                            int v = df3.samp_int[col].i_int[df3_idx];
+                            if (v != -1) {
+                                if (!group_val.empty()) group_val += ",";
+                                group_val += std::to_string(v);
+                            }
+                            printed++;
                         }
-                        col++;
+                        col++; // advance to consume the entire group
                     }
                     sample_data += group_val.empty() ? "." : group_val;
                 }
@@ -406,12 +457,34 @@ std::string VCFReconstructor::formatVariant(int index,
                     std::string base = stripTrailingDigits(df3.samp_float[col].name);
                     if (!sample_data.empty()) sample_data += ":";
 
+                    size_t group_start = col;
+                    size_t group_end = col;
+                    while (group_end < df3.samp_float.size() &&
+                        stripTrailingDigits(df3.samp_float[group_end].name) == base)
+                        group_end++;
+                    size_t group_size = group_end - group_start;
+
+                    size_t limit;
+                    if (group_size > 1) {
+                        std::string number = format_numbers.count(base) ? format_numbers[base] : "R";
+                        size_t real_values = (number == "A") ? alt_indices.size()
+                                                             : alt_indices.size() + 1;
+                        limit = std::min(group_size, real_values);
+                    } else {
+                        limit = 1;
+                    }
+
                     std::string group_val = "";
-                    while (col < df3.samp_float.size() && stripTrailingDigits(df3.samp_float[col].name) == base) {
-                        float v = (float)df3.samp_float[col].i_float[df3_idx];
-                        if (v != -1.0f) {
-                            if (!group_val.empty()) group_val += ",";
-                            group_val += std::to_string(v);
+                    size_t printed = 0;
+                    while (col < df3.samp_float.size() &&
+                        stripTrailingDigits(df3.samp_float[col].name) == base) {
+                        if (printed < limit) {
+                            float v = (float)df3.samp_float[col].i_float[df3_idx];
+                            if (v != -1.0f) {
+                                if (!group_val.empty()) group_val += ",";
+                                group_val += std::to_string(v);
+                            }
+                            printed++;
                         }
                         col++;
                     }
@@ -447,11 +520,8 @@ std::string VCFReconstructor::formatVariant(int index,
                         while (k < df4.var_id.size() && df4.var_id[k] == current_var_id) {
                             if (df4.samp_id[k] == static_cast<unsigned short>(i)) {
                                 for (size_t c = group_start; c < col; c++) {
-                                    int v = df4.samp_int[c].i_int[k];
-                                    if (v != -1) {
-                                        if (!field_val.empty()) field_val += ",";
-                                        field_val += std::to_string(v);
-                                    }
+                                    if (!field_val.empty()) field_val += ",";
+                                    field_val += std::to_string(df4.samp_int[c].i_int[k]);
                                 }
                             }
                             k++;
@@ -476,11 +546,8 @@ std::string VCFReconstructor::formatVariant(int index,
                         while (k < df4.var_id.size() && df4.var_id[k] == current_var_id) {
                             if (df4.samp_id[k] == static_cast<unsigned short>(i)) {
                                 for (size_t c = group_start; c < col; c++) {
-                                    float v = (float)df4.samp_float[c].i_float[k];
-                                    if (v != -1.0f) {
-                                        if (!field_val.empty()) field_val += ",";
-                                        field_val += std::to_string(v);
-                                    }
+                                    if (!field_val.empty()) field_val += ",";
+                                    field_val += std::to_string((float)df4.samp_float[c].i_float[k]);
                                 }
                             }
                             k++;
