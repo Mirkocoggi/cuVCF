@@ -1,3 +1,0 @@
-
-pos 34272 3 valori AD
-GT .|. campi missing di AD

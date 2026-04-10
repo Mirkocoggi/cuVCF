@@ -1,71 +1,72 @@
 #include <iostream>
-#include <algorithm>
 #include <chrono>
 #include <sys/resource.h>
-
-#include "CSVParser.h"
+#include "CSVParser.h" 
 #include "VCFDataFrames.h"
 #include "VCFReconstructor.h"
 
+inline long getPeakRSS() {
+    struct rusage usage;
+    getrusage(RUSAGE_SELF, &usage);
+    return usage.ru_maxrss; // Note: KB on Linux, Bytes on macOS
+}
+
 int main() {
-    // Initialize the parser with the input file paths
+    // ==========================================
+    // PHASE 0: MOCK SETUP (DFs already in RAM)
+    // ==========================================
+    // You will remove this parsing section during integration.
+    // It is only here to populate the DataFrames for the standalone test.
     CSVParser parser(
-        "data/IRBT2/df1.csv", 
-        "data/IRBT2/df2.csv",    
-        "data/IRBT2/df3.csv", 
+        "data/IRBT2/df1.csv",
+        "data/IRBT2/df2.csv",
+        "data/IRBT2/df3.csv",
         "data/IRBT2/df4.csv",
-        "data/IRBT2/irbt_header.txt"
+        "data/IRBT/irbt_header.txt"
     );
 
-    // Create empty dataframe structures
     var_columns_df df1;
     alt_columns_df df2;
     sample_columns_df df3;
     alt_format_df df4;
 
-    std::cout << "Loading all DataFrames..." << std::endl;
+    parser.loadAll(df1, df2, df3, df4);
     
+    // ==========================================
+    // PHASE 1: VCF RECONSTRUCTION PROFILING
+    // ==========================================
+    std::cout << "--- Starting VCF Reconstruction Profiling ---\n";
+    
+    // Track baseline memory and start time right before the reconstructor comes into play
+    long mem_before = getPeakRSS();
+    auto start_time = std::chrono::high_resolution_clock::now();
+    
+    VCFReconstructor reconstructor("build/output_ricostruito.vcf", parser.header_text);
+
     try {
-        parser.loadAll(df1, df2, df3, df4);
-        std::cout << "Loading completed successfully.\n" << std::endl;
+        reconstructor.run(df1, df2, df3, df4);
     } catch (const std::exception& e) {
-        std::cerr << "Error during loading: " << e.what() << std::endl;
+        std::cerr << "Reconstruction Error: " << e.what() << std::endl;
         return 1;
     }
     
-    std::cout << "===========================================" << std::endl;
-    std::cout << "Starting VCF reconstruction..." << std::endl;
+    // Stop tracking right after the run finishes
+    auto end_time = std::chrono::high_resolution_clock::now();
+    long mem_after = getPeakRSS();
+
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+
+    // ==========================================
+    // PHASE 2: REPORT
+    // ==========================================
+    std::cout << "\n[Time]\n";
+    std::cout << "  - Total Execution (Init + Run) : " << duration.count() << " ms\n";
     
-    // Create the reconstructor and set the output path
-    VCFReconstructor reconstructor(
-        "build/output_ricostruito.vcf",
-        parser.header_text,
-        parser.field_types,
-        parser.samp_names
-    );
-    
-    // Run the reconstruction pipeline
-    try {
-
-        struct rusage usage_before;
-        getrusage(RUSAGE_SELF, &usage_before);
-
-        auto start = std::chrono::high_resolution_clock::now();
-
-        reconstructor.run(df1, df2, df3, df4);
-
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
-        struct rusage usage_after;
-        getrusage(RUSAGE_SELF, &usage_after);
-
-        std::cout << "VCF file reconstructed successfully in " << duration.count() << " ms." << std::endl;
-        std::cout <<"Peak RSS: " << usage_after.ru_maxrss << " KB" << std::endl;
-        std::cout << "Memory delta: " << (usage_after.ru_maxrss - usage_before.ru_maxrss) << " KB" << std::endl;
-    } catch (const std::exception& e) {
-        std::cerr << "Fatal error in Reconstructor: " << e.what() << std::endl;
-    }
+    std::cout << "\n[Peak Memory]\n";
+    std::cout << "  - Baseline (Pre-Reconstructor) : " << mem_before << " KB\n";
+    std::cout << "  - Peak (Post-Reconstructor)    : " << mem_after << " KB\n";
+    std::cout << "  - Reconstructor RAM Delta      : +" << (mem_after - mem_before) << " KB\n";
+    std::cout << "---------------------------------------------\n";
 
     return 0;
 }

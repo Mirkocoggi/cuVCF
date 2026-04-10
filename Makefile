@@ -15,7 +15,7 @@ all: $(TARGET)
 # Come costruire l'eseguibile
 $(TARGET): $(SRCS)
 	@mkdir -p build
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SRCS) -o $(TARGET)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SRCS) -o $(TARGET) -lImath
 	@echo "Compilazione completata! Eseguibile salvato in $(TARGET)"
 
 # Regola per ripulire i file compilati (comando: make clean)
