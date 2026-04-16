@@ -3,6 +3,7 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <omp.h>
 
 
 VCFReconstructor::VCFReconstructor(const std::string& output_vcf_path,
@@ -60,6 +61,40 @@ std::map<std::string, std::string> VCFReconstructor::parseFormatNumbers(const st
         result[id] = number;
     }
     return result;
+}
+
+std::vector<VCFReconstructor::ChunkCursor> VCFReconstructor::computeChunkCursor(
+    const var_columns_df& df1,
+    const alt_columns_df& df2,
+    const alt_format_df& df4,
+    int num_threads
+) {
+    size_t total_vars = df1.var_number.size();
+    size_t chunk_size = (total_vars + num_threads - 1) / num_threads;
+    
+    std::vector<ChunkCursor> chunks(num_threads);
+
+    size_t df2_pos = 0;
+    size_t df4_pos = 0;
+
+    for(int c = 0; c < num_threads; c++){
+        size_t var_start = c * chunk_size;
+        size_t var_end = std::min(var_start + chunk_size, total_vars);
+
+        chunks[c].var_start = var_start;
+        chunks[c].var_end = var_end;
+        chunks[c].df2_start = df2_pos;
+        chunks[c].df4_start = df4_pos;
+
+        unsigned int last_var_id = df1.var_number[var_end - 1];
+        while(df2_pos < df2.var_id.size() && df2.var_id[df2_pos] <= last_var_id){
+            df2_pos++;
+        }
+        while(df4_pos < df4.var_id.size() && df4.var_id[df4_pos] <= last_var_id){
+            df4_pos++;
+        }
+    }
+    return chunks;
 }
 
 void VCFReconstructor::run(const var_columns_df& df1,
@@ -166,16 +201,37 @@ void VCFReconstructor::run(const var_columns_df& df1,
         }
     }
 
-    // 5. Main Reconstruction Loop
-    // Reset tracking cursors to the start of DF2 and DF4
-    df2_cursor = 0;
-    df4_cursor = 0;
-    size_t fsize = df1.var_number.size();
-    for (size_t i = 0; i < fsize; i++) {
-        // Build the string for a single variant line and write it
-        vcf_file << formatVariant(i, df1, df2, df3, df4) << "\n";
+    // 5. Pre-compute chunk cursors 
+    int num_threads = omp_get_max_threads();
+    std::vector<ChunkCursor> chunks = computeChunkCursor(df1, df2, df4, num_threads);
+
+    // 6. Parallel processing - each thread writes to its own temp file
+    #pragma omp parallel for num_threads(num_threads) schedule(static)
+    for (int c = 0; c < num_threads; c++) {
+        std::string tmp_path = output_vcf_path + ".tmp_" + std::to_string(c);
+        std::ofstream tmp_file(tmp_path);
+        
+        // Each thread has its own local cursors — no shared state
+        size_t local_df2_cursor = chunks[c].df2_start;
+        size_t local_df4_cursor = chunks[c].df4_start;
+
+        for(size_t i = chunks[c].var_start; i < chunks[c].var_end; i++){
+            tmp_file << formatVariant(i, df1, df2, df3, df4,
+                                      local_df2_cursor,
+                                      local_df4_cursor) << "\n";
+        }
+        tmp_file.close();
     }
 
+    // 7. Concatenate temp files in order
+    for(int c = 0; c < num_threads; c++){
+        std::string tmp_path = output_vcf_path + ".tmp_" + std::to_string(c);
+        std::ifstream tmp_file(tmp_path);
+        vcf_file << tmp_file.rdbuf();
+        tmp_file.close();
+        std::remove(tmp_path.c_str());
+    }
+    
     vcf_file.close();
 }
 
@@ -183,7 +239,9 @@ std::string VCFReconstructor::formatVariant(int index,
                                              const var_columns_df& df1,
                                              const alt_columns_df& df2,
                                              const sample_columns_df& df3,
-                                             const alt_format_df& df4) {
+                                             const alt_format_df& df4,
+                                             size_t& df2_cursor,
+                                             size_t& df4_cursor) {
     std::stringstream ss;
     unsigned int current_var_id = df1.var_number[index];
 

@@ -1,6 +1,6 @@
 # Compilatore e flag
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -O2
+CXXFLAGS = -std=c++17 -Wall -O2 -fopenmp
 INCLUDES = -Iinclude
 
 # File sorgenti

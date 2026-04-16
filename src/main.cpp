@@ -18,10 +18,10 @@ int main() {
     // You will remove this parsing section during integration.
     // It is only here to populate the DataFrames for the standalone test.
     CSVParser parser(
-        "data/IRBT2/df1.csv",
-        "data/IRBT2/df2.csv",
-        "data/IRBT2/df3.csv",
-        "data/IRBT2/df4.csv",
+        "data/IRBT3/df1.csv",
+        "data/IRBT3/df2.csv",
+        "data/IRBT3/df3.csv",
+        "data/IRBT3/df4.csv",
         "data/IRBT/irbt_header.txt"
     );
 
