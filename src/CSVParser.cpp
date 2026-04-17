@@ -140,17 +140,17 @@ void CSVParser::parseDF1(var_columns_df& df1) {
                 bool flag_val = (!val.empty() && val != "0" && val != ".");
                 df1.in_flag[cm.index].i_flag.push_back(flag_val);
             } else if (cm.type == "Integer") {
-                int int_val = 0;
+                int int_val = -1;
                 if (!val.empty() && val != "." && val != " ") {
                     try { int_val = std::stoi(val); }
-                    catch (const std::exception&) { int_val = 0; }
+                    catch (const std::exception&) { int_val = -1; }
                 }
                 df1.in_int[cm.index].i_int.push_back(int_val);
             } else if (cm.type == "Float") {
-                half float_val = (half)0.0f;
+                half float_val = (half)-1.0f;
                 if (!val.empty() && val != "." && val != " ") {
                     try { float_val = (half)std::stof(val); }
-                    catch (const std::exception&) { float_val = (half)0.0f; }
+                    catch (const std::exception&) { float_val = (half)-1.0f; }
                 }
                 df1.in_float[cm.index].i_float.push_back(float_val);
             } else {
@@ -226,14 +226,14 @@ void CSVParser::parseDF2(alt_columns_df& df2) {
             const std::string& val = row[i];
 
             if (cm.type == "Float") {
-                half v = (half)0.0f;
+                half v = (half)-1.0f;
                 if (!val.empty() && val != ".") {
                     try { v = (half)std::stof(val); }
                     catch (const std::exception&) {}
                 }
                 df2.alt_float[cm.index].i_float.push_back(v);
             } else if (cm.type == "Integer") {
-                int v = 0;
+                int v = -1;
                 if (!val.empty() && val != ".") {
                     try { v = std::stoi(val); }
                     catch (const std::exception&) {}
@@ -356,14 +356,14 @@ void CSVParser::parseDF3(sample_columns_df& df3) {
                 }
                 df3.sample_GT[cm.index].GT.push_back(gt_code);
             } else if (cm.type == "Float") {
-                half v = (half)0.0f;
+                half v = (half)-1.0f;
                 if (!val.empty() && val != ".") {
                     try { v = (half)std::stof(val); }
                     catch (const std::exception&) {}
                 }
                 df3.samp_float[cm.index].i_float.push_back(v);
             } else if (cm.type == "Integer") {
-                int v = 0;
+                int v = -1;
                 if (!val.empty() && val != ".") {
                     try { v = std::stoi(val); }
                     catch (const std::exception&) {}
@@ -480,14 +480,14 @@ void CSVParser::parseDF4(alt_format_df& df4) {
                 }
                 df4.sample_GT.GT.push_back(gt_code);
             } else if (cm.type == "Float") {
-                half v = (half)0.0f;
+                half v = (half)-1.0f;
                 if (!val.empty() && val != ".") {
                     try { v = (half)std::stof(val); }
                     catch (const std::exception&) {}
                 }
                 df4.samp_float[cm.index].i_float.push_back(v);
             } else if (cm.type == "Integer") {
-                int v = 0;
+                int v = -1;
                 if (!val.empty() && val != ".") {
                     try { v = std::stoi(val); }
                     catch (const std::exception&) {}

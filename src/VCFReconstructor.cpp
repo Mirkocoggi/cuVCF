@@ -579,7 +579,8 @@ std::string VCFReconstructor::formatVariant(int index,
                             if (df4.samp_id[k] == static_cast<unsigned short>(i)) {
                                 for (size_t c = group_start; c < col; c++) {
                                     if (!field_val.empty()) field_val += ",";
-                                    field_val += std::to_string(df4.samp_int[c].i_int[k]);
+                                    int v = df4.samp_int[c].i_int[k];
+                                    field_val += (v != -1) ? std::to_string(v) : ".";
                                 }
                             }
                             k++;
@@ -605,7 +606,8 @@ std::string VCFReconstructor::formatVariant(int index,
                             if (df4.samp_id[k] == static_cast<unsigned short>(i)) {
                                 for (size_t c = group_start; c < col; c++) {
                                     if (!field_val.empty()) field_val += ",";
-                                    field_val += std::to_string((float)df4.samp_float[c].i_float[k]);
+                                    float v = (float)df4.samp_float[c].i_float[k];
+                                    field_val += (v != -1.0f) ? std::to_string(v) : ".";
                                 }
                             }
                             k++;
