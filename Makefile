@@ -4,7 +4,7 @@ CXXFLAGS = -std=c++17 -Wall -O2 -fopenmp
 INCLUDES = -Iinclude
 
 # File sorgenti
-SRCS = src/main.cpp src/CSVParser.cpp src/VCFReconstructor.cpp src/Utils.cpp
+SRCS = src/CPUVersion/main_cpu.cpp src/CPUVersion/CSVParser.cpp src/CPUVersion/VCFReconstructor.cpp src/Utils.cpp
 
 # Eseguibile finale
 TARGET = build/test_parser
