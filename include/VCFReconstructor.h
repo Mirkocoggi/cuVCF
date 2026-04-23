@@ -69,6 +69,10 @@ private:
     std::vector<std::string> ordered_samp_names;           ///< List of sample names, strictly ordered by their numerical IDs.
     std::map<std::string, std::string> format_numbers;     ///< Maps FORMAT field IDs to their Number attribute (e.g., "AD" -> "R").
 
+    std::map<char, std::string> inv_polyphen_map;          ///< Decodes compact polyphen char keys back to original strings.
+    std::map<char, std::string> inv_csq_map;               ///< Decodes compact csq char keys back to original strings.
+    std::map<char, std::string> inv_tsa_map;               ///< Decodes compact tsa char keys back to original strings.
+
     /**
      * @brief Holds the pre-computed start and end positions for a single thread's chunk.
      *

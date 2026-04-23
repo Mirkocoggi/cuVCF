@@ -1,5 +1,6 @@
 #include "VCFReconstructor.h"
 #include "Utils.h"
+#include "Maps.h"
 #include <fstream>
 #include <sstream>
 #include <iostream>
@@ -23,6 +24,15 @@ void VCFReconstructor::buildInverseMaps(const var_columns_df& df1) {
     }
     for (const auto& pair : df1.filter_map) {
         inv_filter_map[pair.second] = pair.first;
+    }
+    for (const auto& pair : polyphenCharMap) {
+        inv_polyphen_map[pair.second] = pair.first;
+    }
+    for (const auto& pair : csqCharMap) {
+        inv_csq_map[pair.second] = pair.first;
+    }
+    for (const auto& pair : tsaCharMap) {
+        inv_tsa_map[pair.second] = pair.first;
     }
 }
 
@@ -318,7 +328,8 @@ std::string VCFReconstructor::formatVariant(int index,
         int val = df1.in_int[col].i_int[index];
         if (val != -1) {
             if (!first_info) ss << ";";
-            ss << df1.in_int[col].name << "=" << val;
+            const std::string& name = df1.in_int[col].name;
+            ss << name << "=" << val;
             first_info = false;
         }
     }
@@ -338,7 +349,28 @@ std::string VCFReconstructor::formatVariant(int index,
         const std::string& val = df1.in_string[col].i_string[index];
         if (!val.empty() && val != "." && val != "\0") {
             if (!first_info) ss << ";";
-            ss << df1.in_string[col].name << "=" << val;
+            const std::string& name = df1.in_string[col].name;
+            if (name == "TSA") {
+                try {
+                    int code = std::stoi(val);
+                    auto it = inv_tsa_map.find(code);
+                    ss << name << "=" << (it != inv_tsa_map.end() ? it->second : val);
+                } catch (...) { ss << name << "=" << val; }
+            } else if (name == "PolyPhen") {
+                try {
+                    int code = std::stoi(val);
+                    auto it = inv_polyphen_map.find(code);
+                    ss << name << "=" << (it != inv_polyphen_map.end() ? it->second : val);
+                } catch (...) { ss << name << "=" << val; }
+            } else if (name == "CSQ") {
+                try {
+                    int code = std::stoi(val);
+                    auto it = inv_csq_map.find(code);
+                    ss << name << "=" << (it != inv_csq_map.end() ? it->second : val);
+                } catch (...) { ss << name << "=" << val; }
+            } else {
+                ss << name << "=" << val;
+            }
             first_info = false;
         }
     }
