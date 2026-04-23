@@ -492,6 +492,10 @@ std::string VCFReconstructor::formatVariant(int index,
                     continue;
                 }
                 sample_data = df3.getGTStringFromChar(gt_code);
+                if (sample_data == ".|." || sample_data == "./.") {
+                    ss << sample_data;
+                    continue;
+                }
             }
 
             // --- DF3 int fields ---

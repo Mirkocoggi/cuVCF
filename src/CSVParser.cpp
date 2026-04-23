@@ -42,6 +42,68 @@ void CSVParser::parseHeader() {
     }
 }
 
+// Parse maps file
+void CSVParser::parseMaps(const std::string& maps_path,
+                          var_columns_df& df1,
+                          sample_columns_df& df3,
+                          alt_format_df& df4) {
+    std::ifstream file(maps_path);
+    if (!file) throw std::runtime_error("Maps file not found: " + maps_path);
+
+    std::string line;
+    std::getline(file, line); // Salta l'header
+
+    while (std::getline(file, line)) {
+        // 1. Ignora righe vuote
+        if (line.empty()) continue;
+
+        // 2. Pulizia: Rimuovi eventuale '\r' finale tipico di Windows (CRLF)
+        if (line.back() == '\r') {
+            line.pop_back();
+        }
+
+        // 3. Estrazione ad alte performance senza allocare std::vector
+        size_t first_comma = line.find(',');
+        if (first_comma == std::string::npos) continue;
+
+        size_t second_comma = line.find(',', first_comma + 1);
+        if (second_comma == std::string::npos) continue;
+
+        std::string map_name = line.substr(0, first_comma);
+        std::string key      = line.substr(first_comma + 1, second_comma - first_comma - 1);
+        std::string val_str  = line.substr(second_comma + 1);
+
+        // 4. Sicurezza sulle conversioni per evitare crash
+        try {
+            int val = std::stoi(val_str);
+
+            if (map_name == "variantColumns.chrom_map") {
+                // NOTA: Uso di 'unsigned char' invece di 'char' per coprire i valori fino a 255 del CSV
+                df1.chrom_map[key] = static_cast<unsigned char>(val);
+            } 
+            else if (map_name == "variantColumns.filter_map") {
+                df1.filter_map[key] = static_cast<unsigned char>(val);
+            } 
+            else if (map_name == "sampleColumns.sampNames") {
+                df3.sampNames[key] = static_cast<unsigned short>(val);
+            } 
+            else if (map_name == "alternativesSample.sampNames") {
+                df4.sampNames[key] = static_cast<unsigned short>(val);
+            } 
+            else if (map_name == "sampleColumns.GTMap") {
+                df3.GTMap[key] = static_cast<unsigned char>(val); // Anche qui valori fino a 255
+            } 
+            else if (map_name == "variantColumns.info_map1") {
+                df1.info_map1[key] = val; // info_map1 va da 1 a 24 nel tuo dataset, ok intero
+            }
+        } catch (const std::exception& e) {
+            // Ignora o logga le righe malformate senza crashare il sistema
+            // std::cerr << "Attenzione: impossibile convertire la riga: " << line << "\n";
+            continue;
+        }
+    }
+}
+
 // Parse DF1: variant core + typed INFO fields
 void CSVParser::parseDF1(var_columns_df& df1) {
     std::ifstream file(df1_path);
@@ -54,8 +116,8 @@ void CSVParser::parseDF1(var_columns_df& df1) {
     // Build column mappings for dynamic fields (col 7+)
     std::vector<ColumnMapping> col_map;
     for (size_t i = 7; i < headers.size(); i++) {
-        std::string name = stripTypePrefix(headers[i]);         // "int_AD0" → "AD0" (nome nel container)
-        std::string baseName = stripTrailingDigits(name);        // "AD0" → "AD" (per lookup in field_types)
+        std::string name = stripTypePrefix(headers[i]);         // "int_AD0" → "AD0" (container name)
+        std::string baseName = stripTrailingDigits(name);        // "AD0" → "AD" (lookup in field_types)
 
         std::string type;
         if (field_types.count(baseName)) {
@@ -103,9 +165,6 @@ void CSVParser::parseDF1(var_columns_df& df1) {
 
         // CHROM: store as char via chrom_map
         std::string chrom_str = row[1];
-        if (df1.chrom_map.find(chrom_str) == df1.chrom_map.end()) {
-            df1.chrom_map[chrom_str] = static_cast<char>(df1.chrom_map.size());
-        }
         df1.chrom.push_back(df1.chrom_map[chrom_str]);
 
         df1.pos.push_back(std::stoul(row[2]));
@@ -126,10 +185,7 @@ void CSVParser::parseDF1(var_columns_df& df1) {
         // FILTER: store as char via filter_map
         std::string filter_str = row[6];
         if (filter_str.empty()) filter_str = ".";
-        if (df1.filter_map.find(filter_str) == df1.filter_map.end()) {
-            df1.filter_map[filter_str] = static_cast<char>(df1.filter_map.size());
-        }
-        df1.filter.push_back(df1.filter_map[filter_str]);
+        df1.filter.push_back(df1.filter_map.at(filter_str));
 
         // Route dynamic fields to typed vectors
         for (size_t i = 7; i < row.size(); i++) {
@@ -261,8 +317,6 @@ void CSVParser::parseDF3(sample_columns_df& df3) {
     // Determine data start (skip var_id, samp_id, sample_name)
     size_t data_start = (headers.size() > 2 && headers[2] == "sample_name") ? 3 : 2;
 
-    // Init GT map
-    df3.initMapGT();
     df3.numSample = 0;
 
     // Build column mappings
@@ -334,9 +388,6 @@ void CSVParser::parseDF3(sample_columns_df& df3) {
         // Collect sample names
         if (headers[2] == "sample_name") {
             std::string sname = row[2];
-            if (df3.sampNames.find(sname) == df3.sampNames.end()) {
-                df3.sampNames[sname] = current_samp_id;
-            }
         }
 
         if (current_samp_id >= df3.numSample) {
@@ -404,8 +455,6 @@ void CSVParser::parseDF4(alt_format_df& df4) {
         if (headers[i] == "alt_id")  alt_id_col = i;
     }
 
-    // Init GT map
-    df4.initMapGT();
 
     // Build column mappings
     std::vector<ColumnMapping> col_map;

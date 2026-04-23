@@ -36,6 +36,11 @@ public:
                  sample_columns_df& df3,
                  alt_format_df& df4);
 
+    void parseMaps(const std::string& maps_path,
+                   var_columns_df& df1,
+                   sample_columns_df& df3,
+                   alt_format_df& df4);
+
 private:
     std::string df1_path, df2_path, df3_path, df4_path, header_path;
 
