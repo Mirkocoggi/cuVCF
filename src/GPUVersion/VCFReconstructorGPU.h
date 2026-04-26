@@ -77,20 +77,26 @@ private:
     int num_alt_float_fields;
 
     void buildInverseMaps(const var_columns_df& df1);
+
     void allocateDevice(const var_columns_df& df1,
                         const alt_columns_df& df2,
                         int chunk_size,
                         int chunk_start,
                         int chunk_end,
                         int df2_start);
+
     void freeDevice();
+
     void hostToDevice(const var_columns_df& df1,
                       const alt_columns_df& df2,
                       int chunk_start,
                       int chunk_end,
                       int df2_start,
                       int df2_end);
+
     void writeChunk(int num_variants, std::ofstream& out);
+    
+    void run(const var_columns_df& df1, const alt_columns_df& df2);
 };
 
 #endif

@@ -436,6 +436,7 @@ __global__ void reconstructKernel(
     const char* id_data, const unsigned int* id_offsets,
     const char* ref_data, const unsigned int* ref_offsets,
     const __half* qual, const char* filter,
+    const unsigned int* var_number,
     // DF1 INFO
     const int* in_int, const __half* in_float, const uint8_t* in_flag,
     int num_int_fields, int num_float_fields, int num_flag_fields,
@@ -464,4 +465,154 @@ __global__ void reconstructKernel(
     //POS
     pos += device_itoa(positions[tid], line + pos);
     line[pos++] = '\t';
+
+    // ID
+    pos += device_strcpy(line + pos, id_data + id_offsets[tid]);
+    line[pos++] = '\t';
+
+    //REF
+    pos += device_strcpy(line + pos, ref_data + ref_offsets[tid]);
+    line[pos++] = '\t';
+
+    //ALT
+    bool first_alt = true;
+    for (int j = 0; j < num_alt_entries; j++){
+        if (alt_var_id[j] == var_number[tid]){
+            if (!first_alt){
+                line[pos++] = ',';
+            }
+            first_alt = false;
+            pos += device_strcpy(line + pos, alt_data + alt_offsets[j]);
+        }
+    }
+    line[pos++] = '\t';
+
+    //QUAL
+    float q = qual[tid];
+    pos += device_ftoa(q, line + pos);
+    line[pos++] = '\t';
+
+    //FILTER
+    unsigned char filter_code = filter[tid];
+    pos += device_strcpy(line + pos, filter_strings + filter_offsets[filter_code]);
+    line[pos++] = '\t';
+
+    //INFO
+    bool first_info = true;
+    
+    //Flag
+    for (int f = 0; f < num_flag_fields; f++){
+        if (in_flag[f * chunk_size + tid]){
+            if(!first_info){
+                line[pos++] = ';'
+            }
+            first_info = false;
+            pos += device_strcpy(line + pos, flag_names + f * MAX_NAME_LEN);
+        }
+    }
+
+    //Int
+    for (int f = 0; f < num_int_fields; f++){
+        if (in_int[f * chunk_size + tid] != -1){
+            if(!first_info){
+                line[pos++] = ';';
+            }
+            first_info = false;
+            pos += device_strcpy(line + pos, int_names + f * MAX_NAME_LEN);
+            line[pos++] = '=';
+            pos += device_itoa(in_int[f * chunk_size + tid], line + pos);
+        }
+    }
+
+    //Float
+    for (int f = 0; f < num_float_fields; f++){
+        if (__half2float(in_float[f * chunk_size + tid] != -1.0f){
+            if(!first_info){
+                line[pos++] = ';';
+            }
+            first_info = false;
+            pos += device_strcpy(line + pos, float_names + f * MAX_NAME_LEN);
+            line[pos++] = '=';
+            pos += device_ftoa(__half2float(in_float[f * chunk_size + tid]), line + pos);
+        }
+    }
+
+    if(first_info){
+        line[pos++] = '.';
+    }
+    line[pos++] = '\n';
+    line_lens[tid] = pos;
+}
+
+void VCFReconstructorGPU::writeChunk(int num_variants, std::ofstream& out){
+    char* h_output = new char[num_variants * MAX_LINE_LEN];
+    unsigned int* h_line_lens = new unsigned int[num_variants];
+
+    cudaMemcpy(h_output, d_output, num_variants * MAX_LINE_LEN * sizeof(char), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_line_lens, d_line_lens, num_variants * sizeof(unsigned int), cudaMemcpyDeviceToHost);
+
+    for (int i = 0; i < num_variants; i++){
+        out.write(h_output + i * MAX_LINE_LEN, h_line_lens[i]);
+    }
+
+    delete[] h_output;
+    delete[] h_line_lens;
+}
+
+void VCFReconstructorGPU::run(const var_columns_df& df1, const alt_columns_df& df2){
+    buildInverseMaps(df1);
+
+    std::ofstream vcf_file(output_vcf_path);
+    if (!vcf_file.is_open()) {
+        throw std::runtime_error("Error opening output VCF file: " + output_vcf_path);
+    }
+
+    vcf_file << header_text;
+
+    int df2_start = 0;
+    for (int chunk_start = 0; chunk_start < (int)df1.var_number.size(); chunk_start += CHUNK_SIZE){
+        int chunk_end = std::min(chunk_start + CHUNK_SIZE, (int)df1.var_number.size());
+        int chunk_size = chunk_end - chunk_start;
+
+        while(df2_start < (int)df2.var_id.size() && 
+                df2.var_id[df2_start] < df1.var_number[chunk_start]){
+            df2_start++;
+        }
+
+        allocateDevice(df1, df2, chunk_size, chunk_start, chunk_end, df2_start);
+        hostToDevice(df1, df2, chunk_size, chunk_start, chunk_end, df2_start);
+
+        int block_size = 256;
+        int num_blocks = (chunk_size + block_size -1) / block_size;
+        
+        int df2_count = 0;
+        for(size_t j = df2_start; j < df2.var_id.size() && (int)df2.var_id[j] < chunk_end; j++){
+            df2_count++;
+        }
+
+        reconstructKernel<<<num_blocks, block_size>>>(
+            d_chrom_strings, d_chrom_offsets,
+            d_filter_strings, d_filter_offsets,
+            d_chrom, d_pos,
+            d_id_data, d_id_offsets,
+            d_ref_data, d_ref_offsets,
+            d_qual, d_filter,
+            d_var_number,
+            d_in_int, d_in_float, d_in_flag,
+            num_int_fields, num_float_fields, num_flag_fields,
+            d_int_names, d_float_names, d_flag_names,
+            d_alt_var_id, d_alt_data, d_alt_offsets, df2_count,
+            d_alt_int, d_alt_float,
+            num_alt_int_fields, num_alt_float_fields,
+            d_alt_int_names, d_alt_float_names,
+            d_output, d_line_lens,
+            chunk_size, chunk_size
+        );
+
+        cudaDeviceSynchronize();
+        writeChunk(chunk_size, vcf_file);
+        freeDevice();
+    }
+
+    vcf_file.close();
 }
