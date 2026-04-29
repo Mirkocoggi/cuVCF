@@ -291,7 +291,7 @@ void VCFReconstructorGPU::hostToDevice(const var_columns_df& df1,
     // Build buffer host for id
     std::vector<char> alt_data_buffer;
     std::vector<unsigned int> alt_data_offsets(df2_count);
-    unsigned int offset = 0;
+    offset = 0;
 
     for (int i = df2_start; i < df2_start + df2_count; i++) {
         alt_data_offsets[i - df2_start] = offset;
@@ -377,7 +377,6 @@ __device__ int device_strcpy(char* dst, const char* src) {
    
 __device__ int device_itoa(int n, char* dst){
     char tmp[20];
-    bool negative = false;
     int dst_pos = 0;
     int tmp_len = 0;
 
@@ -390,7 +389,6 @@ __device__ int device_itoa(int n, char* dst){
         dst[0] = '-';
         n = -n;
         dst_pos = 1;
-        negative = true;
     }
 
     while(n>0){
@@ -504,7 +502,7 @@ __global__ void reconstructKernel(
     for (int f = 0; f < num_flag_fields; f++){
         if (in_flag[f * chunk_size + tid]){
             if(!first_info){
-                line[pos++] = ';'
+                line[pos++] = ';';
             }
             first_info = false;
             pos += device_strcpy(line + pos, flag_names + f * MAX_NAME_LEN);
@@ -526,7 +524,7 @@ __global__ void reconstructKernel(
 
     //Float
     for (int f = 0; f < num_float_fields; f++){
-        if (__half2float(in_float[f * chunk_size + tid] != -1.0f){
+        if (__half2float(in_float[f * chunk_size + tid]) != -1.0f){
             if(!first_info){
                 line[pos++] = ';';
             }
@@ -568,6 +566,7 @@ void VCFReconstructorGPU::run(const var_columns_df& df1, const alt_columns_df& d
     }
 
     vcf_file << header_text;
+    vcf_file << "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n";
 
     int df2_start = 0;
     for (int chunk_start = 0; chunk_start < (int)df1.var_number.size(); chunk_start += CHUNK_SIZE){

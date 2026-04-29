@@ -5,9 +5,9 @@
 #include <map>
 #include <vector>
 #include <fstream>
+#include "VCFDataFrames.h"
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
-#include "VCFDataFrames.h"
 
 #define MAX_LINE_LEN 1024
 #define MAX_NAME_LEN 16
@@ -96,7 +96,6 @@ private:
 
     void writeChunk(int num_variants, std::ofstream& out);
     
-    void run(const var_columns_df& df1, const alt_columns_df& df2);
 };
 
 #endif

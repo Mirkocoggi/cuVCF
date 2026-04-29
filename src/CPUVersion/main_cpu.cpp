@@ -18,11 +18,11 @@ int main() {
     // You will remove this parsing section during integration.
     // It is only here to populate the DataFrames for the standalone test.
     CSVParser parser(
-        "data/IRBT2/df1.csv",
-        "data/IRBT2/df2.csv",
-        "data/IRBT2/df3.csv",
-        "data/IRBT2/df4.csv",
-        "data/IRBT/irbt_header.txt"
+        "data/bos_taurus/df1.csv",
+        "data/bos_taurus/df2.csv",
+        "data/bos_taurus/df3.csv",
+        "data/bos_taurus/df4.csv",
+        "data/bos_taurus/bos_taurus_header.txt"
     );
 
     var_columns_df df1;
@@ -30,7 +30,7 @@ int main() {
     sample_columns_df df3;
     alt_format_df df4;
 
-    parser.parseMaps("data/IRBT/maps_used_IRBT.csv", df1, df3, df4);
+    parser.parseMaps("data/bos_taurus/maps_used_bos.csv", df1, df3, df4);
     parser.loadAll(df1, df2, df3, df4);
     
     // ==========================================

@@ -1,24 +1,39 @@
-# Compilatore e flag
-CXX = g++
+CXX      = g++
+NVCC     = nvcc
 CXXFLAGS = -std=c++17 -Wall -O2 -fopenmp
-INCLUDES = -Iinclude
+NVCCFLAGS= -std=c++17 -O2 -Xcompiler -fopenmp
+INCLUDES = -Iinclude -Isrc/CPUVersion -Isrc/GPUVersion
+BUILD    = build
 
-# File sorgenti
-SRCS = src/CPUVersion/main_cpu.cpp src/CPUVersion/CSVParser.cpp src/CPUVersion/VCFReconstructor.cpp src/Utils.cpp
+SRCS_CPU = src/CPUVersion/main_cpu.cpp \
+           src/CPUVersion/CSVParser.cpp \
+           src/CPUVersion/VCFReconstructor.cpp \
+           src/Utils.cpp
 
-# Eseguibile finale
-TARGET = build/test_parser
+SRCS_GPU = src/GPUVersion/main_gpu.cu \
+           src/GPUVersion/VCFReconstructorGPU.cu \
+           src/CPUVersion/CSVParser.cpp \
+           src/Utils.cpp
 
-# Regola di default quando scrivi solo "make"
-all: $(TARGET)
+TARGET_CPU = $(BUILD)/test_parser
+TARGET_GPU = $(BUILD)/test_parser_gpu
 
-# Come costruire l'eseguibile
-$(TARGET): $(SRCS)
-	@mkdir -p build
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SRCS) -o $(TARGET) -lImath
-	@echo "Compilazione completata! Eseguibile salvato in $(TARGET)"
+all: $(TARGET_CPU)
 
-# Regola per ripulire i file compilati (comando: make clean)
+cpu: $(TARGET_CPU)
+
+gpu: $(TARGET_GPU)
+
+$(TARGET_CPU): $(SRCS_CPU)
+	@mkdir -p $(BUILD)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SRCS_CPU) -o $(TARGET_CPU) -lImath
+	@echo "CPU build completata!"
+
+$(TARGET_GPU): $(SRCS_GPU)
+	@mkdir -p $(BUILD)
+	$(NVCC) $(NVCCFLAGS) $(INCLUDES) $(SRCS_GPU) -o $(TARGET_GPU) -lImath
+	@echo "GPU build completata!"
+
 clean:
-	rm -rf build/*
+	rm -rf $(BUILD)/*
 	@echo "Pulizia completata."
