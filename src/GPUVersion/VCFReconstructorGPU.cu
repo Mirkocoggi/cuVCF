@@ -585,7 +585,7 @@ void VCFReconstructorGPU::run(const var_columns_df& df1, const alt_columns_df& d
         cudaEventElapsedTime(&ms_h2d, start, stop);
 
         int block_size = 32;
-        int num_blocks = 256;
+        int num_blocks = (chunk_size + block_size - 1) / block_size;
 
         cudaEventRecord(start);
         reconstructKernel<<<num_blocks, block_size>>>(

@@ -12,7 +12,7 @@
 
 #define MAX_LINE_LEN 1024
 #define MAX_NAME_LEN 16
-#define CHUNK_SIZE   100000
+#define CHUNK_SIZE   10000
 
 class VCFReconstructorGPU {
 public:
