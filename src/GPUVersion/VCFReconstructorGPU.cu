@@ -27,6 +27,7 @@ void VCFReconstructorGPU::freeDevice(){
       safe_cuda_free(d_df1.chrom);
       safe_cuda_free(d_df1.pos);
       safe_cuda_free(d_df1.id_data);
+      safe_cuda_free(d_df1.id_offsets);
       safe_cuda_free(d_df1.ref_data);
       safe_cuda_free(d_df1.ref_offsets);
       safe_cuda_free(d_df1.qual);
@@ -141,13 +142,13 @@ void VCFReconstructorGPU::allocateDevice(const var_columns_df& df1,
     for (const auto& pair : inv_chrom_map)
         chrom_total_chars += pair.second.size() + 1;
     cudaMalloc((void**)&d_maps.chrom_strings, chrom_total_chars * sizeof(char));
-    cudaMalloc((void**)&d_maps.chrom_offsets, inv_chrom_map.size() * sizeof(unsigned int));
+    cudaMalloc((void**)&d_maps.chrom_offsets, 256 * sizeof(unsigned int));
 
     size_t filter_total_chars = 0;
     for (const auto& pair : inv_filter_map)
         filter_total_chars += pair.second.size() + 1;
     cudaMalloc((void**)&d_maps.filter_strings, filter_total_chars * sizeof(char));
-    cudaMalloc((void**)&d_maps.filter_offsets, inv_filter_map.size() * sizeof(unsigned int));
+    cudaMalloc((void**)&d_maps.filter_offsets, 256 * sizeof(unsigned int));
 }
 
 void VCFReconstructorGPU::hostToDevice(const var_columns_df& df1,
@@ -310,30 +311,40 @@ void VCFReconstructorGPU::hostToDevice(const var_columns_df& df1,
 
     // Inverse maps
     std::vector<char> chrom_strings_buffer;
-    std::vector<unsigned int> chrom_offsets_buffer;
+    std::vector<unsigned int> chrom_offsets_buffer(256,0);
     offset = 0;
     for (const auto& pair : inv_chrom_map) {
-        chrom_offsets_buffer.push_back(offset);
-        for (char c : pair.second)
-            chrom_strings_buffer.push_back(c);
-        chrom_strings_buffer.push_back('\0');
-        offset += pair.second.size() + 1;
+        int idx = static_cast<int>(pair.first); 
+        if (idx >= 0 && idx < 256) {
+            chrom_offsets_buffer[idx] = offset; 
+            
+            for (char c : pair.second) {
+                chrom_strings_buffer.push_back(c);
+            }
+            chrom_strings_buffer.push_back('\0');
+            offset += pair.second.size() + 1;
+        }
     }
     cudaMemcpy(d_maps.chrom_strings, chrom_strings_buffer.data(), chrom_strings_buffer.size() * sizeof(char), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_maps.chrom_offsets, chrom_offsets_buffer.data(), chrom_offsets_buffer.size() * sizeof(unsigned int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_maps.chrom_offsets, chrom_offsets_buffer.data(), 256 * sizeof(unsigned int), cudaMemcpyHostToDevice);
 
     std::vector<char> filter_strings_buffer;
-    std::vector<unsigned int> filter_offsets_buffer;
+    std::vector<unsigned int> filter_offsets_buffer(256,0);
     offset = 0;
     for (const auto& pair : inv_filter_map) {
-        filter_offsets_buffer.push_back(offset);
-        for (char c : pair.second)
-            filter_strings_buffer.push_back(c);
-        filter_strings_buffer.push_back('\0');
-        offset += pair.second.size() + 1;
+        int idx = static_cast<int>(pair.first);
+        if (idx >= 0 && idx < 256) {
+            filter_offsets_buffer[idx] = offset; 
+            
+            for (char c : pair.second) {
+                filter_strings_buffer.push_back(c);
+            }
+            filter_strings_buffer.push_back('\0');
+            offset += pair.second.size() + 1;
+        }
     }
     cudaMemcpy(d_maps.filter_strings, filter_strings_buffer.data(), filter_strings_buffer.size() * sizeof(char), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_maps.filter_offsets, filter_offsets_buffer.data(), filter_offsets_buffer.size() * sizeof(unsigned int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_maps.filter_offsets, filter_offsets_buffer.data(), 256 * sizeof(unsigned int), cudaMemcpyHostToDevice);
 }
 
 __device__ int device_strcpy(char* dst, const char* src) {
