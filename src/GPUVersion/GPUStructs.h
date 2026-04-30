@@ -57,4 +57,16 @@ struct DeviceAltColumns {
     int num_alt_float_fields = 0;
 };
 
+struct DeviceSampleColumns {
+    int num_samples = 0;
+
+    // Buffer packed con i sample pre-formattati
+    char*         sample_data    = nullptr;   // [total_chars]
+    unsigned int* sample_offsets = nullptr;   // [chunk_size * num_samples]
+
+    // FORMAT string (costante per dataset, "GT:AD:DP:GQ")
+    char* format_str    = nullptr;
+    int   format_str_len = 0;
+};
+
 #endif

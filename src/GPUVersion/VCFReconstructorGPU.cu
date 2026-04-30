@@ -2,6 +2,7 @@
 #include "CudaUtils.cuh"
 #include "Utils.h"
 #include "Maps.h"
+#include <sstream>
 
 VCFReconstructorGPU::VCFReconstructorGPU(const std::string& output_vcf_path,
                                          const std::string& header_text)
@@ -54,6 +55,9 @@ void VCFReconstructorGPU::freeDevice(){
       safe_cuda_free(d_maps.chrom_offsets);
       safe_cuda_free(d_maps.filter_strings);
       safe_cuda_free(d_maps.filter_offsets);
+    //DF3
+        safe_cuda_free(d_df3.sample_data);
+        safe_cuda_free(d_df3.sample_offsets);
 }
 
 VCFReconstructorGPU::~VCFReconstructorGPU() {
@@ -80,6 +84,7 @@ void VCFReconstructorGPU::buildInverseMaps(const var_columns_df& df1) {
 
 void VCFReconstructorGPU::allocateDevice(const var_columns_df& df1,
                                           const alt_columns_df& df2,
+                                          const sample_columns_df& df3,
                                           int chunk_size,
                                           int chunk_start,
                                           int chunk_end,
@@ -156,10 +161,21 @@ void VCFReconstructorGPU::allocateDevice(const var_columns_df& df1,
         filter_total_chars += pair.second.size() + 1;
     gpuErrchk( cudaMalloc((void**)&d_maps.filter_strings, filter_total_chars * sizeof(char)));
     gpuErrchk( cudaMalloc((void**)&d_maps.filter_offsets, 256 * sizeof(unsigned int)));
+
+    // Stima upper-bound: chunk_size * num_samples * MAX_SAMPLE_STRING_LEN
+    // MAX_SAMPLE_STRING_LEN dipende dal tuo dataset, sull'IRBT direi 256 byte abbondanti
+    size_t max_sample_chars = (size_t)chunk_size * df3.numSample * MAX_SAMPLE_STRING_LEN;
+
+    gpuErrchk( cudaMalloc(&d_df3.sample_data,    max_sample_chars * sizeof(char)));
+    gpuErrchk( cudaMalloc(&d_df3.sample_offsets, chunk_size * df3.numSample * sizeof(unsigned int)));
+    d_df3.num_samples = df3.numSample;
+
 }
 
 void VCFReconstructorGPU::hostToDevice(const var_columns_df& df1,
                                           const alt_columns_df& df2,
+                                          const sample_columns_df& df3,
+                                          const alt_format_df& df4,
                                           int chunk_size,
                                           int chunk_start,
                                           int chunk_end,
@@ -369,6 +385,21 @@ void VCFReconstructorGPU::hostToDevice(const var_columns_df& df1,
     }
     gpuErrchk( cudaMemcpy(d_maps.filter_strings, filter_strings_buffer.data(), filter_strings_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
     gpuErrchk( cudaMemcpy(d_maps.filter_offsets, filter_offsets_buffer.data(), 256 * sizeof(unsigned int), cudaMemcpyHostToDevice));
+
+    // Costruzione dei sample pre-formattati
+    std::vector<char> sample_buffer;
+    std::vector<unsigned int> sample_offsets;
+    buildSampleStrings(df1, df2, df3, df4,
+                    chunk_size, chunk_start, chunk_end, df2_start,
+                    sample_buffer, sample_offsets);
+
+    size_t max_chars = (size_t)chunk_size * df3.numSample * MAX_SAMPLE_STRING_LEN;
+    if (sample_buffer.size() > max_chars) {
+        throw std::runtime_error("sample_buffer overflow: aumentare MAX_SAMPLE_STRING_LEN");
+    }
+
+    gpuErrchk(cudaMemcpy(d_df3.sample_data, sample_buffer.data(), sample_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpy(d_df3.sample_offsets, sample_offsets.data(), sample_offsets.size() * sizeof(unsigned int), cudaMemcpyHostToDevice));
 }
 
 __device__ int device_strcpy(char* dst, const char* src) {
@@ -434,6 +465,7 @@ __global__ void reconstructKernel(
     DeviceMaps maps,
     DeviceVarColumns df1,
     DeviceAltColumns df2,
+    DeviceSampleColumns df3,
     char* output, unsigned int* line_lens,
     int chunk_size
 ){
@@ -525,6 +557,20 @@ __global__ void reconstructKernel(
         if(first_info){
             line[pos++] = '.';
         }
+
+        //FORMAT + SAMPLES
+        if (df3.num_samples > 0) {
+            line[pos++] = '\t';
+            pos += device_strcpy(line + pos, df3.format_str);
+
+            for (int s = 0; s < df3.num_samples; s++) {
+                line[pos++] = '\t';
+                int idx = i * df3.num_samples + s;
+                pos += device_strcpy(line + pos,
+                                    df3.sample_data + df3.sample_offsets[idx]);
+            }
+        }
+
         line[pos++] = '\n';
         line_lens[i] = pos;
     }
@@ -545,8 +591,14 @@ void VCFReconstructorGPU::writeChunk(int num_variants, std::ofstream& out){
     delete[] h_line_lens;
 }
 
-void VCFReconstructorGPU::run(const var_columns_df& df1, const alt_columns_df& df2){
+void VCFReconstructorGPU::run(const var_columns_df& df1,
+         const alt_columns_df& df2,
+         const sample_columns_df& df3,
+         const alt_format_df& df4){
+
     buildInverseMaps(df1);
+    buildSampleNames(df3);
+    format_numbers = parseFormatNumbers(header_text);
 
     std::ofstream vcf_file(output_vcf_path);
     if (!vcf_file.is_open()) {
@@ -554,11 +606,91 @@ void VCFReconstructorGPU::run(const var_columns_df& df1, const alt_columns_df& d
     }
 
     vcf_file << header_text;
-    vcf_file << "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n";
+    vcf_file << "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO";
+    if (df3.numSample > 0) {
+        vcf_file << "\tFORMAT";
+        for (const auto& name : ordered_samp_names) {
+            vcf_file << "\t" << name;
+        }
+    }
+    vcf_file << "\n";
 
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
+
+    //Costruzione Format string
+    gt_in_df3 = !df3.sample_GT.empty();
+    gt_in_df4 = !gt_in_df3 && !df4.sample_GT.GT.empty();
+    has_gt    = gt_in_df3 || gt_in_df4;
+
+    format_str = "";
+    if (df3.numSample > 0) {
+        if (has_gt) format_str = "GT";
+
+        // Group DF3 integer fields
+        // E.g., if we see AD0, AD1, we only append "AD" to the format string once
+        std::string prev_base = "";
+        for (size_t i = 0; i < df3.samp_int.size(); i++) {
+            std::string base = stripTrailingDigits(df3.samp_int[i].name);
+            if (base != prev_base) {
+                if (!format_str.empty()) format_str += ":";
+                format_str += base;
+                prev_base = base;
+            }
+        }
+
+        // Group DF3 float fields
+        prev_base = "";
+        for (size_t i = 0; i < df3.samp_float.size(); i++) {
+            std::string base = stripTrailingDigits(df3.samp_float[i].name);
+            if (base != prev_base) {
+                if (!format_str.empty()) format_str += ":";
+                format_str += base;
+                prev_base = base;
+            }
+        }
+
+        // DF3 string fields are usually singular (no grouping needed)
+        for (size_t i = 0; i < df3.samp_string.size(); i++) {
+            if (!format_str.empty()) format_str += ":";
+            format_str += df3.samp_string[i].name;
+        }
+
+        // Group DF4 integer fields (per-allele format fields)
+        prev_base = "";
+        for (size_t i = 0; i < df4.samp_int.size(); i++) {
+            std::string base = stripTrailingDigits(df4.samp_int[i].name);
+            if (base != prev_base) {
+                if (!format_str.empty()) format_str += ":";
+                format_str += base;
+                prev_base = base;
+            }
+        }
+
+        // Group DF4 float fields
+        prev_base = "";
+        for (size_t i = 0; i < df4.samp_float.size(); i++) {
+            std::string base = stripTrailingDigits(df4.samp_float[i].name);
+            if (base != prev_base) {
+                if (!format_str.empty()) format_str += ":";
+                format_str += base;
+                prev_base = base;
+            }
+        }
+
+        // DF4 string fields
+        for (size_t i = 0; i < df4.samp_string.size(); i++) {
+            if (!format_str.empty()) format_str += ":";
+            format_str += df4.samp_string[i].name;
+        }
+    }
+
+    gpuErrchk( cudaMalloc(&d_df3.format_str, (format_str.size() + 1) * sizeof(char)));
+    gpuErrchk( cudaMemcpy(d_df3.format_str, format_str.c_str(), format_str.size() + 1, cudaMemcpyHostToDevice));
+    d_df3.format_str_len = format_str.size();
+    d_df3.num_samples    = df3.numSample;
+
 
     int df2_start = 0;
     for (int chunk_start = 0; chunk_start < (int)df1.var_number.size(); chunk_start += CHUNK_SIZE){
@@ -573,13 +705,13 @@ void VCFReconstructorGPU::run(const var_columns_df& df1, const alt_columns_df& d
         float ms_alloc, ms_h2d, ms_kernel, ms_write, ms_free;
 
         cudaEventRecord(start);
-        allocateDevice(df1, df2, chunk_size, chunk_start, chunk_end, df2_start);
+        allocateDevice(df1, df2, df3, chunk_size, chunk_start, chunk_end, df2_start);
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&ms_alloc, start, stop);
 
         cudaEventRecord(start);
-        hostToDevice(df1, df2, chunk_size, chunk_start, chunk_end, df2_start);
+        hostToDevice(df1, df2, df3, df4, chunk_size, chunk_start, chunk_end, df2_start);
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&ms_h2d, start, stop);
@@ -592,6 +724,7 @@ void VCFReconstructorGPU::run(const var_columns_df& df1, const alt_columns_df& d
             d_maps,
             d_df1,
             d_df2,
+            d_df3,
             d_output,
             d_line_lens,
             chunk_size
@@ -619,8 +752,289 @@ void VCFReconstructorGPU::run(const var_columns_df& df1, const alt_columns_df& d
                ms_alloc, ms_h2d, ms_kernel, ms_write, ms_free);
     }
 
+    safe_cuda_free(d_df3.format_str);
+
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
 
     vcf_file.close();
+}
+
+void VCFReconstructorGPU::buildSampleNames(const sample_columns_df& df3) {
+    ordered_samp_names.resize(df3.sampNames.size());
+    for (const auto& pair : df3.sampNames) {
+        ordered_samp_names[pair.second] = pair.first;
+    }
+}
+
+std::map<std::string, std::string> VCFReconstructorGPU::parseFormatNumbers(const std::string& header_text) {
+    std::map<std::string, std::string> result;
+    std::istringstream stream(header_text);
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (line.substr(0, 8) != "##FORMAT") continue;
+        size_t id_pos  = line.find("ID=");
+        size_t num_pos = line.find("Number=");
+        if (id_pos == std::string::npos || num_pos == std::string::npos) continue;
+        size_t id_start = id_pos + 3;
+        size_t id_end   = line.find_first_of(",", id_start);
+        std::string id  = line.substr(id_start, id_end - id_start);
+        size_t num_start = num_pos + 7;
+        size_t num_end   = line.find_first_of(",", num_start);
+        std::string number = line.substr(num_start, num_end - num_start);
+        result[id] = number;
+    }
+    return result;
+}
+
+void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
+                                             const alt_columns_df& df2,
+                                             const sample_columns_df& df3,
+                                             const alt_format_df& df4,
+                                             int chunk_size,
+                                             int chunk_start,
+                                             int chunk_end,
+                                             int df2_start,
+                                             std::vector<char>& buffer,
+                                             std::vector<unsigned int>& offsets) {
+    int num_samples = df3.numSample;
+    offsets.resize(chunk_size * num_samples);
+    buffer.clear();
+    buffer.reserve((size_t)chunk_size * num_samples * 64); // hint iniziale
+
+    // Cursore DF4 sequenziale sul chunk
+    size_t df4_cursor = 0;
+    while (df4_cursor < df4.var_id.size() &&
+           df4.var_id[df4_cursor] < df1.var_number[chunk_start]) {
+        df4_cursor++;
+    }
+    // Nota: invece di una variabile membro, ti conviene passare il var_number dell'inizio
+    // chunk come parametro, oppure ricalcolare dal df1 (vedi sotto).
+
+    for (int i = chunk_start; i < chunk_end; i++) {
+        unsigned int current_var_id = df1.var_number[i]; // <-- vedi sotto
+
+        size_t df2_cursor = (size_t)df2_start;  // o passalo in modo pulito
+        while (df2_cursor < df2.var_id.size() && df2.var_id[df2_cursor] < current_var_id) {
+            df2_cursor++;
+        }
+        size_t num_alts = 0;
+        {
+            size_t j = df2_cursor;
+            while (j < df2.var_id.size() && df2.var_id[j] == current_var_id) {
+                num_alts++;
+                j++;
+            }
+        }
+
+        // Avanza df4_cursor fino al primo record con var_id == current_var_id
+        while (df4_cursor < df4.var_id.size() &&
+               df4.var_id[df4_cursor] < current_var_id) {
+            df4_cursor++;
+        }
+        int start_df4 = (df4_cursor < df4.var_id.size() &&
+                         df4.var_id[df4_cursor] == current_var_id)
+                        ? (int)df4_cursor : -1;
+
+        for (int s = 0; s < num_samples; s++) {
+            size_t df3_idx = (size_t)i * num_samples + s;
+            std::string sample_data;
+
+            // ---------- GT ----------
+            if (has_gt) {
+                char gt_code = -1;
+                if (gt_in_df3) {
+                    gt_code = df3.sample_GT[0].GT[df3_idx];
+                } else if (gt_in_df4 && start_df4 != -1) {
+                    size_t k = (size_t)start_df4;
+                    while (k < df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                        if (df4.samp_id[k] == (unsigned short)s) {
+                            gt_code = df4.sample_GT.GT[k];
+                            break;
+                        }
+                        k++;
+                    }
+                }
+                if (gt_code == -1) {
+                    sample_data = ".|.";
+                } else {
+                    sample_data = df3.getGTStringFromChar(gt_code);
+                }
+            }
+
+            // ---------- DF3 int (raggruppati) ----------
+            {
+                size_t col = 0;
+                while (col < df3.samp_int.size()) {
+                    std::string base = stripTrailingDigits(df3.samp_int[col].name);
+                    if (!sample_data.empty()) sample_data += ":";
+
+                    size_t group_end = col;
+                    while (group_end < df3.samp_int.size() &&
+                           stripTrailingDigits(df3.samp_int[group_end].name) == base) {
+                        group_end++;
+                    }
+                    size_t group_size = group_end - col;
+
+                    size_t limit;
+                    if (group_size > 1) {
+                        std::string num = format_numbers.count(base) ? format_numbers[base] : "R";
+                        size_t real = (num == "A") ? num_alts : num_alts + 1;
+                        limit = std::min(group_size, real);
+                    } else {
+                        limit = 1;
+                    }
+
+                    std::string group_val;
+                    size_t printed = 0;
+                    while (col < df3.samp_int.size() &&
+                           stripTrailingDigits(df3.samp_int[col].name) == base) {
+                        if (printed < limit) {
+                            int v = df3.samp_int[col].i_int[df3_idx];
+                            if (v != -1) {
+                                if (!group_val.empty()) group_val += ",";
+                                group_val += std::to_string(v);
+                            }
+                            printed++;
+                        }
+                        col++;
+                    }
+                    sample_data += group_val.empty() ? "." : group_val;
+                }
+            }
+
+            // ---------- DF3 float (raggruppati) ----------
+            {
+                size_t col = 0;
+                while (col < df3.samp_float.size()) {
+                    std::string base = stripTrailingDigits(df3.samp_float[col].name);
+                    if (!sample_data.empty()) sample_data += ":";
+
+                    size_t group_end = col;
+                    while (group_end < df3.samp_float.size() &&
+                           stripTrailingDigits(df3.samp_float[group_end].name) == base) {
+                        group_end++;
+                    }
+                    size_t group_size = group_end - col;
+
+                    size_t limit;
+                    if (group_size > 1) {
+                        std::string num = format_numbers.count(base) ? format_numbers[base] : "R";
+                        size_t real = (num == "A") ? num_alts : num_alts + 1;
+                        limit = std::min(group_size, real);
+                    } else {
+                        limit = 1;
+                    }
+
+                    std::string group_val;
+                    size_t printed = 0;
+                    while (col < df3.samp_float.size() &&
+                           stripTrailingDigits(df3.samp_float[col].name) == base) {
+                        if (printed < limit) {
+                            float v = (float)df3.samp_float[col].i_float[df3_idx];
+                            if (v != -1.0f) {
+                                if (!group_val.empty()) group_val += ",";
+                                group_val += std::to_string(v);
+                            }
+                            printed++;
+                        }
+                        col++;
+                    }
+                    sample_data += group_val.empty() ? "." : group_val;
+                }
+            }
+
+            // ---------- DF3 string ----------
+            for (size_t col = 0; col < df3.samp_string.size(); col++) {
+                if (!sample_data.empty()) sample_data += ":";
+                sample_data += df3.samp_string[col].i_string[df3_idx];
+            }
+
+            // ---------- DF4 (raggruppati int/float, poi string) ----------
+            if (start_df4 != -1) {
+                // int
+                size_t col = 0;
+                while (col < df4.samp_int.size()) {
+                    std::string base = stripTrailingDigits(df4.samp_int[col].name);
+                    std::string field_val;
+
+                    size_t group_start = col;
+                    while (col < df4.samp_int.size() &&
+                           stripTrailingDigits(df4.samp_int[col].name) == base) {
+                        col++;
+                    }
+                    size_t k = (size_t)start_df4;
+                    while (k < df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                        if (df4.samp_id[k] == (unsigned short)s) {
+                            for (size_t c = group_start; c < col; c++) {
+                                if (!field_val.empty()) field_val += ",";
+                                int v = df4.samp_int[c].i_int[k];
+                                field_val += (v != -1) ? std::to_string(v) : ".";
+                            }
+                        }
+                        k++;
+                    }
+                    sample_data += ":";
+                    sample_data += field_val.empty() ? "." : field_val;
+                }
+
+                // float
+                col = 0;
+                while (col < df4.samp_float.size()) {
+                    std::string base = stripTrailingDigits(df4.samp_float[col].name);
+                    std::string field_val;
+
+                    size_t group_start = col;
+                    while (col < df4.samp_float.size() &&
+                           stripTrailingDigits(df4.samp_float[col].name) == base) {
+                        col++;
+                    }
+                    size_t k = (size_t)start_df4;
+                    while (k < df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                        if (df4.samp_id[k] == (unsigned short)s) {
+                            for (size_t c = group_start; c < col; c++) {
+                                if (!field_val.empty()) field_val += ",";
+                                float v = (float)df4.samp_float[c].i_float[k];
+                                field_val += (v != -1.0f) ? std::to_string(v) : ".";
+                            }
+                        }
+                        k++;
+                    }
+                    sample_data += ":";
+                    sample_data += field_val.empty() ? "." : field_val;
+                }
+
+                // string
+                for (size_t cc = 0; cc < df4.samp_string.size(); cc++) {
+                    std::string field_val;
+                    size_t k = (size_t)start_df4;
+                    while (k < df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                        if (df4.samp_id[k] == (unsigned short)s) {
+                            if (!field_val.empty()) field_val += ",";
+                            field_val += df4.samp_string[cc].i_string[k];
+                        }
+                        k++;
+                    }
+                    sample_data += ":";
+                    sample_data += field_val.empty() ? "." : field_val;
+                }
+            }
+
+            // ---------- Pulizia finali vuoti (VCF Spec) ----------
+            // Rimuove tutti i ":." finali finché ce ne sono
+            while (sample_data.size() >= 2 && sample_data.substr(sample_data.size() - 2) == ":.") {
+                sample_data.erase(sample_data.size() - 2);
+            }
+            // Rimuove un eventuale ":" finale rimasto appeso
+            if (!sample_data.empty() && sample_data.back() == ':') {
+                sample_data.pop_back();
+            }
+
+            // ---------- Append nel buffer ----------
+            size_t out_idx = (size_t)(i - chunk_start) * num_samples + s;
+            offsets[out_idx] = (unsigned int)buffer.size();
+            buffer.insert(buffer.end(), sample_data.begin(), sample_data.end());
+            buffer.push_back('\0');
+        }
+    }
 }

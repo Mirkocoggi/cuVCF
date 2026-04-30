@@ -25,7 +25,7 @@ int main() {
     VCFReconstructorGPU reconstructor("build/output_gpu.vcf", parser.header_text);
 
     try {
-        reconstructor.run(df1, df2);
+        reconstructor.run(df1, df2, df3, df4);
     } catch (const std::exception& e) {
         std::cerr << "Reconstruction Error: " << e.what() << std::endl;
         return 1;
