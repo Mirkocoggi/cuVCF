@@ -43,6 +43,8 @@ struct DeviceAltColumns {
     unsigned int* var_id = nullptr;
     char*         alt_data = nullptr;
     unsigned int* alt_offsets = nullptr;
+    unsigned int* alt_start = nullptr;
+    unsigned int* alt_count = nullptr;
 
     int*          alt_int = nullptr;
     __half*       alt_float = nullptr;

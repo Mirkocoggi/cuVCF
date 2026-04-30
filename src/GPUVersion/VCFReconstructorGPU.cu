@@ -43,6 +43,8 @@ void VCFReconstructorGPU::freeDevice(){
       safe_cuda_free(d_df2.var_id);
       safe_cuda_free(d_df2.alt_data);
       safe_cuda_free(d_df2.alt_offsets);
+      safe_cuda_free(d_df2.alt_start);
+      safe_cuda_free(d_df2.alt_count);
       safe_cuda_free(d_df2.alt_int);
       safe_cuda_free(d_df2.alt_float);
       safe_cuda_free(d_df2.alt_int_names);
@@ -133,6 +135,10 @@ void VCFReconstructorGPU::allocateDevice(const var_columns_df& df1,
     gpuErrchk( cudaMalloc((void**)&d_df2.var_id,       df2_count * sizeof(unsigned int)));
     gpuErrchk( cudaMalloc((void**)&d_df2.alt_data,         alt_total_chars * sizeof(char)));
     gpuErrchk( cudaMalloc((void**)&d_df2.alt_offsets,      df2_count * sizeof(unsigned int)));
+
+    gpuErrchk(cudaMalloc((void**)&d_df2.alt_start, chunk_size * sizeof(unsigned int)));
+    gpuErrchk(cudaMalloc((void**)&d_df2.alt_count, chunk_size * sizeof(unsigned int)));
+
     gpuErrchk( cudaMalloc((void**)&d_df2.alt_int,          d_df2.num_alt_int_fields   * df2_count * sizeof(int)));
     gpuErrchk( cudaMalloc((void**)&d_df2.alt_float,        d_df2.num_alt_float_fields * df2_count * sizeof(__half)));
     gpuErrchk( cudaMalloc((void**)&d_df2.alt_int_names,    d_df2.num_alt_int_fields   * MAX_NAME_LEN * sizeof(char)));
@@ -278,6 +284,23 @@ void VCFReconstructorGPU::hostToDevice(const var_columns_df& df1,
     gpuErrchk( cudaMemcpy(d_df2.alt_data, alt_data_buffer.data(), alt_data_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
     gpuErrchk( cudaMemcpy(d_df2.alt_offsets, alt_data_offsets.data(), d_df2.num_entries * sizeof(unsigned int), cudaMemcpyHostToDevice));
 
+    std::vector<unsigned int> alt_start_buf(chunk_size, 0);
+    std::vector<unsigned int> alt_count_buf(chunk_size, 0);
+
+    int j = df2_start;
+    for (int i = 0; i < chunk_size; i++) {
+        unsigned int var_num = df1.var_number[chunk_start + i];
+        alt_start_buf[i] = j - df2_start;
+        while (j < df2_start + df2_count && df2.var_id[j] == var_num) {
+            j++;
+        }
+        alt_count_buf[i] = (j - df2_start) - alt_start_buf[i];
+    }
+
+    gpuErrchk(cudaMemcpy(d_df2.alt_start, alt_start_buf.data(), chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpy(d_df2.alt_count, alt_count_buf.data(), chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
+
+
     std::vector<int> alt_int_buffer(d_df2.num_alt_int_fields * df2_count);
     for (int f = 0; f < d_df2.num_alt_int_fields; f++) {
         for (int i = df2_start; i < df2_start + d_df2.num_entries; i++) {
@@ -415,96 +438,96 @@ __global__ void reconstructKernel(
     int chunk_size
 ){
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    if (tid >= chunk_size) return;
+    int stride = blockDim.x * gridDim.x;
 
-    char* line = output + tid * MAX_LINE_LEN;
-    int pos = 0;
+    for (int i = tid; i < chunk_size; i += stride){
+        char* line = output + i * MAX_LINE_LEN;
+        int pos = 0;
 
-    //CHROM
-    unsigned char chrom_code = df1.chrom[tid];
-    pos += device_strcpy(line + pos, maps.chrom_strings + maps.chrom_offsets[chrom_code]);
-    line[pos++] = '\t';
+        //CHROM
+        unsigned char chrom_code = df1.chrom[i];
+        pos += device_strcpy(line + pos, maps.chrom_strings + maps.chrom_offsets[chrom_code]);
+        line[pos++] = '\t';
 
-    //POS
-    pos += device_itoa(df1.pos[tid], line + pos);
-    line[pos++] = '\t';
+        //POS
+        pos += device_itoa(df1.pos[i], line + pos);
+        line[pos++] = '\t';
 
-    // ID
-    pos += device_strcpy(line + pos, df1.id_data + df1.id_offsets[tid]);
-    line[pos++] = '\t';
+        // ID
+        pos += device_strcpy(line + pos, df1.id_data + df1.id_offsets[i]);
+        line[pos++] = '\t';
 
-    //REF
-    pos += device_strcpy(line + pos, df1.ref_data + df1.ref_offsets[tid]);
-    line[pos++] = '\t';
+        //REF
+        pos += device_strcpy(line + pos, df1.ref_data + df1.ref_offsets[i]);
+        line[pos++] = '\t';
 
-    //ALT
-    bool first_alt = true;
-    for (int j = 0; j < df2.num_entries; j++){
-        if (df2.var_id[j] == df1.var_number[tid]){
-            if (!first_alt){
-                line[pos++] = ',';
-            }
+        //ALT
+        int alt_begin = df2.alt_start[i];
+        int alt_end   = alt_begin + df2.alt_count[i];
+        bool first_alt = true;
+        for (int j = alt_begin; j < alt_end; j++){
+            if (!first_alt) line[pos++] = ',';
             first_alt = false;
             pos += device_strcpy(line + pos, df2.alt_data + df2.alt_offsets[j]);
         }
-    }
-    line[pos++] = '\t';
+        line[pos++] = '\t';
 
-    //QUAL
-    float q = df1.qual[tid];
-    pos += device_ftoa(q, line + pos);
-    line[pos++] = '\t';
+        //QUAL
+        float q = df1.qual[i];
+        pos += device_ftoa(q, line + pos);
+        line[pos++] = '\t';
 
-    //FILTER
-    unsigned char filter_code = df1.filter[tid];
-    pos += device_strcpy(line + pos, maps.filter_strings + maps.filter_offsets[filter_code]);
-    line[pos++] = '\t';
+        //FILTER
+        unsigned char filter_code = df1.filter[i];
+        pos += device_strcpy(line + pos, maps.filter_strings + maps.filter_offsets[filter_code]);
+        line[pos++] = '\t';
 
-    //INFO
-    bool first_info = true;
-    
-    //Flag
-    for (int f = 0; f < df1.num_flag_fields; f++){
-        if (df1.in_flag[f * chunk_size + tid]){
-            if(!first_info){
-                line[pos++] = ';';
+        //INFO
+        bool first_info = true;
+        
+        //Flag
+        for (int f = 0; f < df1.num_flag_fields; f++){
+            if (df1.in_flag[f * chunk_size + i]){
+                if(!first_info){
+                    line[pos++] = ';';
+                }
+                first_info = false;
+                pos += device_strcpy(line + pos, df1.flag_names + f * MAX_NAME_LEN);
             }
-            first_info = false;
-            pos += device_strcpy(line + pos, df1.flag_names + f * MAX_NAME_LEN);
         }
-    }
 
-    //Int
-    for (int f = 0; f < df1.num_int_fields; f++){
-        if (df1.in_int[f * chunk_size + tid] != -1){
-            if(!first_info){
-                line[pos++] = ';';
+        //Int
+        for (int f = 0; f < df1.num_int_fields; f++){
+            if (df1.in_int[f * chunk_size + i] != -1){
+                if(!first_info){
+                    line[pos++] = ';';
+                }
+                first_info = false;
+                pos += device_strcpy(line + pos, df1.int_names + f * MAX_NAME_LEN);
+                line[pos++] = '=';
+                pos += device_itoa(df1.in_int[f * chunk_size + i], line + pos);
             }
-            first_info = false;
-            pos += device_strcpy(line + pos, df1.int_names + f * MAX_NAME_LEN);
-            line[pos++] = '=';
-            pos += device_itoa(df1.in_int[f * chunk_size + tid], line + pos);
         }
-    }
 
-    //Float
-    for (int f = 0; f < df1.num_float_fields; f++){
-        if (__half2float(df1.in_float[f * chunk_size + tid]) != -1.0f){
-            if(!first_info){
-                line[pos++] = ';';
+        //Float
+        for (int f = 0; f < df1.num_float_fields; f++){
+            if (__half2float(df1.in_float[f * chunk_size + i]) != -1.0f){
+                if(!first_info){
+                    line[pos++] = ';';
+                }
+                first_info = false;
+                pos += device_strcpy(line + pos, df1.float_names + f * MAX_NAME_LEN);
+                line[pos++] = '=';
+                pos += device_ftoa(__half2float(df1.in_float[f * chunk_size + i]), line + pos);
             }
-            first_info = false;
-            pos += device_strcpy(line + pos, df1.float_names + f * MAX_NAME_LEN);
-            line[pos++] = '=';
-            pos += device_ftoa(__half2float(df1.in_float[f * chunk_size + tid]), line + pos);
         }
-    }
 
-    if(first_info){
-        line[pos++] = '.';
+        if(first_info){
+            line[pos++] = '.';
+        }
+        line[pos++] = '\n';
+        line_lens[i] = pos;
     }
-    line[pos++] = '\n';
-    line_lens[tid] = pos;
 }
 
 void VCFReconstructorGPU::writeChunk(int num_variants, std::ofstream& out){
@@ -533,6 +556,10 @@ void VCFReconstructorGPU::run(const var_columns_df& df1, const alt_columns_df& d
     vcf_file << header_text;
     vcf_file << "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n";
 
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
     int df2_start = 0;
     for (int chunk_start = 0; chunk_start < (int)df1.var_number.size(); chunk_start += CHUNK_SIZE){
         int chunk_end = std::min(chunk_start + CHUNK_SIZE, (int)df1.var_number.size());
@@ -543,17 +570,24 @@ void VCFReconstructorGPU::run(const var_columns_df& df1, const alt_columns_df& d
             df2_start++;
         }
 
+        float ms_alloc, ms_h2d, ms_kernel, ms_write, ms_free;
+
+        cudaEventRecord(start);
         allocateDevice(df1, df2, chunk_size, chunk_start, chunk_end, df2_start);
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&ms_alloc, start, stop);
+
+        cudaEventRecord(start);
         hostToDevice(df1, df2, chunk_size, chunk_start, chunk_end, df2_start);
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&ms_h2d, start, stop);
 
-        int block_size = 256;
-        int num_blocks = (chunk_size + block_size -1) / block_size;
-        
-        int df2_count = 0;
-        for(size_t j = df2_start; j < df2.var_id.size() && (int)df2.var_id[j] < chunk_end; j++){
-            df2_count++;
-        }
+        int block_size = 32;
+        int num_blocks = 256;
 
+        cudaEventRecord(start);
         reconstructKernel<<<num_blocks, block_size>>>(
             d_maps,
             d_df1,
@@ -562,14 +596,31 @@ void VCFReconstructorGPU::run(const var_columns_df& df1, const alt_columns_df& d
             d_line_lens,
             chunk_size
         );
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&ms_kernel, start, stop);
 
-        gpuErrchk( cudaPeekAtLastError() );
+        gpuErrchk(cudaPeekAtLastError());
+        gpuErrchk(cudaDeviceSynchronize());
 
-        gpuErrchk( cudaDeviceSynchronize() );
-
+        cudaEventRecord(start);
         writeChunk(chunk_size, vcf_file);
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&ms_write, start, stop);
+
+        cudaEventRecord(start);
         freeDevice();
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&ms_free, start, stop);
+
+        printf("alloc: %.2f | h2d: %.2f | kernel: %.2f | write: %.2f | free: %.2f\n",
+               ms_alloc, ms_h2d, ms_kernel, ms_write, ms_free);
     }
+
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
 
     vcf_file.close();
 }
