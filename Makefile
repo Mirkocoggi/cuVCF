@@ -1,7 +1,11 @@
 CXX      = g++
 NVCC     = nvcc
+
+# Imath flag potrebbe essere necessario includerlo nei path
+# Se Imath e' installato globalmente, -lImath basta.
 CXXFLAGS = -std=c++17 -Wall -O2 -fopenmp
-NVCCFLAGS= -std=c++17 -O2 -Xcompiler -fopenmp
+# Aggiunto -arch=native per assicurare il supporto a __half sulla tua GPU
+NVCCFLAGS= -std=c++17 -O2 -Xcompiler -fopenmp -arch=native 
 INCLUDES = -Iinclude -Isrc/CPUVersion -Isrc/GPUVersion
 BUILD    = build
 
@@ -18,7 +22,7 @@ SRCS_GPU = src/GPUVersion/main_gpu.cu \
 TARGET_CPU = $(BUILD)/test_parser
 TARGET_GPU = $(BUILD)/test_parser_gpu
 
-all: $(TARGET_CPU)
+all: $(TARGET_CPU) $(TARGET_GPU)
 
 cpu: $(TARGET_CPU)
 
