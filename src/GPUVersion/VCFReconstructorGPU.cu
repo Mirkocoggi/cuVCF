@@ -172,234 +172,180 @@ void VCFReconstructorGPU::allocateDevice(const var_columns_df& df1,
 
 }
 
-void VCFReconstructorGPU::hostToDevice(const var_columns_df& df1,
-                                          const alt_columns_df& df2,
-                                          const sample_columns_df& df3,
-                                          const alt_format_df& df4,
-                                          int chunk_size,
-                                          int chunk_start,
-                                          int chunk_end,
-                                          int df2_start) {
-    // DF1 scalar
-    gpuErrchk( cudaMemcpy(d_df1.var_number, df1.var_number.data() + chunk_start, chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
-    gpuErrchk( cudaMemcpy(d_df1.chrom,      df1.chrom.data()      + chunk_start, chunk_size * sizeof(char),     cudaMemcpyHostToDevice));
-    gpuErrchk( cudaMemcpy(d_df1.pos,        df1.pos.data()        + chunk_start, chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
-    gpuErrchk( cudaMemcpy(d_df1.qual,       df1.qual.data()       + chunk_start, chunk_size * sizeof(__half),   cudaMemcpyHostToDevice));
-    gpuErrchk( cudaMemcpy(d_df1.filter,     df1.filter.data()     + chunk_start, chunk_size * sizeof(char),     cudaMemcpyHostToDevice));
+void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
+                                              const alt_columns_df& df2,
+                                              const sample_columns_df& df3,
+                                              const alt_format_df& df4,
+                                              HostBuffers& buffers) {
+    int chunk_size  = buffers.chunk_size;
+    int chunk_start = buffers.chunk_start;
+    int chunk_end   = buffers.chunk_end;
+    int df2_start   = buffers.df2_start;
 
-    // Build buffer host for id
-    std::vector<char> id_buffer;
-    std::vector<unsigned int> id_offsets(chunk_size);
-    unsigned int offset = 0;
-
-    for (int i = chunk_start; i < chunk_end; i++) {
-        id_offsets[i - chunk_start] = offset;
-        // copy the characters of the string into the buffer
-        for (char c : df1.id[i]) {
-            id_buffer.push_back(c);
+    // DF1 id
+    buffers.id_buffer.clear();
+    buffers.id_offsets.resize(chunk_size);
+    {
+        unsigned int offset = 0;
+        for (int i = chunk_start; i < chunk_end; i++) {
+            buffers.id_offsets[i - chunk_start] = offset;
+            for (char c : df1.id[i]) buffers.id_buffer.push_back(c);
+            buffers.id_buffer.push_back('\0');
+            offset += df1.id[i].size() + 1;
         }
-        id_buffer.push_back('\0');  // terminator
-        offset += df1.id[i].size() + 1;
     }
 
-    // Now copy to GPU
-    gpuErrchk( cudaMemcpy(d_df1.id_data,    id_buffer.data(),  id_buffer.size() * sizeof(char),         cudaMemcpyHostToDevice));
-    gpuErrchk( cudaMemcpy(d_df1.id_offsets, id_offsets.data(), chunk_size       * sizeof(unsigned int),  cudaMemcpyHostToDevice));
-
-    // Build buffer host for ref
-    std::vector<char> ref_buffer;
-    std::vector<unsigned int> ref_offsets(chunk_size);
-    offset = 0;
-    // copy the characters of the string into the buffer
-    for (int i = chunk_start; i < chunk_end; i++){
-        ref_offsets[i - chunk_start] = offset;
-
-        for (char c: df1.ref[i]){
-            ref_buffer.push_back(c);
+    // DF1 ref
+    buffers.ref_buffer.clear();
+    buffers.ref_offsets.resize(chunk_size);
+    {
+        unsigned int offset = 0;
+        for (int i = chunk_start; i < chunk_end; i++) {
+            buffers.ref_offsets[i - chunk_start] = offset;
+            for (char c : df1.ref[i]) buffers.ref_buffer.push_back(c);
+            buffers.ref_buffer.push_back('\0');
+            offset += df1.ref[i].size() + 1;
         }
-        ref_buffer.push_back('\0'); // terminator
-        offset += df1.ref[i].size() + 1;
     }
 
-    // Now copy to GPU
-    gpuErrchk( cudaMemcpy(d_df1.ref_data, ref_buffer.data(), ref_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
-    gpuErrchk( cudaMemcpy(d_df1.ref_offsets, ref_offsets.data(), chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
-
-
-    // DF1 INFO fields
-    std::vector<int> in_int_buffer(d_df1.num_int_fields * chunk_size);
+    // DF1 INFO int
+    buffers.in_int_buffer.assign(d_df1.num_int_fields * chunk_size, 0);
     for (int f = 0; f < d_df1.num_int_fields; f++) {
         for (int i = chunk_start; i < chunk_end; i++) {
-            in_int_buffer[f * chunk_size + (i - chunk_start)] = df1.in_int[f].i_int[i];
+            buffers.in_int_buffer[f * chunk_size + (i - chunk_start)] = df1.in_int[f].i_int[i];
         }
     }
 
-    gpuErrchk( cudaMemcpy(d_df1.in_int, in_int_buffer.data(), d_df1.num_int_fields * chunk_size * sizeof(int), cudaMemcpyHostToDevice));
-
-    std::vector<__half> in_float_buffer(d_df1.num_float_fields * chunk_size);
+    // DF1 INFO float
+    buffers.in_float_buffer.assign(d_df1.num_float_fields * chunk_size, __half(0));
     for (int f = 0; f < d_df1.num_float_fields; f++) {
         for (int i = chunk_start; i < chunk_end; i++) {
-            in_float_buffer[f * chunk_size + (i - chunk_start)] = df1.in_float[f].i_float[i];
+            buffers.in_float_buffer[f * chunk_size + (i - chunk_start)] = df1.in_float[f].i_float[i];
         }
     }
 
-    gpuErrchk( cudaMemcpy(d_df1.in_float, in_float_buffer.data(), d_df1.num_float_fields * chunk_size * sizeof(__half), cudaMemcpyHostToDevice));
-
-    std::vector<uint8_t> in_flag_buffer(d_df1.num_flag_fields * chunk_size);
+    // DF1 INFO flag
+    buffers.in_flag_buffer.assign(d_df1.num_flag_fields * chunk_size, 0);
     for (int f = 0; f < d_df1.num_flag_fields; f++) {
         for (int i = chunk_start; i < chunk_end; i++) {
-            in_flag_buffer[f * chunk_size + (i - chunk_start)] = df1.in_flag[f].i_flag[i];
+            buffers.in_flag_buffer[f * chunk_size + (i - chunk_start)] = df1.in_flag[f].i_flag[i];
         }
     }
 
-    gpuErrchk( cudaMemcpy(d_df1.in_flag, in_flag_buffer.data(), d_df1.num_flag_fields * chunk_size * sizeof(uint8_t), cudaMemcpyHostToDevice));
-
-    std::vector<char> int_names_buffer(d_df1.num_int_fields * MAX_NAME_LEN, '\0');
-    for (int f = 0; f < d_df1.num_int_fields; f++) {
-        const std::string& name = df1.in_int[f].name;
-        strncpy(&int_names_buffer[f * MAX_NAME_LEN], name.c_str(), MAX_NAME_LEN - 1);
-    }
-    gpuErrchk( cudaMemcpy(d_df1.int_names, int_names_buffer.data(), d_df1.num_int_fields * MAX_NAME_LEN * sizeof(char), cudaMemcpyHostToDevice));
-
-    std::vector<char> float_names_buffer(d_df1.num_float_fields * MAX_NAME_LEN, '\0');
-    for (int f = 0; f < d_df1.num_float_fields; f++) {
-        const std::string& name = df1.in_float[f].name;
-        strncpy(&float_names_buffer[f * MAX_NAME_LEN], name.c_str(), MAX_NAME_LEN - 1);
-    }
-    gpuErrchk( cudaMemcpy(d_df1.float_names, float_names_buffer.data(), d_df1.num_float_fields * MAX_NAME_LEN * sizeof(char), cudaMemcpyHostToDevice));
-
-    std::vector<char> flag_names_buffer(d_df1.num_flag_fields * MAX_NAME_LEN, '\0');
-    for (int f = 0; f < d_df1.num_flag_fields; f++) {
-        const std::string& name = df1.in_flag[f].name;
-        strncpy(&flag_names_buffer[f * MAX_NAME_LEN], name.c_str(), MAX_NAME_LEN - 1);
-    }
-    gpuErrchk( cudaMemcpy(d_df1.flag_names, flag_names_buffer.data(), d_df1.num_flag_fields * MAX_NAME_LEN * sizeof(char), cudaMemcpyHostToDevice));
-
-    //DF2
+    // DF2 count
     int df2_count = 0;
-    for (size_t j = df2_start; j < df2.var_id.size() && (int)df2.var_id[j] < chunk_end; j++){
-        df2_count++;
-    }
-    gpuErrchk( cudaMemcpy(d_df2.var_id, df2.var_id.data() + df2_start, d_df2.num_entries * sizeof(unsigned int), cudaMemcpyHostToDevice));
+    for (size_t j = df2_start; j < df2.var_id.size() && (int)df2.var_id[j] < chunk_end; j++) df2_count++;
+    buffers.df2_count = df2_count;
 
-    // Build buffer host for id
-    std::vector<char> alt_data_buffer;
-    std::vector<unsigned int> alt_data_offsets(d_df2.num_entries);
-    offset = 0;
-
-    for (int i = df2_start; i < df2_start + df2_count; i++) {
-        alt_data_offsets[i - df2_start] = offset;
-        // copy the characters of the string into the buffer
-        for (char c : df2.alt[i]) {
-            alt_data_buffer.push_back(c);
+    // DF2 alt strings
+    buffers.alt_data_buffer.clear();
+    buffers.alt_data_offsets.resize(df2_count);
+    {
+        unsigned int offset = 0;
+        for (int i = df2_start; i < df2_start + df2_count; i++) {
+            buffers.alt_data_offsets[i - df2_start] = offset;
+            for (char c : df2.alt[i]) buffers.alt_data_buffer.push_back(c);
+            buffers.alt_data_buffer.push_back('\0');
+            offset += df2.alt[i].size() + 1;
         }
-        alt_data_buffer.push_back('\0');  // terminator
-        offset += df2.alt[i].size() + 1;
     }
 
-    gpuErrchk( cudaMemcpy(d_df2.alt_data, alt_data_buffer.data(), alt_data_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
-    gpuErrchk( cudaMemcpy(d_df2.alt_offsets, alt_data_offsets.data(), d_df2.num_entries * sizeof(unsigned int), cudaMemcpyHostToDevice));
-
-    std::vector<unsigned int> alt_start_buf(chunk_size, 0);
-    std::vector<unsigned int> alt_count_buf(chunk_size, 0);
-
-    int j = df2_start;
-    for (int i = 0; i < chunk_size; i++) {
-        unsigned int var_num = df1.var_number[chunk_start + i];
-        alt_start_buf[i] = j - df2_start;
-        while (j < df2_start + df2_count && df2.var_id[j] == var_num) {
-            j++;
+    // alt_start / alt_count
+    buffers.alt_start_buf.assign(chunk_size, 0);
+    buffers.alt_count_buf.assign(chunk_size, 0);
+    {
+        int j = df2_start;
+        for (int i = 0; i < chunk_size; i++) {
+            unsigned int var_num = df1.var_number[chunk_start + i];
+            buffers.alt_start_buf[i] = j - df2_start;
+            while (j < df2_start + df2_count && df2.var_id[j] == var_num) j++;
+            buffers.alt_count_buf[i] = (j - df2_start) - buffers.alt_start_buf[i];
         }
-        alt_count_buf[i] = (j - df2_start) - alt_start_buf[i];
     }
 
-    gpuErrchk(cudaMemcpy(d_df2.alt_start, alt_start_buf.data(), chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
-    gpuErrchk(cudaMemcpy(d_df2.alt_count, alt_count_buf.data(), chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
-
-
-    std::vector<int> alt_int_buffer(d_df2.num_alt_int_fields * df2_count);
+    // DF2 alt int
+    buffers.alt_int_buffer.assign(d_df2.num_alt_int_fields * df2_count, 0);
     for (int f = 0; f < d_df2.num_alt_int_fields; f++) {
-        for (int i = df2_start; i < df2_start + d_df2.num_entries; i++) {
-            alt_int_buffer[f * d_df2.num_entries + (i - df2_start)] = df2.alt_int[f].i_int[i];
+        for (int i = df2_start; i < df2_start + df2_count; i++) {
+            buffers.alt_int_buffer[f * df2_count + (i - df2_start)] = df2.alt_int[f].i_int[i];
         }
     }
 
-    gpuErrchk( cudaMemcpy(d_df2.alt_int, alt_int_buffer.data(), d_df2.num_alt_int_fields * df2_count * sizeof(int), cudaMemcpyHostToDevice));
-
-    std::vector<__half> alt_float_buffer(d_df2.num_alt_float_fields * df2_count);
+    // DF2 alt float
+    buffers.alt_float_buffer.assign(d_df2.num_alt_float_fields * df2_count, __half(0));
     for (int f = 0; f < d_df2.num_alt_float_fields; f++) {
-        for (int i = df2_start; i < df2_start + d_df2.num_entries; i++) {
-            alt_float_buffer[f * d_df2.num_entries + (i - df2_start)] = df2.alt_float[f].i_float[i];
+        for (int i = df2_start; i < df2_start + df2_count; i++) {
+            buffers.alt_float_buffer[f * df2_count + (i - df2_start)] = df2.alt_float[f].i_float[i];
         }
     }
 
-    gpuErrchk( cudaMemcpy(d_df2.alt_float, alt_float_buffer.data(), d_df2.num_alt_float_fields * df2_count * sizeof(__half), cudaMemcpyHostToDevice));
-
-    std::vector<char> alt_int_names_buffer(d_df2.num_alt_int_fields * MAX_NAME_LEN, '\0');
-    for (int f = 0; f < d_df2.num_alt_int_fields; f++) {
-        const std::string& name = df2.alt_int[f].name;
-        strncpy(&alt_int_names_buffer[f * MAX_NAME_LEN], name.c_str(), MAX_NAME_LEN - 1);
-    }
-    gpuErrchk( cudaMemcpy(d_df2.alt_int_names, alt_int_names_buffer.data(), d_df2.num_alt_int_fields * MAX_NAME_LEN * sizeof(char), cudaMemcpyHostToDevice));
-
-    std::vector<char> alt_float_names_buffer(d_df2.num_alt_float_fields * MAX_NAME_LEN, '\0');
-    for (int f = 0; f < d_df2.num_alt_float_fields; f++) {
-        const std::string& name = df2.alt_float[f].name;
-        strncpy(&alt_float_names_buffer[f * MAX_NAME_LEN], name.c_str(), MAX_NAME_LEN - 1);
-    }
-    gpuErrchk( cudaMemcpy(d_df2.alt_float_names, alt_float_names_buffer.data(), d_df2.num_alt_float_fields * MAX_NAME_LEN * sizeof(char), cudaMemcpyHostToDevice));
-
-    // Inverse maps
-    std::vector<char> chrom_strings_buffer;
-    std::vector<unsigned int> chrom_offsets_buffer(256,0);
-    offset = 0;
-    for (const auto& pair : inv_chrom_map) {
-        int idx = static_cast<int>(pair.first); 
-        if (idx >= 0 && idx < 256) {
-            chrom_offsets_buffer[idx] = offset; 
-            
-            for (char c : pair.second) {
-                chrom_strings_buffer.push_back(c);
-            }
-            chrom_strings_buffer.push_back('\0');
-            offset += pair.second.size() + 1;
-        }
-    }
-    gpuErrchk( cudaMemcpy(d_maps.chrom_strings, chrom_strings_buffer.data(), chrom_strings_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
-    gpuErrchk( cudaMemcpy(d_maps.chrom_offsets, chrom_offsets_buffer.data(), 256 * sizeof(unsigned int), cudaMemcpyHostToDevice));
-
-    std::vector<char> filter_strings_buffer;
-    std::vector<unsigned int> filter_offsets_buffer(256,0);
-    offset = 0;
-    for (const auto& pair : inv_filter_map) {
-        int idx = static_cast<int>(pair.first);
-        if (idx >= 0 && idx < 256) {
-            filter_offsets_buffer[idx] = offset; 
-            
-            for (char c : pair.second) {
-                filter_strings_buffer.push_back(c);
-            }
-            filter_strings_buffer.push_back('\0');
-            offset += pair.second.size() + 1;
-        }
-    }
-    gpuErrchk( cudaMemcpy(d_maps.filter_strings, filter_strings_buffer.data(), filter_strings_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
-    gpuErrchk( cudaMemcpy(d_maps.filter_offsets, filter_offsets_buffer.data(), 256 * sizeof(unsigned int), cudaMemcpyHostToDevice));
-
-    // Costruzione dei sample pre-formattati
-    std::vector<char> sample_buffer;
-    std::vector<unsigned int> sample_offsets;
+    // DF3 sample strings
     buildSampleStrings(df1, df2, df3, df4,
-                    chunk_size, chunk_start, chunk_end, df2_start,
-                    sample_buffer, sample_offsets);
+                       chunk_size, chunk_start, chunk_end, df2_start,
+                       buffers.sample_buffer, buffers.sample_offsets);
+}
 
-    size_t max_chars = (size_t)chunk_size * df3.numSample * MAX_SAMPLE_STRING_LEN;
-    if (sample_buffer.size() > max_chars) {
-        throw std::runtime_error("sample_buffer overflow: aumentare MAX_SAMPLE_STRING_LEN");
-    }
+void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
+                                          const alt_columns_df& df2,
+                                          const HostBuffers& buffers) {
+    int chunk_size  = buffers.chunk_size;
+    int chunk_start = buffers.chunk_start;
+    int df2_start   = buffers.df2_start;
+    int df2_count   = buffers.df2_count;
 
-    gpuErrchk(cudaMemcpy(d_df3.sample_data, sample_buffer.data(), sample_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
-    gpuErrchk(cudaMemcpy(d_df3.sample_offsets, sample_offsets.data(), sample_offsets.size() * sizeof(unsigned int), cudaMemcpyHostToDevice));
+    // DF1 diretti
+    gpuErrchk(cudaMemcpy(d_df1.var_number, df1.var_number.data() + chunk_start,
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpy(d_df1.chrom, df1.chrom.data() + chunk_start,
+                         chunk_size * sizeof(char), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpy(d_df1.pos, df1.pos.data() + chunk_start,
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpy(d_df1.qual, df1.qual.data() + chunk_start,
+                         chunk_size * sizeof(__half), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpy(d_df1.filter, df1.filter.data() + chunk_start,
+                         chunk_size * sizeof(char), cudaMemcpyHostToDevice));
+
+    // DF1 staging
+    gpuErrchk(cudaMemcpy(d_df1.id_data, buffers.id_buffer.data(),
+                         buffers.id_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpy(d_df1.id_offsets, buffers.id_offsets.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpy(d_df1.ref_data, buffers.ref_buffer.data(),
+                         buffers.ref_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpy(d_df1.ref_offsets, buffers.ref_offsets.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
+
+    gpuErrchk(cudaMemcpy(d_df1.in_int, buffers.in_int_buffer.data(),
+                         d_df1.num_int_fields * chunk_size * sizeof(int), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpy(d_df1.in_float, buffers.in_float_buffer.data(),
+                         d_df1.num_float_fields * chunk_size * sizeof(__half), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpy(d_df1.in_flag, buffers.in_flag_buffer.data(),
+                         d_df1.num_flag_fields * chunk_size * sizeof(uint8_t), cudaMemcpyHostToDevice));
+
+    // DF2
+    gpuErrchk(cudaMemcpy(d_df2.var_id, df2.var_id.data() + df2_start,
+                         df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice));
+
+    gpuErrchk(cudaMemcpy(d_df2.alt_data, buffers.alt_data_buffer.data(),
+                         buffers.alt_data_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpy(d_df2.alt_offsets, buffers.alt_data_offsets.data(),
+                         df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice));
+
+    gpuErrchk(cudaMemcpy(d_df2.alt_start, buffers.alt_start_buf.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpy(d_df2.alt_count, buffers.alt_count_buf.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
+
+    gpuErrchk(cudaMemcpy(d_df2.alt_int, buffers.alt_int_buffer.data(),
+                         d_df2.num_alt_int_fields * df2_count * sizeof(int), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpy(d_df2.alt_float, buffers.alt_float_buffer.data(),
+                         d_df2.num_alt_float_fields * df2_count * sizeof(__half), cudaMemcpyHostToDevice));
+
+    // DF3 sample
+    gpuErrchk(cudaMemcpy(d_df3.sample_data, buffers.sample_buffer.data(),
+                         buffers.sample_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpy(d_df3.sample_offsets, buffers.sample_offsets.data(),
+                         buffers.sample_offsets.size() * sizeof(unsigned int), cudaMemcpyHostToDevice));
 }
 
 __device__ int device_strcpy(char* dst, const char* src) {
@@ -772,7 +718,12 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
         cudaEventElapsedTime(&ms_alloc, start, stop);
 
         cudaEventRecord(start);
-        hostToDevice(df1, df2, df3, df4, chunk_size, chunk_start, chunk_end, df2_start);
+        host_buffers.chunk_size  = chunk_size;
+        host_buffers.chunk_start = chunk_start;
+        host_buffers.chunk_end   = chunk_end;
+        host_buffers.df2_start   = df2_start;
+        prepareHostBuffers(df1, df2, df3, df4, host_buffers);
+        uploadToDevice(df1, df2, host_buffers);
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&ms_h2d, start, stop);

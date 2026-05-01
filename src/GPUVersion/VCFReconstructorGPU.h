@@ -15,6 +15,36 @@
 #define MAX_SAMPLE_STRING_LEN 256
 #define CHUNK_SIZE   10000
 
+struct HostBuffers {
+    // DF1
+    std::vector<char>          id_buffer;
+    std::vector<unsigned int>  id_offsets;
+    std::vector<char>          ref_buffer;
+    std::vector<unsigned int>  ref_offsets;
+    std::vector<int>           in_int_buffer;
+    std::vector<__half>        in_float_buffer;
+    std::vector<uint8_t>       in_flag_buffer;
+
+    // DF2
+    int                        df2_count = 0;
+    std::vector<char>          alt_data_buffer;
+    std::vector<unsigned int>  alt_data_offsets;
+    std::vector<unsigned int>  alt_start_buf;
+    std::vector<unsigned int>  alt_count_buf;
+    std::vector<int>           alt_int_buffer;
+    std::vector<__half>        alt_float_buffer;
+
+    // DF3
+    std::vector<char>          sample_buffer;
+    std::vector<unsigned int>  sample_offsets;
+
+    // Metadati
+    int chunk_size  = 0;
+    int chunk_start = 0;
+    int chunk_end   = 0;
+    int df2_start   = 0;
+};
+
 class VCFReconstructorGPU {
 public:
     VCFReconstructorGPU(const std::string& output_vcf_path,
@@ -55,6 +85,8 @@ private:
     std::map<std::string, std::string> parseFormatNumbers(const std::string& header_text);
     std::map<std::string, std::string> format_numbers;
 
+    HostBuffers host_buffers;
+
     void buildInverseMaps(const var_columns_df& df1);
 
     void allocateDevice(const var_columns_df& df1,
@@ -67,14 +99,15 @@ private:
 
     void freeDevice();
 
-    void hostToDevice(const var_columns_df& df1,
-                      const alt_columns_df& df2,
-                      const sample_columns_df& df3,
-                      const alt_format_df& df4,
-                      int chunk_size,
-                      int chunk_start,
-                      int chunk_end,
-                      int df2_start);
+    void prepareHostBuffers(const var_columns_df& df1,
+                            const alt_columns_df& df2,
+                            const sample_columns_df& df3,
+                            const alt_format_df& df4,
+                            HostBuffers& buffers);
+
+    void uploadToDevice(const var_columns_df& df1,
+                        const alt_columns_df& df2,
+                        const HostBuffers& buffers);
 
     void writeChunk(int num_variants, std::ofstream& out);
 
