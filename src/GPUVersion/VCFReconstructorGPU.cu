@@ -554,6 +554,67 @@ __global__ void reconstructKernel(
             }
         }
 
+        //Alt Int (DF2)
+        for (int f = 0; f < df2.num_alt_int_fields; f++){
+            // Verifica se almeno un valore nel gruppo è diverso da -1
+            bool any_valid = false;
+            for (int j = alt_begin; j < alt_end; j++){
+                if (df2.alt_int[f * df2.num_entries + j] != -1){
+                    any_valid = true;
+                    break;
+                }
+            }
+            if (!any_valid) continue;
+
+            if (!first_info) line[pos++] = ';';
+            first_info = false;
+
+            pos += device_strcpy(line + pos, df2.alt_int_names + f * MAX_NAME_LEN);
+            line[pos++] = '=';
+
+            bool first_val = true;
+            for (int j = alt_begin; j < alt_end; j++){
+                if (!first_val) line[pos++] = ',';
+                first_val = false;
+                int v = df2.alt_int[f * df2.num_entries + j];
+                if (v == -1){
+                    line[pos++] = '.';
+                } else {
+                    pos += device_itoa(v, line + pos);
+                }
+            }
+        }
+
+        //Alt Float (DF2)
+        for (int f = 0; f < df2.num_alt_float_fields; f++){
+            bool any_valid = false;
+            for (int j = alt_begin; j < alt_end; j++){
+                if (__half2float(df2.alt_float[f * df2.num_entries + j]) != -1.0f){
+                    any_valid = true;
+                    break;
+                }
+            }
+            if (!any_valid) continue;
+
+            if (!first_info) line[pos++] = ';';
+            first_info = false;
+
+            pos += device_strcpy(line + pos, df2.alt_float_names + f * MAX_NAME_LEN);
+            line[pos++] = '=';
+
+            bool first_val = true;
+            for (int j = alt_begin; j < alt_end; j++){
+                if (!first_val) line[pos++] = ',';
+                first_val = false;
+                float v = __half2float(df2.alt_float[f * df2.num_entries + j]);
+                if (v == -1.0f){
+                    line[pos++] = '.';
+                } else {
+                    pos += device_ftoa(v, line + pos);
+                }
+            }
+        }
+
         if(first_info){
             line[pos++] = '.';
         }
