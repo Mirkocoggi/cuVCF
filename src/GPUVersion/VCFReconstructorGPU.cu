@@ -3,6 +3,7 @@
 #include "Utils.h"
 #include "Maps.h"
 #include <sstream>
+#include <omp.h>
 
 VCFReconstructorGPU::VCFReconstructorGPU(const std::string& output_vcf_path,
                                          const std::string& header_text)
@@ -907,167 +908,219 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                                              std::vector<char>& buffer,
                                              std::vector<unsigned int>& offsets) {
     int num_samples = df3.numSample;
-    offsets.resize(chunk_size * num_samples);
-    buffer.clear();
-    buffer.resize((size_t)chunk_size * num_samples * MAX_SAMPLE_STRING_LEN);
-    size_t buf_pos = 0;
+    int total_cells = chunk_size * num_samples;
+    offsets.resize(total_cells);
 
-    size_t df4_cursor = 0;
-    while (df4_cursor < df4.var_id.size() &&
-           df4.var_id[df4_cursor] < df1.var_number[chunk_start]) df4_cursor++;
-    size_t df2_cursor = (size_t)df2_start;
-
-    for (int i = chunk_start; i < chunk_end; i++) {
-        unsigned int current_var_id = df1.var_number[i];
-
-        while (df2_cursor < df2.var_id.size() &&
-               df2.var_id[df2_cursor] < current_var_id) df2_cursor++;
-        size_t num_alts = 0;
-        {
-            size_t j = df2_cursor;
-            while (j < df2.var_id.size() && df2.var_id[j] == current_var_id) { num_alts++; j++; }
-        }
-
+    // Pre-calcolo per-variante (sequenziale)
+    std::vector<size_t> per_var_num_alts(chunk_size, 0);
+    std::vector<long>   per_var_start_df4(chunk_size, -1);
+    {
+        size_t df2_cursor = (size_t)df2_start;
+        size_t df4_cursor = 0;
         while (df4_cursor < df4.var_id.size() &&
-               df4.var_id[df4_cursor] < current_var_id) df4_cursor++;
-        long start_df4 = (df4_cursor < df4.var_id.size() &&
-                          df4.var_id[df4_cursor] == current_var_id)
-                          ? (long)df4_cursor : -1;
-
-        for (int s = 0; s < num_samples; s++) {
-            size_t df3_idx = (size_t)i * num_samples + s;
-            size_t out_idx = (size_t)(i - chunk_start) * num_samples + s;
-            offsets[out_idx] = (unsigned int)buf_pos;
-
-            char* w  = buffer.data() + buf_pos;
-            char* w0 = w;
-            bool first_field = true;
-            auto write_sep = [&]() { if (!first_field) *w++ = ':'; first_field = false; };
-
-            // GT
-            if (has_gt) {
-                char gt_code = -1;
-                if (gt_in_df3) {
-                    gt_code = df3.sample_GT[0].GT[df3_idx];
-                } else if (gt_in_df4 && start_df4 != -1) {
-                    long k = start_df4;
-                    while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
-                        if (df4.samp_id[k] == (unsigned short)s) { gt_code = df4.sample_GT.GT[k]; break; }
-                        k++;
-                    }
-                }
-                write_sep();
-                if (gt_code == -1) { *w++ = '.'; *w++ = '|'; *w++ = '.'; }
-                else {
-                    const std::string& gt = df3.getGTStringFromChar(gt_code);
-                    memcpy(w, gt.data(), gt.size()); w += gt.size();
-                }
+               df4.var_id[df4_cursor] < df1.var_number[chunk_start]) df4_cursor++;
+        for (int i = chunk_start; i < chunk_end; i++) {
+            unsigned int current_var_id = df1.var_number[i];
+            while (df2_cursor < df2.var_id.size() &&
+                   df2.var_id[df2_cursor] < current_var_id) df2_cursor++;
+            size_t num_alts = 0;
+            {
+                size_t j = df2_cursor;
+                while (j < df2.var_id.size() && df2.var_id[j] == current_var_id) { num_alts++; j++; }
             }
-
-            // DF3 int
-            for (const auto& g : df3_int_groups) {
-                write_sep();
-                size_t group_size = g.col_end - g.col_start;
-                size_t limit = (group_size > 1)
-                    ? std::min(group_size, (g.number_kind == 1) ? num_alts : num_alts + 1) : 1;
-                bool any = false, first_v = true;
-                for (size_t cc = g.col_start; cc < g.col_start + limit; cc++) {
-                    int v = df3.samp_int[cc].i_int[df3_idx];
-                    if (v == -1) continue;
-                    if (!first_v) *w++ = ','; first_v = false;
-                    w += snprintf(w, 16, "%d", v);
-                    any = true;
-                }
-                if (!any) *w++ = '.';
-            }
-
-            // DF3 float
-            for (const auto& g : df3_float_groups) {
-                write_sep();
-                size_t group_size = g.col_end - g.col_start;
-                size_t limit = (group_size > 1)
-                    ? std::min(group_size, (g.number_kind == 1) ? num_alts : num_alts + 1) : 1;
-                bool any = false, first_v = true;
-                for (size_t cc = g.col_start; cc < g.col_start + limit; cc++) {
-                    float v = (float)df3.samp_float[cc].i_float[df3_idx];
-                    if (v == -1.0f) continue;
-                    if (!first_v) *w++ = ','; first_v = false;
-                    w += snprintf(w, 32, "%g", v);
-                    any = true;
-                }
-                if (!any) *w++ = '.';
-            }
-
-            // DF3 string
-            for (size_t col = 0; col < df3.samp_string.size(); col++) {
-                write_sep();
-                const std::string& s_val = df3.samp_string[col].i_string[df3_idx];
-                if (s_val.empty()) *w++ = '.';
-                else { memcpy(w, s_val.data(), s_val.size()); w += s_val.size(); }
-            }
-
-            // DF4
-            if (start_df4 != -1) {
-                for (const auto& g : df4_int_groups) {
-                    write_sep();
-                    bool any = false;
-                    long k = start_df4;
-                    while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
-                        if (df4.samp_id[k] == (unsigned short)s) {
-                            for (size_t cc = g.col_start; cc < g.col_end; cc++) {
-                                if (any) *w++ = ',';
-                                int v = df4.samp_int[cc].i_int[k];
-                                if (v == -1) *w++ = '.';
-                                else w += snprintf(w, 16, "%d", v);
-                                any = true;
-                            }
-                        }
-                        k++;
-                    }
-                    if (!any) *w++ = '.';
-                }
-
-                for (const auto& g : df4_float_groups) {
-                    write_sep();
-                    bool any = false;
-                    long k = start_df4;
-                    while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
-                        if (df4.samp_id[k] == (unsigned short)s) {
-                            for (size_t cc = g.col_start; cc < g.col_end; cc++) {
-                                if (any) *w++ = ',';
-                                float v = (float)df4.samp_float[cc].i_float[k];
-                                if (v == -1.0f) *w++ = '.';
-                                else w += snprintf(w, 32, "%g", v);
-                                any = true;
-                            }
-                        }
-                        k++;
-                    }
-                    if (!any) *w++ = '.';
-                }
-
-                for (size_t col = 0; col < df4.samp_string.size(); col++) {
-                    write_sep();
-                    bool any = false;
-                    long k = start_df4;
-                    while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
-                        if (df4.samp_id[k] == (unsigned short)s) {
-                            const std::string& s_val = df4.samp_string[col].i_string[k];
-                            if (any) *w++ = ',';
-                            if (s_val.empty()) *w++ = '.';
-                            else { memcpy(w, s_val.data(), s_val.size()); w += s_val.size(); }
-                            any = true;
-                        }
-                        k++;
-                    }
-                    if (!any) *w++ = '.';
-                }
-            }
-
-            *w++ = '\0';
-            buf_pos += (w - w0);
+            per_var_num_alts[i - chunk_start] = num_alts;
+            while (df4_cursor < df4.var_id.size() &&
+                   df4.var_id[df4_cursor] < current_var_id) df4_cursor++;
+            per_var_start_df4[i - chunk_start] =
+                (df4_cursor < df4.var_id.size() &&
+                 df4.var_id[df4_cursor] == current_var_id) ? (long)df4_cursor : -1;
         }
     }
 
-    buffer.resize(buf_pos);
+    // Passata 1 parallela: ogni thread scrive in scratch privato
+    std::vector<unsigned int> cell_lens(total_cells, 0);
+    int num_threads = omp_get_max_threads();
+    std::vector<std::vector<char>> scratch(num_threads);
+    std::vector<std::vector<unsigned int>> cell_offsets_in_scratch(num_threads);
+    std::vector<std::vector<int>> global_indices(num_threads);
+
+    #pragma omp parallel
+    {
+        int tid = omp_get_thread_num();
+        int my_var_count = (chunk_size + num_threads - 1) / num_threads;
+        scratch[tid].resize((size_t)my_var_count * num_samples * MAX_SAMPLE_STRING_LEN);
+        cell_offsets_in_scratch[tid].reserve(my_var_count * num_samples);
+        global_indices[tid].reserve(my_var_count * num_samples);
+
+        size_t local_pos = 0;
+
+        #pragma omp for schedule(static)
+        for (int i_rel = 0; i_rel < chunk_size; i_rel++) {
+            int i = chunk_start + i_rel;
+            unsigned int current_var_id = df1.var_number[i];
+            size_t num_alts  = per_var_num_alts[i_rel];
+            long   start_df4 = per_var_start_df4[i_rel];
+
+            for (int s = 0; s < num_samples; s++) {
+                size_t df3_idx = (size_t)i * num_samples + s;
+
+                char* w  = scratch[tid].data() + local_pos;
+                char* w0 = w;
+                bool first_field = true;
+                auto write_sep = [&]() { if (!first_field) *w++ = ':'; first_field = false; };
+
+                // GT
+                if (has_gt) {
+                    char gt_code = -1;
+                    if (gt_in_df3) {
+                        gt_code = df3.sample_GT[0].GT[df3_idx];
+                    } else if (gt_in_df4 && start_df4 != -1) {
+                        long k = start_df4;
+                        while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                            if (df4.samp_id[k] == (unsigned short)s) { gt_code = df4.sample_GT.GT[k]; break; }
+                            k++;
+                        }
+                    }
+                    write_sep();
+                    if (gt_code == -1) { *w++ = '.'; *w++ = '|'; *w++ = '.'; }
+                    else {
+                        const std::string& gt = df3.getGTStringFromChar(gt_code);
+                        memcpy(w, gt.data(), gt.size()); w += gt.size();
+                    }
+                }
+
+                // DF3 int
+                for (const auto& g : df3_int_groups) {
+                    write_sep();
+                    size_t group_size = g.col_end - g.col_start;
+                    size_t limit = (group_size > 1)
+                        ? std::min(group_size, (g.number_kind == 1) ? num_alts : num_alts + 1) : 1;
+                    bool any = false, first_v = true;
+                    for (size_t cc = g.col_start; cc < g.col_start + limit; cc++) {
+                        int v = df3.samp_int[cc].i_int[df3_idx];
+                        if (v == -1) continue;
+                        if (!first_v) *w++ = ','; first_v = false;
+                        w += snprintf(w, 16, "%d", v);
+                        any = true;
+                    }
+                    if (!any) *w++ = '.';
+                }
+
+                // DF3 float
+                for (const auto& g : df3_float_groups) {
+                    write_sep();
+                    size_t group_size = g.col_end - g.col_start;
+                    size_t limit = (group_size > 1)
+                        ? std::min(group_size, (g.number_kind == 1) ? num_alts : num_alts + 1) : 1;
+                    bool any = false, first_v = true;
+                    for (size_t cc = g.col_start; cc < g.col_start + limit; cc++) {
+                        float v = (float)df3.samp_float[cc].i_float[df3_idx];
+                        if (v == -1.0f) continue;
+                        if (!first_v) *w++ = ','; first_v = false;
+                        w += snprintf(w, 32, "%g", v);
+                        any = true;
+                    }
+                    if (!any) *w++ = '.';
+                }
+
+                // DF3 string
+                for (size_t col = 0; col < df3.samp_string.size(); col++) {
+                    write_sep();
+                    const std::string& s_val = df3.samp_string[col].i_string[df3_idx];
+                    if (s_val.empty()) *w++ = '.';
+                    else { memcpy(w, s_val.data(), s_val.size()); w += s_val.size(); }
+                }
+
+                // DF4
+                if (start_df4 != -1) {
+                    for (const auto& g : df4_int_groups) {
+                        write_sep();
+                        bool any = false;
+                        long k = start_df4;
+                        while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                            if (df4.samp_id[k] == (unsigned short)s) {
+                                for (size_t cc = g.col_start; cc < g.col_end; cc++) {
+                                    if (any) *w++ = ',';
+                                    int v = df4.samp_int[cc].i_int[k];
+                                    if (v == -1) *w++ = '.';
+                                    else w += snprintf(w, 16, "%d", v);
+                                    any = true;
+                                }
+                            }
+                            k++;
+                        }
+                        if (!any) *w++ = '.';
+                    }
+
+                    for (const auto& g : df4_float_groups) {
+                        write_sep();
+                        bool any = false;
+                        long k = start_df4;
+                        while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                            if (df4.samp_id[k] == (unsigned short)s) {
+                                for (size_t cc = g.col_start; cc < g.col_end; cc++) {
+                                    if (any) *w++ = ',';
+                                    float v = (float)df4.samp_float[cc].i_float[k];
+                                    if (v == -1.0f) *w++ = '.';
+                                    else w += snprintf(w, 32, "%g", v);
+                                    any = true;
+                                }
+                            }
+                            k++;
+                        }
+                        if (!any) *w++ = '.';
+                    }
+
+                    for (size_t col = 0; col < df4.samp_string.size(); col++) {
+                        write_sep();
+                        bool any = false;
+                        long k = start_df4;
+                        while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                            if (df4.samp_id[k] == (unsigned short)s) {
+                                const std::string& s_val = df4.samp_string[col].i_string[k];
+                                if (any) *w++ = ',';
+                                if (s_val.empty()) *w++ = '.';
+                                else { memcpy(w, s_val.data(), s_val.size()); w += s_val.size(); }
+                                any = true;
+                            }
+                            k++;
+                        }
+                        if (!any) *w++ = '.';
+                    }
+                }
+
+                *w++ = '\0';
+                size_t cell_len = w - w0;
+
+                int global_idx = i_rel * num_samples + s;
+                cell_lens[global_idx] = (unsigned int)cell_len;
+                cell_offsets_in_scratch[tid].push_back((unsigned int)local_pos);
+                global_indices[tid].push_back(global_idx);
+                local_pos += cell_len;
+            }
+        }
+    }
+
+    // Prefix sum
+    size_t total_size = 0;
+    for (int k = 0; k < total_cells; k++) {
+        offsets[k] = (unsigned int)total_size;
+        total_size += cell_lens[k];
+    }
+
+    // Passata 2 parallela: copia da scratch al buffer finale
+    buffer.resize(total_size);
+    #pragma omp parallel for schedule(static)
+    for (int tid = 0; tid < num_threads; tid++) {
+        const auto& src_buf  = scratch[tid];
+        const auto& src_offs = cell_offsets_in_scratch[tid];
+        const auto& gidx     = global_indices[tid];
+        for (size_t k = 0; k < gidx.size(); k++) {
+            int g = gidx[k];
+            unsigned int len = cell_lens[g];
+            memcpy(buffer.data() + offsets[g],
+                   src_buf.data() + src_offs[k],
+                   len);
+        }
+    }
 }
