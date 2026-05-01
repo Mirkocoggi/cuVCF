@@ -47,6 +47,13 @@ struct HostBuffers {
 
 class VCFReconstructorGPU {
 public:
+
+    struct GroupInfo {
+        size_t col_start;
+        size_t col_end;
+        char number_kind;  // 0='R', 1='A', 2=fixed
+    };
+
     VCFReconstructorGPU(const std::string& output_vcf_path,
                         const std::string& header_text);
     ~VCFReconstructorGPU();
@@ -86,6 +93,11 @@ private:
     std::map<std::string, std::string> format_numbers;
 
     HostBuffers host_buffers;
+
+    std::vector<GroupInfo> df3_int_groups;
+    std::vector<GroupInfo> df3_float_groups;
+    std::vector<GroupInfo> df4_int_groups;
+    std::vector<GroupInfo> df4_float_groups;
 
     void buildInverseMaps(const var_columns_df& df1);
 

@@ -571,6 +571,34 @@ void VCFReconstructorGPU::writeChunk(int num_variants, std::ofstream& out){
     delete[] h_line_lens;
 }
 
+template <typename FieldVec>
+static std::vector<VCFReconstructorGPU::GroupInfo> buildGroups(
+    const FieldVec& fields,
+    const std::map<std::string, std::string>& format_numbers)
+{
+    std::vector<VCFReconstructorGPU::GroupInfo> out;
+    size_t col = 0;
+    while (col < fields.size()) {
+        std::string base = stripTrailingDigits(fields[col].name);
+        size_t end = col;
+        while (end < fields.size() &&
+               stripTrailingDigits(fields[end].name) == base) {
+            end++;
+        }
+        VCFReconstructorGPU::GroupInfo g;
+        g.col_start = col;
+        g.col_end   = end;
+        auto it = format_numbers.find(base);
+        std::string num = (it != format_numbers.end()) ? it->second : "R";
+        if      (num == "A") g.number_kind = 1;
+        else if (num == "R") g.number_kind = 0;
+        else                 g.number_kind = 2;
+        out.push_back(g);
+        col = end;
+    }
+    return out;
+}
+
 void VCFReconstructorGPU::run(const var_columns_df& df1,
          const alt_columns_df& df2,
          const sample_columns_df& df3,
@@ -579,6 +607,11 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
     buildInverseMaps(df1);
     buildSampleNames(df3);
     format_numbers = parseFormatNumbers(header_text);
+
+    df3_int_groups   = buildGroups(df3.samp_int,   format_numbers);
+    df3_float_groups = buildGroups(df3.samp_float, format_numbers);
+    df4_int_groups   = buildGroups(df4.samp_int,   format_numbers);
+    df4_float_groups = buildGroups(df4.samp_float, format_numbers);
 
     std::ofstream vcf_file(output_vcf_path);
     if (!vcf_file.is_open()) {
@@ -876,241 +909,165 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
     int num_samples = df3.numSample;
     offsets.resize(chunk_size * num_samples);
     buffer.clear();
-    buffer.reserve((size_t)chunk_size * num_samples * 64); // hint iniziale
+    buffer.resize((size_t)chunk_size * num_samples * MAX_SAMPLE_STRING_LEN);
+    size_t buf_pos = 0;
 
-    // Cursore DF4 sequenziale sul chunk
     size_t df4_cursor = 0;
     while (df4_cursor < df4.var_id.size() &&
-           df4.var_id[df4_cursor] < df1.var_number[chunk_start]) {
-        df4_cursor++;
-    }
-    // Nota: invece di una variabile membro, ti conviene passare il var_number dell'inizio
-    // chunk come parametro, oppure ricalcolare dal df1 (vedi sotto).
+           df4.var_id[df4_cursor] < df1.var_number[chunk_start]) df4_cursor++;
+    size_t df2_cursor = (size_t)df2_start;
 
     for (int i = chunk_start; i < chunk_end; i++) {
-        unsigned int current_var_id = df1.var_number[i]; // <-- vedi sotto
+        unsigned int current_var_id = df1.var_number[i];
 
-        size_t df2_cursor = (size_t)df2_start;  // o passalo in modo pulito
-        while (df2_cursor < df2.var_id.size() && df2.var_id[df2_cursor] < current_var_id) {
-            df2_cursor++;
-        }
+        while (df2_cursor < df2.var_id.size() &&
+               df2.var_id[df2_cursor] < current_var_id) df2_cursor++;
         size_t num_alts = 0;
         {
             size_t j = df2_cursor;
-            while (j < df2.var_id.size() && df2.var_id[j] == current_var_id) {
-                num_alts++;
-                j++;
-            }
+            while (j < df2.var_id.size() && df2.var_id[j] == current_var_id) { num_alts++; j++; }
         }
 
-        // Avanza df4_cursor fino al primo record con var_id == current_var_id
         while (df4_cursor < df4.var_id.size() &&
-               df4.var_id[df4_cursor] < current_var_id) {
-            df4_cursor++;
-        }
-        int start_df4 = (df4_cursor < df4.var_id.size() &&
-                         df4.var_id[df4_cursor] == current_var_id)
-                        ? (int)df4_cursor : -1;
+               df4.var_id[df4_cursor] < current_var_id) df4_cursor++;
+        long start_df4 = (df4_cursor < df4.var_id.size() &&
+                          df4.var_id[df4_cursor] == current_var_id)
+                          ? (long)df4_cursor : -1;
 
         for (int s = 0; s < num_samples; s++) {
             size_t df3_idx = (size_t)i * num_samples + s;
-            std::string sample_data;
+            size_t out_idx = (size_t)(i - chunk_start) * num_samples + s;
+            offsets[out_idx] = (unsigned int)buf_pos;
 
-            // ---------- GT ----------
+            char* w  = buffer.data() + buf_pos;
+            char* w0 = w;
+            bool first_field = true;
+            auto write_sep = [&]() { if (!first_field) *w++ = ':'; first_field = false; };
+
+            // GT
             if (has_gt) {
                 char gt_code = -1;
                 if (gt_in_df3) {
                     gt_code = df3.sample_GT[0].GT[df3_idx];
                 } else if (gt_in_df4 && start_df4 != -1) {
-                    size_t k = (size_t)start_df4;
-                    while (k < df4.var_id.size() && df4.var_id[k] == current_var_id) {
-                        if (df4.samp_id[k] == (unsigned short)s) {
-                            gt_code = df4.sample_GT.GT[k];
-                            break;
-                        }
+                    long k = start_df4;
+                    while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                        if (df4.samp_id[k] == (unsigned short)s) { gt_code = df4.sample_GT.GT[k]; break; }
                         k++;
                     }
                 }
-                if (gt_code == -1) {
-                    sample_data = ".|.";
-                } else {
-                    sample_data = df3.getGTStringFromChar(gt_code);
+                write_sep();
+                if (gt_code == -1) { *w++ = '.'; *w++ = '|'; *w++ = '.'; }
+                else {
+                    const std::string& gt = df3.getGTStringFromChar(gt_code);
+                    memcpy(w, gt.data(), gt.size()); w += gt.size();
                 }
             }
 
-            // ---------- DF3 int (raggruppati) ----------
-            {
-                size_t col = 0;
-                while (col < df3.samp_int.size()) {
-                    std::string base = stripTrailingDigits(df3.samp_int[col].name);
-                    if (!sample_data.empty()) sample_data += ":";
-
-                    size_t group_end = col;
-                    while (group_end < df3.samp_int.size() &&
-                           stripTrailingDigits(df3.samp_int[group_end].name) == base) {
-                        group_end++;
-                    }
-                    size_t group_size = group_end - col;
-
-                    size_t limit;
-                    if (group_size > 1) {
-                        std::string num = format_numbers.count(base) ? format_numbers[base] : "R";
-                        size_t real = (num == "A") ? num_alts : num_alts + 1;
-                        limit = std::min(group_size, real);
-                    } else {
-                        limit = 1;
-                    }
-
-                    std::string group_val;
-                    size_t printed = 0;
-                    while (col < df3.samp_int.size() &&
-                           stripTrailingDigits(df3.samp_int[col].name) == base) {
-                        if (printed < limit) {
-                            int v = df3.samp_int[col].i_int[df3_idx];
-                            if (v != -1) {
-                                if (!group_val.empty()) group_val += ",";
-                                group_val += std::to_string(v);
-                            }
-                            printed++;
-                        }
-                        col++;
-                    }
-                    sample_data += group_val.empty() ? "." : group_val;
+            // DF3 int
+            for (const auto& g : df3_int_groups) {
+                write_sep();
+                size_t group_size = g.col_end - g.col_start;
+                size_t limit = (group_size > 1)
+                    ? std::min(group_size, (g.number_kind == 1) ? num_alts : num_alts + 1) : 1;
+                bool any = false, first_v = true;
+                for (size_t cc = g.col_start; cc < g.col_start + limit; cc++) {
+                    int v = df3.samp_int[cc].i_int[df3_idx];
+                    if (v == -1) continue;
+                    if (!first_v) *w++ = ','; first_v = false;
+                    w += snprintf(w, 16, "%d", v);
+                    any = true;
                 }
+                if (!any) *w++ = '.';
             }
 
-            // ---------- DF3 float (raggruppati) ----------
-            {
-                size_t col = 0;
-                while (col < df3.samp_float.size()) {
-                    std::string base = stripTrailingDigits(df3.samp_float[col].name);
-                    if (!sample_data.empty()) sample_data += ":";
-
-                    size_t group_end = col;
-                    while (group_end < df3.samp_float.size() &&
-                           stripTrailingDigits(df3.samp_float[group_end].name) == base) {
-                        group_end++;
-                    }
-                    size_t group_size = group_end - col;
-
-                    size_t limit;
-                    if (group_size > 1) {
-                        std::string num = format_numbers.count(base) ? format_numbers[base] : "R";
-                        size_t real = (num == "A") ? num_alts : num_alts + 1;
-                        limit = std::min(group_size, real);
-                    } else {
-                        limit = 1;
-                    }
-
-                    std::string group_val;
-                    size_t printed = 0;
-                    while (col < df3.samp_float.size() &&
-                           stripTrailingDigits(df3.samp_float[col].name) == base) {
-                        if (printed < limit) {
-                            float v = (float)df3.samp_float[col].i_float[df3_idx];
-                            if (v != -1.0f) {
-                                if (!group_val.empty()) group_val += ",";
-                                group_val += std::to_string(v);
-                            }
-                            printed++;
-                        }
-                        col++;
-                    }
-                    sample_data += group_val.empty() ? "." : group_val;
+            // DF3 float
+            for (const auto& g : df3_float_groups) {
+                write_sep();
+                size_t group_size = g.col_end - g.col_start;
+                size_t limit = (group_size > 1)
+                    ? std::min(group_size, (g.number_kind == 1) ? num_alts : num_alts + 1) : 1;
+                bool any = false, first_v = true;
+                for (size_t cc = g.col_start; cc < g.col_start + limit; cc++) {
+                    float v = (float)df3.samp_float[cc].i_float[df3_idx];
+                    if (v == -1.0f) continue;
+                    if (!first_v) *w++ = ','; first_v = false;
+                    w += snprintf(w, 32, "%g", v);
+                    any = true;
                 }
+                if (!any) *w++ = '.';
             }
 
-            // ---------- DF3 string ----------
+            // DF3 string
             for (size_t col = 0; col < df3.samp_string.size(); col++) {
-                if (!sample_data.empty()) sample_data += ":";
-                sample_data += df3.samp_string[col].i_string[df3_idx];
+                write_sep();
+                const std::string& s_val = df3.samp_string[col].i_string[df3_idx];
+                if (s_val.empty()) *w++ = '.';
+                else { memcpy(w, s_val.data(), s_val.size()); w += s_val.size(); }
             }
 
-            // ---------- DF4 (raggruppati int/float, poi string) ----------
+            // DF4
             if (start_df4 != -1) {
-                // int
-                size_t col = 0;
-                while (col < df4.samp_int.size()) {
-                    std::string base = stripTrailingDigits(df4.samp_int[col].name);
-                    std::string field_val;
-
-                    size_t group_start = col;
-                    while (col < df4.samp_int.size() &&
-                           stripTrailingDigits(df4.samp_int[col].name) == base) {
-                        col++;
-                    }
-                    size_t k = (size_t)start_df4;
-                    while (k < df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                for (const auto& g : df4_int_groups) {
+                    write_sep();
+                    bool any = false;
+                    long k = start_df4;
+                    while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
                         if (df4.samp_id[k] == (unsigned short)s) {
-                            for (size_t c = group_start; c < col; c++) {
-                                if (!field_val.empty()) field_val += ",";
-                                int v = df4.samp_int[c].i_int[k];
-                                field_val += (v != -1) ? std::to_string(v) : ".";
+                            for (size_t cc = g.col_start; cc < g.col_end; cc++) {
+                                if (any) *w++ = ',';
+                                int v = df4.samp_int[cc].i_int[k];
+                                if (v == -1) *w++ = '.';
+                                else w += snprintf(w, 16, "%d", v);
+                                any = true;
                             }
                         }
                         k++;
                     }
-                    sample_data += ":";
-                    sample_data += field_val.empty() ? "." : field_val;
+                    if (!any) *w++ = '.';
                 }
 
-                // float
-                col = 0;
-                while (col < df4.samp_float.size()) {
-                    std::string base = stripTrailingDigits(df4.samp_float[col].name);
-                    std::string field_val;
-
-                    size_t group_start = col;
-                    while (col < df4.samp_float.size() &&
-                           stripTrailingDigits(df4.samp_float[col].name) == base) {
-                        col++;
-                    }
-                    size_t k = (size_t)start_df4;
-                    while (k < df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                for (const auto& g : df4_float_groups) {
+                    write_sep();
+                    bool any = false;
+                    long k = start_df4;
+                    while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
                         if (df4.samp_id[k] == (unsigned short)s) {
-                            for (size_t c = group_start; c < col; c++) {
-                                if (!field_val.empty()) field_val += ",";
-                                float v = (float)df4.samp_float[c].i_float[k];
-                                field_val += (v != -1.0f) ? std::to_string(v) : ".";
+                            for (size_t cc = g.col_start; cc < g.col_end; cc++) {
+                                if (any) *w++ = ',';
+                                float v = (float)df4.samp_float[cc].i_float[k];
+                                if (v == -1.0f) *w++ = '.';
+                                else w += snprintf(w, 32, "%g", v);
+                                any = true;
                             }
                         }
                         k++;
                     }
-                    sample_data += ":";
-                    sample_data += field_val.empty() ? "." : field_val;
+                    if (!any) *w++ = '.';
                 }
 
-                // string
-                for (size_t cc = 0; cc < df4.samp_string.size(); cc++) {
-                    std::string field_val;
-                    size_t k = (size_t)start_df4;
-                    while (k < df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                for (size_t col = 0; col < df4.samp_string.size(); col++) {
+                    write_sep();
+                    bool any = false;
+                    long k = start_df4;
+                    while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
                         if (df4.samp_id[k] == (unsigned short)s) {
-                            if (!field_val.empty()) field_val += ",";
-                            field_val += df4.samp_string[cc].i_string[k];
+                            const std::string& s_val = df4.samp_string[col].i_string[k];
+                            if (any) *w++ = ',';
+                            if (s_val.empty()) *w++ = '.';
+                            else { memcpy(w, s_val.data(), s_val.size()); w += s_val.size(); }
+                            any = true;
                         }
                         k++;
                     }
-                    sample_data += ":";
-                    sample_data += field_val.empty() ? "." : field_val;
+                    if (!any) *w++ = '.';
                 }
             }
 
-            // ---------- Pulizia finali vuoti (VCF Spec) ----------
-            // Rimuove tutti i ":." finali finché ce ne sono
-            while (sample_data.size() >= 2 && sample_data.substr(sample_data.size() - 2) == ":.") {
-                sample_data.erase(sample_data.size() - 2);
-            }
-            // Rimuove un eventuale ":" finale rimasto appeso
-            if (!sample_data.empty() && sample_data.back() == ':') {
-                sample_data.pop_back();
-            }
-
-            // ---------- Append nel buffer ----------
-            size_t out_idx = (size_t)(i - chunk_start) * num_samples + s;
-            offsets[out_idx] = (unsigned int)buffer.size();
-            buffer.insert(buffer.end(), sample_data.begin(), sample_data.end());
-            buffer.push_back('\0');
+            *w++ = '\0';
+            buf_pos += (w - w0);
         }
     }
+
+    buffer.resize(buf_pos);
 }
