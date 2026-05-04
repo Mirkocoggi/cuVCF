@@ -5,10 +5,10 @@
 #include <map>
 #include <vector>
 #include <fstream>
-#include "VCFDataFrames.h"
-#include "GPUStructs.h"
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
+#include "VCFDataFrames.h"
+#include "GPUStructs.h"
 
 #define MAX_LINE_LEN 1024
 #define MAX_NAME_LEN 16
@@ -30,6 +30,8 @@ struct HostBuffers {
     std::vector<int>           in_int_buffer;   ///< Temporary buffer for integer INFO
     std::vector<__half>        in_float_buffer; ///< Temporary buffer for float INFO
     std::vector<uint8_t>       in_flag_buffer;  ///< Temporary buffer for flag INFO
+    std::vector<char>         in_string_buffer;   ///< Temporary flat host buffer for INFO strings.
+    std::vector<unsigned int> in_string_offsets;  ///< Temporary offsets for INFO strings.
 
     // DF2
     int                        df2_count = 0;      ///< Number of alleles in the current chunk
@@ -39,6 +41,8 @@ struct HostBuffers {
     std::vector<unsigned int>  alt_count_buf;      ///< Count mapping variants->alleles
     std::vector<int>           alt_int_buffer;     ///< Temporary buffer for INFO-ALT int
     std::vector<__half>        alt_float_buffer;   ///< Temporary buffer for INFO-ALT float
+    std::vector<char>         alt_string_buffer;  ///< Temporary flat host buffer for INFO-ALT strings.
+    std::vector<unsigned int> alt_string_offsets; ///< Temporary offsets for INFO-ALT strings.
 
     // DF3
     std::vector<char>          sample_buffer;      ///< Pre-calculated patient data buffer

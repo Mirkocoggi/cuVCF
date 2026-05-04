@@ -10,14 +10,14 @@ int main() {
     alt_format_df df4;
 
     CSVParser parser(
-        "data/bos_taurus/df1.csv",
-        "data/bos_taurus/df2.csv",
-        "data/bos_taurus/df3.csv",
-        "data/bos_taurus/df4.csv",
-        "data/bos_taurus/bos_taurus_header.txt"
+        "data/IRBT3/df1.csv",
+        "data/IRBT3/df2.csv",
+        "data/IRBT3/df3.csv",
+        "data/IRBT3/df4.csv",
+        "data/IRBT/irbt_header.txt"
     );
 
-    parser.parseMaps("data/bos_taurus/maps_used_bos.csv", df1, df3, df4);
+    parser.parseMaps("data/IRBT/maps_used_IRBT.csv", df1, df3, df4);
     parser.loadAll(df1, df2, df3, df4);
 
     auto start_time = std::chrono::high_resolution_clock::now();

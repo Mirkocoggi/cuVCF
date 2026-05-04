@@ -5,7 +5,7 @@ NVCC     = nvcc
 # Se Imath e' installato globalmente, -lImath basta.
 CXXFLAGS = -std=c++17 -Wall -O2 -fopenmp
 # Aggiunto -arch=native per assicurare il supporto a __half sulla tua GPU
-NVCCFLAGS= -std=c++17 -O2 -Xcompiler -fopenmp -arch=native 
+NVCCFLAGS= -std=c++17 -O2 -Xcompiler -fopenmp -arch=native
 INCLUDES = -Iinclude -Isrc/CPUVersion -Isrc/GPUVersion
 BUILD    = build
 
@@ -23,6 +23,7 @@ TARGET_CPU = $(BUILD)/test_parser
 TARGET_GPU = $(BUILD)/test_parser_gpu
 
 all: $(TARGET_CPU) $(TARGET_GPU)
+
 
 cpu: $(TARGET_CPU)
 

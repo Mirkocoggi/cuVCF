@@ -15,7 +15,15 @@ struct DeviceMaps {
     unsigned int* chrom_offsets = nullptr;   ///< Starting offsets for each chromosome string
     char* filter_strings = nullptr;          ///< Buffer for filter strings
     unsigned int* filter_offsets = nullptr;  ///< Starting offsets for each filter string
+
+    char* tsa_strings = nullptr;             ///< Buffer for TSA strings
+    unsigned int* tsa_offsets = nullptr;     ///< Starting offsets for TSA
+    char* polyphen_strings = nullptr;        ///< Buffer for PolyPhen strings
+    unsigned int* polyphen_offsets = nullptr;///< Starting offsets for PolyPhen
+    char* csq_strings = nullptr;             ///< Buffer for CSQ strings
+    unsigned int* csq_offsets = nullptr;     ///< Starting offsets for CSQ
 };
+
 
 /**
  * @brief Shadow structure for var_columns_df (DF1) allocated on the device.
@@ -41,11 +49,15 @@ struct DeviceVarColumns {
     char*         int_names = nullptr;  ///< Labels for integer fields
     char*         float_names = nullptr;///< Labels for float fields
     char*         flag_names = nullptr; ///< Labels for flag fields
+    char*         in_string_data = nullptr;    ///< Flat buffer containing ALL variant-level INFO strings.
+    unsigned int* in_string_offsets = nullptr; ///< Offsets to locate individual strings [num_string_fields * chunk_size].
+    char*         string_names = nullptr;      ///< Labels for string INFO fields.
     
     // Dimensions
     int num_int_fields = 0;             ///< Total number of Integer INFO columns
     int num_float_fields = 0;           ///< Total number of Float INFO columns
     int num_flag_fields = 0;            ///< Total number of Flag INFO columns
+    int num_string_fields = 0;          ///< Total number of INFO columns of type String.
 };
 
 /**
@@ -65,11 +77,15 @@ struct DeviceAltColumns {
     __half*       alt_float = nullptr;  ///< Buffer for float INFO-ALT fields (fp16)
     char*         alt_int_names = nullptr;   ///< Labels for integer INFO-ALT fields
     char*         alt_float_names = nullptr; ///< Labels for float INFO-ALT fields
+    char*         alt_string_data = nullptr;    ///< Flat buffer containing ALL allele-specific INFO strings.
+    unsigned int* alt_string_offsets = nullptr; ///< Offsets to locate strings [num_alt_string_fields * df2_count].
+    char*         alt_string_names = nullptr;   ///< Labels for allele-specific string INFO fields.
     
     // Dimensions
     int num_entries = 0;                ///< Total number of DF2 entries for the current chunk
     int num_alt_int_fields = 0;         ///< Number of allele-specific integer fields
     int num_alt_float_fields = 0;       ///< Number of allele-specific float fields
+    int num_alt_string_fields = 0;              ///< Number of allele-specific string fields.
 };
 
 /**

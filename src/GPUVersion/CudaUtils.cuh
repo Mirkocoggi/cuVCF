@@ -26,3 +26,152 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
       if (abort) exit(code);
    }
 }
+
+/**
+ * @brief Device utility to copy a null-terminated string.
+ * 
+ * Functions similarly to the standard C `strcpy`, copying characters from the 
+ * source string to the destination buffer until a null terminator `\0` is reached.
+ * 
+ * @param dst Pointer to the destination memory buffer.
+ * @param src Pointer to the null-terminated source string.
+ * @return int The number of characters written to the destination buffer.
+ */
+__device__ int device_strcpy(char* dst, const char* src) {
+    int i = 0;
+    while (src[i] != '\0') {
+        dst[i] = src[i];
+        i++;
+    }
+    return i;
+}
+   
+/**
+ * @brief Device utility to convert an integer to a character string (itoa).
+ * 
+ * Handles base-10 conversion of integer values, including negative numbers 
+ * and zero. The digits are extracted in reverse order and then properly 
+ * placed into the destination buffer.
+ * 
+ * @param n   The integer value to convert.
+ * @param dst Pointer to the destination character buffer.
+ * @return int The length of the resulting string written to the buffer.
+ */
+__device__ int device_itoa(int n, char* dst){
+    char tmp[20];
+    int dst_pos = 0;
+    int tmp_len = 0;
+
+    if(n==0){
+        dst[0] = '0';
+        return 1;
+    }
+
+    if(n<0){
+        dst[0] = '-';
+        n = -n;
+        dst_pos = 1;
+    }
+
+    while(n>0){
+        tmp[tmp_len] = '0' + n % 10;
+        n /= 10;
+        tmp_len++;
+    }
+
+    for (int j = 0; j < tmp_len; j++){
+        dst[dst_pos + j] = tmp[tmp_len - j - 1];
+    }
+    
+    return dst_pos + tmp_len;
+}
+
+/**
+ * @brief Device utility to convert a float (fp32) to a string (ftoa).
+ * 
+ * Handles floating-point formatting by splitting the number into its integer 
+ * and fractional components. It uses `device_itoa` to process each part and 
+ * inserts a decimal point. Includes a specific check for the missing value sentinel (`-1.0f`).
+ * 
+ * @param f   The floating-point number to format.
+ * @param dst Pointer to the destination character buffer.
+ * @return int The total length of the resulting string.
+ */
+__device__ int device_ftoa(float f, char* dst){
+
+    if(f == -1.0f){
+        dst[0] = '.';
+        return 1;
+    }
+
+    int int_part = (int)f;
+    int int_len = device_itoa(int_part, dst);
+    dst[int_len] = '.';
+    float frac_part = f - int_part;
+
+    if(frac_part < 0){
+        frac_part = -frac_part;
+    }
+
+    frac_part *= 1000000;
+    int frac_len = device_itoa((int)frac_part, dst + int_len + 1);
+    return int_len + frac_len + 1;
+}   
+
+/**
+ * @brief Device utility to compare two null-terminated strings.
+ * 
+ * @param a First string.
+ * @param b Second string.
+ * @return true If strings are identical.
+ * @return false If strings differ.
+ */
+__device__ bool device_strcmp(const char* a, const char* b) {
+    int i = 0;
+    while (a[i] != '\0' && b[i] != '\0') {
+        if (a[i] != b[i]) return false;
+        i++;
+    }
+    return a[i] == b[i];
+}
+
+/**
+ * @brief Checks if a string consists entirely of numeric characters.
+ * 
+ * Acts as a safe guard (similar to a try-catch block) before attempting 
+ * to parse a string into an integer.
+ * 
+ * @param str Null-terminated string to check.
+ * @return true If the string is a valid integer.
+ * @return false If the string contains non-numeric characters.
+ */
+__device__ bool device_is_numeric(const char* str) {
+    if (str[0] == '\0') return false;
+    int i = 0;
+    if (str[0] == '-') i++;
+    if (str[i] == '\0') return false; // Edge case: just "-"
+    for (; str[i] != '\0'; i++) {
+        if (str[i] < '0' || str[i] > '9') return false;
+    }
+    return true;
+}
+
+/**
+ * @brief Device utility to convert a numeric character string to an integer (atoi).
+ * 
+ * @param str Null-terminated string representing a number.
+ * @return int The parsed integer value.
+ */
+__device__ int device_atoi(const char* str) {
+    int res = 0;
+    int i = 0;
+    if (str[0] == '-') i++; // Handle negative sign if present
+    for (; str[i] != '\0'; ++i) {
+        if (str[i] >= '0' && str[i] <= '9') {
+            res = res * 10 + (str[i] - '0');
+        } else {
+            break; // Stop parsing if a non-numeric character is found
+        }
+    }
+    return (str[0] == '-') ? -res : res;
+}

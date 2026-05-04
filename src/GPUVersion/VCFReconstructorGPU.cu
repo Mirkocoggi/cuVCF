@@ -44,39 +44,43 @@ inline void safe_cuda_free(T*& d_ptr) {
  */
 void VCFReconstructorGPU::freeDevice(){
     // --- Sparse Output Buffers ---
-      safe_cuda_free(d_output);
-      safe_cuda_free(d_line_lens);
+    safe_cuda_free(d_output);
+    safe_cuda_free(d_line_lens);
+    safe_cuda_free(d_output_offsets); 
 
-      // --- DF1 (Core Variants & INFO) ---
-      safe_cuda_free(d_df1.var_number);
-      safe_cuda_free(d_df1.chrom);
-      safe_cuda_free(d_df1.pos);
-      safe_cuda_free(d_df1.id_data);
-      safe_cuda_free(d_df1.id_offsets);
-      safe_cuda_free(d_df1.ref_data);
-      safe_cuda_free(d_df1.ref_offsets);
-      safe_cuda_free(d_df1.qual);
-      safe_cuda_free(d_df1.filter);
-      safe_cuda_free(d_df1.in_int);
-      safe_cuda_free(d_df1.in_float);
-      safe_cuda_free(d_df1.in_flag);
+    // --- DF1 (Core Variants & INFO) ---
+    safe_cuda_free(d_df1.var_number);
+    safe_cuda_free(d_df1.chrom);
+    safe_cuda_free(d_df1.pos);
+    safe_cuda_free(d_df1.id_data);
+    safe_cuda_free(d_df1.id_offsets);
+    safe_cuda_free(d_df1.ref_data);
+    safe_cuda_free(d_df1.ref_offsets);
+    safe_cuda_free(d_df1.qual);
+    safe_cuda_free(d_df1.filter);
+    safe_cuda_free(d_df1.in_int);
+    safe_cuda_free(d_df1.in_float);
+    safe_cuda_free(d_df1.in_flag);
+    safe_cuda_free(d_df1.in_string_data);
+    safe_cuda_free(d_df1.in_string_offsets);
     
-      // --- DF2 (Alternative Alleles & INFO-ALT) ---
-      safe_cuda_free(d_df2.var_id);
-      safe_cuda_free(d_df2.alt_data);
-      safe_cuda_free(d_df2.alt_offsets);
-      safe_cuda_free(d_df2.alt_start);
-      safe_cuda_free(d_df2.alt_count);
-      safe_cuda_free(d_df2.alt_int);
-      safe_cuda_free(d_df2.alt_float);
+    // --- DF2 (Alternative Alleles & INFO-ALT) ---
+    safe_cuda_free(d_df2.var_id);
+    safe_cuda_free(d_df2.alt_data);
+    safe_cuda_free(d_df2.alt_offsets);
+    safe_cuda_free(d_df2.alt_start);
+    safe_cuda_free(d_df2.alt_count);
+    safe_cuda_free(d_df2.alt_int);
+    safe_cuda_free(d_df2.alt_float);
+    safe_cuda_free(d_df2.alt_string_data);
+    safe_cuda_free(d_df2.alt_string_offsets);
 
     // --- DF3/DF4 (Packed Sample Data) ---
-        safe_cuda_free(d_df3.sample_data);
-        safe_cuda_free(d_df3.sample_offsets);
+    safe_cuda_free(d_df3.sample_data);
+    safe_cuda_free(d_df3.sample_offsets);
 
-    // --- Compacting (Prefix Sum Buffers) ---
-        safe_cuda_free(d_compacted);
-        safe_cuda_free(d_output_offsets);
+    // NOTE: d_compacted is already freed inside writeChunk() 
+    // to keep its lifecycle local to the I/O operation.
 }
 
 //Destructor
@@ -85,29 +89,6 @@ VCFReconstructorGPU::~VCFReconstructorGPU() {
 
     // Clean up host-side dynamically allocated compaction buffer
     if (h_compacted) safe_cuda_free(h_compacted);
-}
-
-/*
-* The parser inherently builds forward dictionaries (e.g., String -> char ID) to 
-* compress the data in RAM. This method flips those dictionaries (char ID -> String) 
-* so that the GPU kernel can retrieve the original textual representation.
-*/
-void VCFReconstructorGPU::buildInverseMaps(const var_columns_df& df1) {
-    for (const auto& pair : df1.chrom_map) {
-        inv_chrom_map[pair.second] = pair.first;
-    }
-    for (const auto& pair : df1.filter_map) {
-        inv_filter_map[pair.second] = pair.first;
-    }
-    for (const auto& pair : polyphenCharMap) {
-        inv_polyphen_map[pair.second] = pair.first;
-    }
-    for (const auto& pair : csqCharMap) {
-        inv_csq_map[pair.second] = pair.first;
-    }
-    for (const auto& pair : tsaCharMap) {
-        inv_tsa_map[pair.second] = pair.first;
-    }
 }
 
 // Device Allocation & Data Transfer Setup
@@ -158,6 +139,19 @@ void VCFReconstructorGPU::allocateDevice(const var_columns_df& df1,
     gpuErrchk( cudaMalloc((void**)&d_df1.in_float,    d_df1.num_float_fields * chunk_size * sizeof(__half)));
     gpuErrchk( cudaMalloc((void**)&d_df1.in_flag,     d_df1.num_flag_fields  * chunk_size * sizeof(bool)));
 
+    // --- DF1 INFO Strings ---
+    d_df1.num_string_fields = df1.in_string.size();
+    size_t info_str_total_chars = 0;
+    for (int f = 0; f < d_df1.num_string_fields; f++) {
+        for (int i = chunk_start; i < chunk_end; i++) {
+            info_str_total_chars += df1.in_string[f].i_string[i].size() + 1; // +1 for the '\0' terminator
+        }
+    }
+    if (info_str_total_chars > 0) {
+        gpuErrchk(cudaMalloc((void**)&d_df1.in_string_data, info_str_total_chars * sizeof(char)));
+    }
+    gpuErrchk(cudaMalloc((void**)&d_df1.in_string_offsets, d_df1.num_string_fields * chunk_size * sizeof(unsigned int)));
+
 
     // --- DF2 (Alternative alleles count & allocation) ---
     int df2_count = 0;
@@ -181,6 +175,19 @@ void VCFReconstructorGPU::allocateDevice(const var_columns_df& df1,
     gpuErrchk( cudaMalloc((void**)&d_df2.alt_int,          d_df2.num_alt_int_fields   * df2_count * sizeof(int)));
     gpuErrchk( cudaMalloc((void**)&d_df2.alt_float,        d_df2.num_alt_float_fields * df2_count * sizeof(__half)));
 
+    // --- DF2 INFO-ALT Strings ---
+    d_df2.num_alt_string_fields = df2.alt_string.size();
+    size_t alt_info_str_total_chars = 0;
+    for (int f = 0; f < d_df2.num_alt_string_fields; f++) {
+        for (int i = df2_start; i < df2_start + df2_count; i++) {
+            alt_info_str_total_chars += df2.alt_string[f].i_string[i].size() + 1;
+        }
+    }
+    if (alt_info_str_total_chars > 0) {
+        gpuErrchk(cudaMalloc((void**)&d_df2.alt_string_data, alt_info_str_total_chars * sizeof(char)));
+    }
+    gpuErrchk(cudaMalloc((void**)&d_df2.alt_string_offsets, d_df2.num_alt_string_fields * df2_count * sizeof(unsigned int)));
+
     // --- DF3 (Sample Strings upper bound) ---
     // Calculate a safe upper bound size for sample strings to prevent OOM errors.
     size_t max_sample_chars = (size_t)chunk_size * df3.numSample * MAX_SAMPLE_STRING_LEN;
@@ -189,119 +196,6 @@ void VCFReconstructorGPU::allocateDevice(const var_columns_df& df1,
     gpuErrchk( cudaMalloc(&d_df3.sample_offsets, chunk_size * df3.numSample * sizeof(unsigned int)));
     d_df3.num_samples = df3.numSample;
 
-}
-
-void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
-                                              const alt_columns_df& df2,
-                                              const sample_columns_df& df3,
-                                              const alt_format_df& df4,
-                                              HostBuffers& buffers) {
-    int chunk_size  = buffers.chunk_size;
-    int chunk_start = buffers.chunk_start;
-    int chunk_end   = buffers.chunk_end;
-    int df2_start   = buffers.df2_start;
-
-    // --- Prepare DF1 ID buffer ---
-    buffers.id_buffer.clear();
-    buffers.id_offsets.resize(chunk_size);
-    {
-        unsigned int offset = 0;
-        for (int i = chunk_start; i < chunk_end; i++) {
-            buffers.id_offsets[i - chunk_start] = offset;
-            for (char c : df1.id[i]) buffers.id_buffer.push_back(c);
-            buffers.id_buffer.push_back('\0');
-            offset += df1.id[i].size() + 1;
-        }
-    }
-
-    // --- Prepare DF1 REF buffer ---
-    buffers.ref_buffer.clear();
-    buffers.ref_offsets.resize(chunk_size);
-    {
-        unsigned int offset = 0;
-        for (int i = chunk_start; i < chunk_end; i++) {
-            buffers.ref_offsets[i - chunk_start] = offset;
-            for (char c : df1.ref[i]) buffers.ref_buffer.push_back(c);
-            buffers.ref_buffer.push_back('\0');
-            offset += df1.ref[i].size() + 1;
-        }
-    }
-
-    // --- Prepare DF1 INFO integers ---
-    // Flatten multi-dimensional array into a 1D contiguous block
-    buffers.in_int_buffer.assign(d_df1.num_int_fields * chunk_size, 0);
-    for (int f = 0; f < d_df1.num_int_fields; f++) {
-        for (int i = chunk_start; i < chunk_end; i++) {
-            buffers.in_int_buffer[f * chunk_size + (i - chunk_start)] = df1.in_int[f].i_int[i];
-        }
-    }
-
-    // --- Prepare DF1 INFO floats ---
-    buffers.in_float_buffer.assign(d_df1.num_float_fields * chunk_size, __half(0));
-    for (int f = 0; f < d_df1.num_float_fields; f++) {
-        for (int i = chunk_start; i < chunk_end; i++) {
-            buffers.in_float_buffer[f * chunk_size + (i - chunk_start)] = df1.in_float[f].i_float[i];
-        }
-    }
-
-    // --- Prepare DF1 INFO flags ---
-    buffers.in_flag_buffer.assign(d_df1.num_flag_fields * chunk_size, 0);
-    for (int f = 0; f < d_df1.num_flag_fields; f++) {
-        for (int i = chunk_start; i < chunk_end; i++) {
-            buffers.in_flag_buffer[f * chunk_size + (i - chunk_start)] = df1.in_flag[f].i_flag[i];
-        }
-    }
-
-    // --- Prepare DF2 counts ---
-    int df2_count = 0;
-    for (size_t j = df2_start; j < df2.var_id.size() && (int)df2.var_id[j] < chunk_end; j++) df2_count++;
-    buffers.df2_count = df2_count;
-
-    // --- Prepare DF2 ALT strings ---
-    buffers.alt_data_buffer.clear();
-    buffers.alt_data_offsets.resize(df2_count);
-    {
-        unsigned int offset = 0;
-        for (int i = df2_start; i < df2_start + df2_count; i++) {
-            buffers.alt_data_offsets[i - df2_start] = offset;
-            for (char c : df2.alt[i]) buffers.alt_data_buffer.push_back(c);
-            buffers.alt_data_buffer.push_back('\0');
-            offset += df2.alt[i].size() + 1;
-        }
-    }
-
-    // --- Setup alt_start and alt_count mapping arrays ---
-    buffers.alt_start_buf.assign(chunk_size, 0);
-    buffers.alt_count_buf.assign(chunk_size, 0);
-    {
-        int j = df2_start;
-        for (int i = 0; i < chunk_size; i++) {
-            unsigned int var_num = df1.var_number[chunk_start + i];
-            buffers.alt_start_buf[i] = j - df2_start;
-            while (j < df2_start + df2_count && df2.var_id[j] == var_num) j++;
-            buffers.alt_count_buf[i] = (j - df2_start) - buffers.alt_start_buf[i];
-        }
-    }
-
-    // --- Prepare DF2 ALT INFO fields ---
-    buffers.alt_int_buffer.assign(d_df2.num_alt_int_fields * df2_count, 0);
-    for (int f = 0; f < d_df2.num_alt_int_fields; f++) {
-        for (int i = df2_start; i < df2_start + df2_count; i++) {
-            buffers.alt_int_buffer[f * df2_count + (i - df2_start)] = df2.alt_int[f].i_int[i];
-        }
-    }
-
-    buffers.alt_float_buffer.assign(d_df2.num_alt_float_fields * df2_count, __half(0));
-    for (int f = 0; f < d_df2.num_alt_float_fields; f++) {
-        for (int i = df2_start; i < df2_start + df2_count; i++) {
-            buffers.alt_float_buffer[f * df2_count + (i - df2_start)] = df2.alt_float[f].i_float[i];
-        }
-    }
-
-    // --- Package complex sample strings (delegates to buildSampleStrings) ---
-    buildSampleStrings(df1, df2, df3, df4,
-                       chunk_size, chunk_start, chunk_end, df2_start,
-                       buffers.sample_buffer, buffers.sample_offsets);
 }
 
 void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
@@ -342,6 +236,14 @@ void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
     gpuErrchk(cudaMemcpy(d_df1.in_flag, buffers.in_flag_buffer.data(),
                          d_df1.num_flag_fields * chunk_size * sizeof(uint8_t), cudaMemcpyHostToDevice));
 
+    // --- DF1 String INFO Copies ---
+    if (buffers.in_string_buffer.size() > 0) {
+        gpuErrchk(cudaMemcpy(d_df1.in_string_data, buffers.in_string_buffer.data(),
+                            buffers.in_string_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
+    }
+    gpuErrchk(cudaMemcpy(d_df1.in_string_offsets, buffers.in_string_offsets.data(),
+                        d_df1.num_string_fields * chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
+
     // --- DF2 Direct and Staging Copies ---
     gpuErrchk(cudaMemcpy(d_df2.var_id, df2.var_id.data() + df2_start,
                          df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice));
@@ -361,103 +263,20 @@ void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
     gpuErrchk(cudaMemcpy(d_df2.alt_float, buffers.alt_float_buffer.data(),
                          d_df2.num_alt_float_fields * df2_count * sizeof(__half), cudaMemcpyHostToDevice));
 
+    // --- DF2 String INFO-ALT Copies ---
+    if (buffers.alt_string_buffer.size() > 0) {
+        gpuErrchk(cudaMemcpy(d_df2.alt_string_data, buffers.alt_string_buffer.data(),
+                            buffers.alt_string_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
+    }
+    gpuErrchk(cudaMemcpy(d_df2.alt_string_offsets, buffers.alt_string_offsets.data(),
+                        d_df2.num_alt_string_fields * df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice));
+
     // --- DF3 Sample Data Copies ---
     gpuErrchk(cudaMemcpy(d_df3.sample_data, buffers.sample_buffer.data(),
                          buffers.sample_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
     gpuErrchk(cudaMemcpy(d_df3.sample_offsets, buffers.sample_offsets.data(),
                          buffers.sample_offsets.size() * sizeof(unsigned int), cudaMemcpyHostToDevice));
 }
-
-/**
- * @brief Device utility to copy a null-terminated string.
- * 
- * Functions similarly to the standard C `strcpy`, copying characters from the 
- * source string to the destination buffer until a null terminator `\0` is reached.
- * 
- * @param dst Pointer to the destination memory buffer.
- * @param src Pointer to the null-terminated source string.
- * @return int The number of characters written to the destination buffer.
- */
-__device__ int device_strcpy(char* dst, const char* src) {
-    int i = 0;
-    while (src[i] != '\0') {
-        dst[i] = src[i];
-        i++;
-    }
-    return i;
-}
-   
-/**
- * @brief Device utility to convert an integer to a character string (itoa).
- * 
- * Handles base-10 conversion of integer values, including negative numbers 
- * and zero. The digits are extracted in reverse order and then properly 
- * placed into the destination buffer.
- * 
- * @param n   The integer value to convert.
- * @param dst Pointer to the destination character buffer.
- * @return int The length of the resulting string written to the buffer.
- */
-__device__ int device_itoa(int n, char* dst){
-    char tmp[20];
-    int dst_pos = 0;
-    int tmp_len = 0;
-
-    if(n==0){
-        dst[0] = '0';
-        return 1;
-    }
-
-    if(n<0){
-        dst[0] = '-';
-        n = -n;
-        dst_pos = 1;
-    }
-
-    while(n>0){
-        tmp[tmp_len] = '0' + n % 10;
-        n /= 10;
-        tmp_len++;
-    }
-
-    for (int j = 0; j < tmp_len; j++){
-        dst[dst_pos + j] = tmp[tmp_len - j - 1];
-    }
-    
-    return dst_pos + tmp_len;
-}
-
-/**
- * @brief Device utility to convert a float (fp32) to a string (ftoa).
- * 
- * Handles floating-point formatting by splitting the number into its integer 
- * and fractional components. It uses `device_itoa` to process each part and 
- * inserts a decimal point. Includes a specific check for the missing value sentinel (`-1.0f`).
- * 
- * @param f   The floating-point number to format.
- * @param dst Pointer to the destination character buffer.
- * @return int The total length of the resulting string.
- */
-__device__ int device_ftoa(float f, char* dst){
-
-    if(f == -1.0f){
-        dst[0] = '.';
-        return 1;
-    }
-
-    int int_part = (int)f;
-    int int_len = device_itoa(int_part, dst);
-    dst[int_len] = '.';
-    float frac_part = f - int_part;
-
-    if(frac_part < 0){
-        frac_part = -frac_part;
-    }
-
-    frac_part *= 1000000;
-    int frac_len = device_itoa((int)frac_part, dst + int_len + 1);
-    return int_len + frac_len + 1;
-}   
 
 /**
  * @brief Stream compaction kernel to consolidate sparse VCF string buffers.
@@ -611,6 +430,60 @@ __global__ void reconstructKernel(
             }
         }
 
+        // --- Append variant-level String fields ---
+        for (int f = 0; f < df1.num_string_fields; f++){
+            int flat_idx = f * chunk_size + i;
+            unsigned int offset = df1.in_string_offsets[flat_idx];
+            const char* str_val = df1.in_string_data + offset;
+            
+            // Ensure the string is neither empty nor the missing value sentinel "."
+            if (str_val[0] != '\0' && !(str_val[0] == '.' && str_val[1] == '\0')){
+                if(!first_info) line[pos++] = ';';
+                first_info = false;
+                
+                const char* field_name = df1.string_names + f * MAX_NAME_LEN;
+                pos += device_strcpy(line + pos, field_name);
+                line[pos++] = '=';
+                
+                bool mapped = false;
+
+                // Decode specific mapped fields (TSA, PolyPhen, CSQ)
+                if (device_strcmp(field_name, "TSA") && device_is_numeric(str_val)) {
+                    int val = device_atoi(str_val);
+                    if (val >= 0 && val < 256) { // Bounds check matching 'it != map.end()'
+                        const char* mapped_str = maps.tsa_strings + maps.tsa_offsets[val];
+                        if (mapped_str[0] != '\0') {
+                            pos += device_strcpy(line + pos, mapped_str);
+                            mapped = true;
+                        }
+                    }
+                } else if (device_strcmp(field_name, "PolyPhen") && device_is_numeric(str_val)) {
+                    int val = device_atoi(str_val);
+                    if (val >= 0 && val < 256) {
+                        const char* mapped_str = maps.polyphen_strings + maps.polyphen_offsets[val];
+                        if (mapped_str[0] != '\0') {
+                            pos += device_strcpy(line + pos, mapped_str);
+                            mapped = true;
+                        }
+                    }
+                } else if (device_strcmp(field_name, "CSQ") && device_is_numeric(str_val)) {
+                    int val = device_atoi(str_val);
+                    if (val >= 0 && val < 256) {
+                        const char* mapped_str = maps.csq_strings + maps.csq_offsets[val];
+                        if (mapped_str[0] != '\0') {
+                            pos += device_strcpy(line + pos, mapped_str);
+                            mapped = true;
+                        }
+                    }
+                }
+                
+                // Fallback (simulating the 'catch' block or unmapped string)
+                if (!mapped) {
+                    pos += device_strcpy(line + pos, str_val);
+                }
+            }
+        }
+
         // Append allele-specific Integer fields from DF2 (comma-separated if multi-allelic)
         for (int f = 0; f < df2.num_alt_int_fields; f++){
             // Validate if the group contains any actual data
@@ -668,6 +541,44 @@ __global__ void reconstructKernel(
                     line[pos++] = '.';
                 } else {
                     pos += device_ftoa(v, line + pos);
+                }
+            }
+        }
+
+        // --- Append allele-specific String fields from DF2 ---
+        for (int f = 0; f < df2.num_alt_string_fields; f++){
+            bool any_valid = false;
+            
+            // First pass: check if there is at least one valid data point in the multi-allelic group
+            for (int j = alt_begin; j < alt_end; j++){
+                int flat_idx = f * df2.num_entries + j;
+                const char* str_val = df2.alt_string_data + df2.alt_string_offsets[flat_idx];
+                if (str_val[0] != '\0' && !(str_val[0] == '.' && str_val[1] == '\0')){
+                    any_valid = true;
+                    break;
+                }
+            }
+            if (!any_valid) continue;
+
+            if (!first_info) line[pos++] = ';';
+            first_info = false;
+
+            pos += device_strcpy(line + pos, df2.alt_string_names + f * MAX_NAME_LEN);
+            line[pos++] = '=';
+
+            bool first_val = true;
+            for (int j = alt_begin; j < alt_end; j++){
+                if (!first_val) line[pos++] = ',';
+                first_val = false;
+                
+                int flat_idx = f * df2.num_entries + j;
+                const char* str_val = df2.alt_string_data + df2.alt_string_offsets[flat_idx];
+                
+                // Write the missing indicator if the string is empty or already a sentinel
+                if (str_val[0] == '\0' || (str_val[0] == '.' && str_val[1] == '\0')){
+                    line[pos++] = '.';
+                } else {
+                    pos += device_strcpy(line + pos, str_val);
                 }
             }
         }
@@ -901,50 +812,75 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
     d_df3.num_samples    = df3.numSample;
 
     // ====== Dataset Constants (Allocated and copied once) ======
-    // Field names buffers
     {
-        std::vector<char> int_names_buffer(df1.in_int.size() * MAX_NAME_LEN, '\0');
-        for (size_t f = 0; f < df1.in_int.size(); f++) {
-            strncpy(&int_names_buffer[f * MAX_NAME_LEN], df1.in_int[f].name.c_str(), MAX_NAME_LEN - 1);
-        }
-        std::vector<char> float_names_buffer(df1.in_float.size() * MAX_NAME_LEN, '\0');
-        for (size_t f = 0; f < df1.in_float.size(); f++) {
-            strncpy(&float_names_buffer[f * MAX_NAME_LEN], df1.in_float[f].name.c_str(), MAX_NAME_LEN - 1);
-        }
-        std::vector<char> flag_names_buffer(df1.in_flag.size() * MAX_NAME_LEN, '\0');
-        for (size_t f = 0; f < df1.in_flag.size(); f++) {
-            strncpy(&flag_names_buffer[f * MAX_NAME_LEN], df1.in_flag[f].name.c_str(), MAX_NAME_LEN - 1);
-        }
-        std::vector<char> alt_int_names_buffer(df2.alt_int.size() * MAX_NAME_LEN, '\0');
-        for (size_t f = 0; f < df2.alt_int.size(); f++) {
-            strncpy(&alt_int_names_buffer[f * MAX_NAME_LEN], df2.alt_int[f].name.c_str(), MAX_NAME_LEN - 1);
-        }
-        std::vector<char> alt_float_names_buffer(df2.alt_float.size() * MAX_NAME_LEN, '\0');
-        for (size_t f = 0; f < df2.alt_float.size(); f++) {
-            strncpy(&alt_float_names_buffer[f * MAX_NAME_LEN], df2.alt_float[f].name.c_str(), MAX_NAME_LEN - 1);
-        }
+        // --- Helper per allocazione sicura ---
+        auto safe_alloc_and_copy = [](void** device_ptr, const std::vector<char>& buffer) {
+            if (!buffer.empty()) {
+                gpuErrchk(cudaMalloc(device_ptr, buffer.size()));
+                gpuErrchk(cudaMemcpy(*device_ptr, buffer.data(), buffer.size(), cudaMemcpyHostToDevice));
+            } else {
+                *device_ptr = nullptr; // Fondamentale per evitare crash in free
+            }
+        };
 
-        gpuErrchk(cudaMalloc(&d_df1.int_names,   int_names_buffer.size()));
-        gpuErrchk(cudaMalloc(&d_df1.float_names, float_names_buffer.size()));
-        gpuErrchk(cudaMalloc(&d_df1.flag_names,  flag_names_buffer.size()));
-        gpuErrchk(cudaMalloc(&d_df2.alt_int_names,   alt_int_names_buffer.size()));
-        gpuErrchk(cudaMalloc(&d_df2.alt_float_names, alt_float_names_buffer.size()));
+        // Preparazione buffer nomi (DF1)
+        std::vector<char> int_names_buf(df1.in_int.size() * MAX_NAME_LEN, '\0');
+        for (size_t f = 0; f < df1.in_int.size(); f++) strncpy(&int_names_buf[f * MAX_NAME_LEN], df1.in_int[f].name.c_str(), MAX_NAME_LEN - 1);
+        
+        std::vector<char> float_names_buf(df1.in_float.size() * MAX_NAME_LEN, '\0');
+        for (size_t f = 0; f < df1.in_float.size(); f++) strncpy(&float_names_buf[f * MAX_NAME_LEN], df1.in_float[f].name.c_str(), MAX_NAME_LEN - 1);
+        
+        std::vector<char> flag_names_buf(df1.in_flag.size() * MAX_NAME_LEN, '\0');
+        for (size_t f = 0; f < df1.in_flag.size(); f++) strncpy(&flag_names_buf[f * MAX_NAME_LEN], df1.in_flag[f].name.c_str(), MAX_NAME_LEN - 1);
 
-        gpuErrchk(cudaMemcpy(d_df1.int_names,   int_names_buffer.data(),   int_names_buffer.size(),   cudaMemcpyHostToDevice));
-        gpuErrchk(cudaMemcpy(d_df1.float_names, float_names_buffer.data(), float_names_buffer.size(), cudaMemcpyHostToDevice));
-        gpuErrchk(cudaMemcpy(d_df1.flag_names,  flag_names_buffer.data(),  flag_names_buffer.size(),  cudaMemcpyHostToDevice));
-        gpuErrchk(cudaMemcpy(d_df2.alt_int_names,   alt_int_names_buffer.data(),   alt_int_names_buffer.size(),   cudaMemcpyHostToDevice));
-        gpuErrchk(cudaMemcpy(d_df2.alt_float_names, alt_float_names_buffer.data(), alt_float_names_buffer.size(), cudaMemcpyHostToDevice));
+        std::vector<char> string_names_buf(df1.in_string.size() * MAX_NAME_LEN, '\0');
+        for (size_t f = 0; f < df1.in_string.size(); f++) strncpy(&string_names_buf[f * MAX_NAME_LEN], df1.in_string[f].name.c_str(), MAX_NAME_LEN - 1);
 
-        d_df1.num_int_fields   = df1.in_int.size();
-        d_df1.num_float_fields = df1.in_float.size();
-        d_df1.num_flag_fields  = df1.in_flag.size();
-        d_df2.num_alt_int_fields   = df2.alt_int.size();
-        d_df2.num_alt_float_fields = df2.alt_float.size();
+        // Preparazione buffer nomi (DF2)
+        std::vector<char> alt_int_names_buf(df2.alt_int.size() * MAX_NAME_LEN, '\0');
+        for (size_t f = 0; f < df2.alt_int.size(); f++) strncpy(&alt_int_names_buf[f * MAX_NAME_LEN], df2.alt_int[f].name.c_str(), MAX_NAME_LEN - 1);
+        
+        std::vector<char> alt_float_names_buf(df2.alt_float.size() * MAX_NAME_LEN, '\0');
+        for (size_t f = 0; f < df2.alt_float.size(); f++) strncpy(&alt_float_names_buf[f * MAX_NAME_LEN], df2.alt_float[f].name.c_str(), MAX_NAME_LEN - 1);
+
+        std::vector<char> alt_string_names_buf(df2.alt_string.size() * MAX_NAME_LEN, '\0');
+        for (size_t f = 0; f < df2.alt_string.size(); f++) strncpy(&alt_string_names_buf[f * MAX_NAME_LEN], df2.alt_string[f].name.c_str(), MAX_NAME_LEN - 1);
+
+        // Esecuzione allocazioni protette
+        safe_alloc_and_copy((void**)&d_df1.int_names,   int_names_buf);
+        safe_alloc_and_copy((void**)&d_df1.float_names, float_names_buf);
+        safe_alloc_and_copy((void**)&d_df1.flag_names,  flag_names_buf);
+        safe_alloc_and_copy((void**)&d_df1.string_names, string_names_buf);
+
+        safe_alloc_and_copy((void**)&d_df2.alt_int_names,   alt_int_names_buf);
+        safe_alloc_and_copy((void**)&d_df2.alt_float_names, alt_float_names_buf);
+        safe_alloc_and_copy((void**)&d_df2.alt_string_names, alt_string_names_buf);
+
+        // Update counters
+        d_df1.num_int_fields    = df1.in_int.size();
+        d_df1.num_float_fields  = df1.in_float.size();
+        d_df1.num_flag_fields   = df1.in_flag.size();
+        d_df1.num_string_fields = df1.in_string.size();
+        
+        d_df2.num_alt_int_fields    = df2.alt_int.size();
+        d_df2.num_alt_float_fields  = df2.alt_float.size();
+        d_df2.num_alt_string_fields = df2.alt_string.size();
     }
 
     // Inverse maps buffers
     {
+        auto safe_map_alloc = [](void** str_ptr, void** off_ptr, const std::vector<char>& s_buf, const std::vector<unsigned int>& o_buf) {
+            gpuErrchk(cudaMalloc(off_ptr, 256 * sizeof(unsigned int)));
+            gpuErrchk(cudaMemcpy(*off_ptr, o_buf.data(), 256 * sizeof(unsigned int), cudaMemcpyHostToDevice));
+
+            if (!s_buf.empty()) {
+                gpuErrchk(cudaMalloc(str_ptr, s_buf.size()));
+                gpuErrchk(cudaMemcpy(*str_ptr, s_buf.data(), s_buf.size(), cudaMemcpyHostToDevice));
+            } else {
+                *str_ptr = nullptr;
+            }
+        };
+
         std::vector<char> chrom_strings_buf;
         std::vector<unsigned int> chrom_offsets_buf(256, 0);
         unsigned int offset = 0;
@@ -971,15 +907,53 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
             }
         }
 
-        gpuErrchk(cudaMalloc(&d_maps.chrom_strings,  chrom_strings_buf.size()));
-        gpuErrchk(cudaMalloc(&d_maps.chrom_offsets,  256 * sizeof(unsigned int)));
-        gpuErrchk(cudaMalloc(&d_maps.filter_strings, filter_strings_buf.size()));
-        gpuErrchk(cudaMalloc(&d_maps.filter_offsets, 256 * sizeof(unsigned int)));
+        // --- PolyPhen Map ---
+        std::vector<char> polyphen_strings_buf;
+        std::vector<unsigned int> polyphen_offsets_buf(256, 0);
+        unsigned int offset_poly = 0;
+        for (const auto& pair : inv_polyphen_map) {
+            int idx = static_cast<int>(pair.first);
+            if (idx >= 0 && idx < 256) {
+                polyphen_offsets_buf[idx] = offset_poly;
+                for (char c : pair.second) polyphen_strings_buf.push_back(c);
+                polyphen_strings_buf.push_back('\0');
+                offset_poly += pair.second.size() + 1;
+            }
+        }
 
-        gpuErrchk(cudaMemcpy(d_maps.chrom_strings,  chrom_strings_buf.data(),  chrom_strings_buf.size(),  cudaMemcpyHostToDevice));
-        gpuErrchk(cudaMemcpy(d_maps.chrom_offsets,  chrom_offsets_buf.data(),  256 * sizeof(unsigned int), cudaMemcpyHostToDevice));
-        gpuErrchk(cudaMemcpy(d_maps.filter_strings, filter_strings_buf.data(), filter_strings_buf.size(), cudaMemcpyHostToDevice));
-        gpuErrchk(cudaMemcpy(d_maps.filter_offsets, filter_offsets_buf.data(), 256 * sizeof(unsigned int), cudaMemcpyHostToDevice));
+        // --- CSQ Map ---
+        std::vector<char> csq_strings_buf;
+        std::vector<unsigned int> csq_offsets_buf(256, 0);
+        unsigned int offset_csq = 0;
+        for (const auto& pair : inv_csq_map) {
+            int idx = static_cast<int>(pair.first);
+            if (idx >= 0 && idx < 256) {
+                csq_offsets_buf[idx] = offset_csq;
+                for (char c : pair.second) csq_strings_buf.push_back(c);
+                csq_strings_buf.push_back('\0');
+                offset_csq += pair.second.size() + 1;
+            }
+        }
+
+        // --- TSA Map ---
+        std::vector<char> tsa_strings_buf;
+        std::vector<unsigned int> tsa_offsets_buf(256, 0);
+        unsigned int offset_tsa = 0;
+        for (const auto& pair : inv_tsa_map) {
+            int idx = static_cast<int>(pair.first);
+            if (idx >= 0 && idx < 256) {
+                tsa_offsets_buf[idx] = offset_tsa;
+                for (char c : pair.second) tsa_strings_buf.push_back(c);
+                tsa_strings_buf.push_back('\0');
+                offset_tsa += pair.second.size() + 1;
+            }
+        }
+
+        safe_map_alloc((void**)&d_maps.chrom_strings,  (void**)&d_maps.chrom_offsets,  chrom_strings_buf,  chrom_offsets_buf);
+        safe_map_alloc((void**)&d_maps.filter_strings, (void**)&d_maps.filter_offsets, filter_strings_buf, filter_offsets_buf);
+        safe_map_alloc((void**)&d_maps.polyphen_strings, (void**)&d_maps.polyphen_offsets, polyphen_strings_buf, polyphen_offsets_buf);
+        safe_map_alloc((void**)&d_maps.csq_strings,    (void**)&d_maps.csq_offsets,    csq_strings_buf,    csq_offsets_buf);
+        safe_map_alloc((void**)&d_maps.tsa_strings,    (void**)&d_maps.tsa_offsets,    tsa_strings_buf,    tsa_offsets_buf);
     }
 
     // Main execution loop: Process data in chunks
@@ -1071,6 +1045,12 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
     safe_cuda_free(d_maps.filter_strings);
     safe_cuda_free(d_maps.filter_offsets);
     safe_cuda_free(d_df3.format_str);
+    safe_cuda_free(d_maps.tsa_strings);
+    safe_cuda_free(d_maps.tsa_offsets);
+    safe_cuda_free(d_maps.polyphen_strings);
+    safe_cuda_free(d_maps.polyphen_offsets);
+    safe_cuda_free(d_maps.csq_strings);
+    safe_cuda_free(d_maps.csq_offsets);
 
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
@@ -1105,6 +1085,18 @@ std::map<std::string, std::string> VCFReconstructorGPU::parseFormatNumbers(const
     return result;
 }
 
+/**
+ * @param df1         Core variants DataFrame.
+ * @param df2         Alternative alleles DataFrame.
+ * @param df3         Sample core DataFrame.
+ * @param df4         Intersected sample-allele DataFrame.
+ * @param chunk_size  Number of variants in the current block.
+ * @param chunk_start Starting index in DF1.
+ * @param chunk_end   Ending index in DF1.
+ * @param df2_start   Starting index in DF2.
+ * @param buffer      Output vector that will hold the flattened character data.
+ * @param offsets     Output vector that will hold the prefix-summed offsets for the character buffer.
+ */
 void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                                              const alt_columns_df& df2,
                                              const sample_columns_df& df3,
@@ -1127,18 +1119,23 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
         size_t df4_cursor = 0;
         while (df4_cursor < df4.var_id.size() &&
                df4.var_id[df4_cursor] < df1.var_number[chunk_start]) df4_cursor++;
+               
         for (int i = chunk_start; i < chunk_end; i++) {
             unsigned int current_var_id = df1.var_number[i];
+            
             while (df2_cursor < df2.var_id.size() &&
                    df2.var_id[df2_cursor] < current_var_id) df2_cursor++;
+                   
             size_t num_alts = 0;
             {
                 size_t j = df2_cursor;
                 while (j < df2.var_id.size() && df2.var_id[j] == current_var_id) { num_alts++; j++; }
             }
             per_var_num_alts[i - chunk_start] = num_alts;
+            
             while (df4_cursor < df4.var_id.size() &&
                    df4.var_id[df4_cursor] < current_var_id) df4_cursor++;
+                   
             per_var_start_df4[i - chunk_start] =
                 (df4_cursor < df4.var_id.size() &&
                  df4.var_id[df4_cursor] == current_var_id) ? (long)df4_cursor : -1;
@@ -1177,6 +1174,9 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                 bool first_field = true;
                 auto write_sep = [&]() { if (!first_field) *w++ = ':'; first_field = false; };
 
+                // FLAG PER TRONCARE I CAMPI SE GT E' MANCANTE
+                bool skip_rest = false;
+
                 // Handle Genotype (GT)
                 if (has_gt) {
                     char gt_code = -1;
@@ -1190,112 +1190,122 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                         }
                     }
                     write_sep();
-                    if (gt_code == -1) { *w++ = '.'; *w++ = '|'; *w++ = '.'; }
+                    if (gt_code == -1) { 
+                        *w++ = '.'; *w++ = '|'; *w++ = '.'; 
+                        skip_rest = true; 
+                    }
                     else {
                         const std::string& gt = df3.getGTStringFromChar(gt_code);
                         memcpy(w, gt.data(), gt.size()); w += gt.size();
+                        // Protezione extra se il mapping originario conteneva la stringa missing
+                        if (gt == ".|." || gt == "./.") {
+                            skip_rest = true;
+                        }
                     }
                 }
 
-                // Process DF3 Integer fields
-                for (const auto& g : df3_int_groups) {
-                    write_sep();
-                    size_t group_size = g.col_end - g.col_start;
-                    size_t limit = (group_size > 1)
-                        ? std::min(group_size, (g.number_kind == 1) ? num_alts : num_alts + 1) : 1;
-                    bool any = false, first_v = true;
-                    for (size_t cc = g.col_start; cc < g.col_start + limit; cc++) {
-                        int v = df3.samp_int[cc].i_int[df3_idx];
-                        if (v == -1) continue;
-                        if (!first_v) *w++ = ','; first_v = false;
-                        w += snprintf(w, 16, "%d", v);
-                        any = true;
-                    }
-                    if (!any) *w++ = '.';
-                }
-
-                // Process DF3 Float fields
-                for (const auto& g : df3_float_groups) {
-                    write_sep();
-                    size_t group_size = g.col_end - g.col_start;
-                    size_t limit = (group_size > 1)
-                        ? std::min(group_size, (g.number_kind == 1) ? num_alts : num_alts + 1) : 1;
-                    bool any = false, first_v = true;
-                    for (size_t cc = g.col_start; cc < g.col_start + limit; cc++) {
-                        float v = (float)df3.samp_float[cc].i_float[df3_idx];
-                        if (v == -1.0f) continue;
-                        if (!first_v) *w++ = ','; first_v = false;
-                        w += snprintf(w, 32, "%g", v);
-                        any = true;
-                    }
-                    if (!any) *w++ = '.';
-                }
-
-                // Process DF3 String fields
-                for (size_t col = 0; col < df3.samp_string.size(); col++) {
-                    write_sep();
-                    const std::string& s_val = df3.samp_string[col].i_string[df3_idx];
-                    if (s_val.empty()) *w++ = '.';
-                    else { memcpy(w, s_val.data(), s_val.size()); w += s_val.size(); }
-                }
-
-                // Process DF4 Allele-specific fields
-                if (start_df4 != -1) {
-                    for (const auto& g : df4_int_groups) {
+                // PROCEDI CON IL RESTO SOLO SE IL GENOTIPO E' VALIDO
+                if (!skip_rest) {
+                    // Process DF3 Integer fields
+                    for (const auto& g : df3_int_groups) {
                         write_sep();
-                        bool any = false;
-                        long k = start_df4;
-                        while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
-                            if (df4.samp_id[k] == (unsigned short)s) {
-                                for (size_t cc = g.col_start; cc < g.col_end; cc++) {
+                        size_t group_size = g.col_end - g.col_start;
+                        size_t limit = (group_size > 1)
+                            ? std::min(group_size, (g.number_kind == 1) ? num_alts : num_alts + 1) : 1;
+                        bool any = false, first_v = true;
+                        for (size_t cc = g.col_start; cc < g.col_start + limit; cc++) {
+                            int v = df3.samp_int[cc].i_int[df3_idx];
+                            if (v == -1) continue;
+                            if (!first_v) *w++ = ','; first_v = false;
+                            w += snprintf(w, 16, "%d", v);
+                            any = true;
+                        }
+                        if (!any) *w++ = '.';
+                    }
+
+                    // Process DF3 Float fields
+                    for (const auto& g : df3_float_groups) {
+                        write_sep();
+                        size_t group_size = g.col_end - g.col_start;
+                        size_t limit = (group_size > 1)
+                            ? std::min(group_size, (g.number_kind == 1) ? num_alts : num_alts + 1) : 1;
+                        bool any = false, first_v = true;
+                        for (size_t cc = g.col_start; cc < g.col_start + limit; cc++) {
+                            float v = (float)df3.samp_float[cc].i_float[df3_idx];
+                            if (v == -1.0f) continue;
+                            if (!first_v) *w++ = ','; first_v = false;
+                            w += snprintf(w, 32, "%g", v);
+                            any = true;
+                        }
+                        if (!any) *w++ = '.';
+                    }
+
+                    // Process DF3 String fields
+                    for (size_t col = 0; col < df3.samp_string.size(); col++) {
+                        write_sep();
+                        const std::string& s_val = df3.samp_string[col].i_string[df3_idx];
+                        if (s_val.empty()) *w++ = '.';
+                        else { memcpy(w, s_val.data(), s_val.size()); w += s_val.size(); }
+                    }
+
+                    // Process DF4 Allele-specific fields
+                    if (start_df4 != -1) {
+                        for (const auto& g : df4_int_groups) {
+                            write_sep();
+                            bool any = false;
+                            long k = start_df4;
+                            while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                                if (df4.samp_id[k] == (unsigned short)s) {
+                                    for (size_t cc = g.col_start; cc < g.col_end; cc++) {
+                                        if (any) *w++ = ',';
+                                        int v = df4.samp_int[cc].i_int[k];
+                                        if (v == -1) *w++ = '.';
+                                        else w += snprintf(w, 16, "%d", v);
+                                        any = true;
+                                    }
+                                }
+                                k++;
+                            }
+                            if (!any) *w++ = '.';
+                        }
+
+                        for (const auto& g : df4_float_groups) {
+                            write_sep();
+                            bool any = false;
+                            long k = start_df4;
+                            while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                                if (df4.samp_id[k] == (unsigned short)s) {
+                                    for (size_t cc = g.col_start; cc < g.col_end; cc++) {
+                                        if (any) *w++ = ',';
+                                        float v = (float)df4.samp_float[cc].i_float[k];
+                                        if (v == -1.0f) *w++ = '.';
+                                        else w += snprintf(w, 32, "%g", v);
+                                        any = true;
+                                    }
+                                }
+                                k++;
+                            }
+                            if (!any) *w++ = '.';
+                        }
+
+                        for (size_t col = 0; col < df4.samp_string.size(); col++) {
+                            write_sep();
+                            bool any = false;
+                            long k = start_df4;
+                            while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                                if (df4.samp_id[k] == (unsigned short)s) {
+                                    const std::string& s_val = df4.samp_string[col].i_string[k];
                                     if (any) *w++ = ',';
-                                    int v = df4.samp_int[cc].i_int[k];
-                                    if (v == -1) *w++ = '.';
-                                    else w += snprintf(w, 16, "%d", v);
+                                    if (s_val.empty()) *w++ = '.';
+                                    else { memcpy(w, s_val.data(), s_val.size()); w += s_val.size(); }
                                     any = true;
                                 }
+                                k++;
                             }
-                            k++;
+                            if (!any) *w++ = '.';
                         }
-                        if (!any) *w++ = '.';
                     }
-
-                    for (const auto& g : df4_float_groups) {
-                        write_sep();
-                        bool any = false;
-                        long k = start_df4;
-                        while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
-                            if (df4.samp_id[k] == (unsigned short)s) {
-                                for (size_t cc = g.col_start; cc < g.col_end; cc++) {
-                                    if (any) *w++ = ',';
-                                    float v = (float)df4.samp_float[cc].i_float[k];
-                                    if (v == -1.0f) *w++ = '.';
-                                    else w += snprintf(w, 32, "%g", v);
-                                    any = true;
-                                }
-                            }
-                            k++;
-                        }
-                        if (!any) *w++ = '.';
-                    }
-
-                    for (size_t col = 0; col < df4.samp_string.size(); col++) {
-                        write_sep();
-                        bool any = false;
-                        long k = start_df4;
-                        while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
-                            if (df4.samp_id[k] == (unsigned short)s) {
-                                const std::string& s_val = df4.samp_string[col].i_string[k];
-                                if (any) *w++ = ',';
-                                if (s_val.empty()) *w++ = '.';
-                                else { memcpy(w, s_val.data(), s_val.size()); w += s_val.size(); }
-                                any = true;
-                            }
-                            k++;
-                        }
-                        if (!any) *w++ = '.';
-                    }
-                }
+                } // FINE BLOCCO if (!skip_rest)
 
                 *w++ = '\0';
                 size_t cell_len = w - w0;
@@ -1330,5 +1340,177 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                    src_buf.data() + src_offs[k],
                    len);
         }
+    }
+}
+
+void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
+                                              const alt_columns_df& df2,
+                                              const sample_columns_df& df3,
+                                              const alt_format_df& df4,
+                                              HostBuffers& buffers) {
+    int chunk_size  = buffers.chunk_size;
+    int chunk_start = buffers.chunk_start;
+    int chunk_end   = buffers.chunk_end;
+    int df2_start   = buffers.df2_start;
+
+    // --- Prepare DF1 ID buffer ---
+    buffers.id_buffer.clear();
+    buffers.id_offsets.resize(chunk_size);
+    {
+        unsigned int offset = 0;
+        for (int i = chunk_start; i < chunk_end; i++) {
+            buffers.id_offsets[i - chunk_start] = offset;
+            for (char c : df1.id[i]) buffers.id_buffer.push_back(c);
+            buffers.id_buffer.push_back('\0');
+            offset += df1.id[i].size() + 1;
+        }
+    }
+
+    // --- Prepare DF1 REF buffer ---
+    buffers.ref_buffer.clear();
+    buffers.ref_offsets.resize(chunk_size);
+    {
+        unsigned int offset = 0;
+        for (int i = chunk_start; i < chunk_end; i++) {
+            buffers.ref_offsets[i - chunk_start] = offset;
+            for (char c : df1.ref[i]) buffers.ref_buffer.push_back(c);
+            buffers.ref_buffer.push_back('\0');
+            offset += df1.ref[i].size() + 1;
+        }
+    }
+
+    // --- Prepare DF1 INFO integers ---
+    // Flatten multi-dimensional array into a 1D contiguous block
+    buffers.in_int_buffer.assign(d_df1.num_int_fields * chunk_size, 0);
+    for (int f = 0; f < d_df1.num_int_fields; f++) {
+        for (int i = chunk_start; i < chunk_end; i++) {
+            buffers.in_int_buffer[f * chunk_size + (i - chunk_start)] = df1.in_int[f].i_int[i];
+        }
+    }
+
+    // --- Prepare DF1 INFO floats ---
+    buffers.in_float_buffer.assign(d_df1.num_float_fields * chunk_size, __half(0));
+    for (int f = 0; f < d_df1.num_float_fields; f++) {
+        for (int i = chunk_start; i < chunk_end; i++) {
+            buffers.in_float_buffer[f * chunk_size + (i - chunk_start)] = df1.in_float[f].i_float[i];
+        }
+    }
+
+    // --- Prepare DF1 INFO flags ---
+    buffers.in_flag_buffer.assign(d_df1.num_flag_fields * chunk_size, 0);
+    for (int f = 0; f < d_df1.num_flag_fields; f++) {
+        for (int i = chunk_start; i < chunk_end; i++) {
+            buffers.in_flag_buffer[f * chunk_size + (i - chunk_start)] = df1.in_flag[f].i_flag[i];
+        }
+    }
+
+    // --- Prepare DF1 INFO Strings ---
+    buffers.in_string_buffer.clear();
+    buffers.in_string_offsets.assign(d_df1.num_string_fields * chunk_size, 0);
+    unsigned int current_offset = 0;
+
+    for (int f = 0; f < d_df1.num_string_fields; f++) {
+        for (int i = chunk_start; i < chunk_end; i++) {
+            int flat_idx = f * chunk_size + (i - chunk_start);
+            buffers.in_string_offsets[flat_idx] = current_offset;
+            
+            const std::string& val = df1.in_string[f].i_string[i];
+            for (char c : val) buffers.in_string_buffer.push_back(c);
+            buffers.in_string_buffer.push_back('\0'); // C-style string terminator
+            
+            current_offset += val.size() + 1;
+        }
+    }
+
+    // --- Prepare DF2 counts ---
+    int df2_count = 0;
+    for (size_t j = df2_start; j < df2.var_id.size() && (int)df2.var_id[j] < chunk_end; j++) df2_count++;
+    buffers.df2_count = df2_count;
+
+    // --- Prepare DF2 ALT strings ---
+    buffers.alt_data_buffer.clear();
+    buffers.alt_data_offsets.resize(df2_count);
+    {
+        unsigned int offset = 0;
+        for (int i = df2_start; i < df2_start + df2_count; i++) {
+            buffers.alt_data_offsets[i - df2_start] = offset;
+            for (char c : df2.alt[i]) buffers.alt_data_buffer.push_back(c);
+            buffers.alt_data_buffer.push_back('\0');
+            offset += df2.alt[i].size() + 1;
+        }
+    }
+
+    // --- Setup alt_start and alt_count mapping arrays ---
+    buffers.alt_start_buf.assign(chunk_size, 0);
+    buffers.alt_count_buf.assign(chunk_size, 0);
+    {
+        int j = df2_start;
+        for (int i = 0; i < chunk_size; i++) {
+            unsigned int var_num = df1.var_number[chunk_start + i];
+            buffers.alt_start_buf[i] = j - df2_start;
+            while (j < df2_start + df2_count && df2.var_id[j] == var_num) j++;
+            buffers.alt_count_buf[i] = (j - df2_start) - buffers.alt_start_buf[i];
+        }
+    }
+
+    // --- Prepare DF2 ALT INFO fields ---
+    buffers.alt_int_buffer.assign(d_df2.num_alt_int_fields * df2_count, 0);
+    for (int f = 0; f < d_df2.num_alt_int_fields; f++) {
+        for (int i = df2_start; i < df2_start + df2_count; i++) {
+            buffers.alt_int_buffer[f * df2_count + (i - df2_start)] = df2.alt_int[f].i_int[i];
+        }
+    }
+
+    buffers.alt_float_buffer.assign(d_df2.num_alt_float_fields * df2_count, __half(0));
+    for (int f = 0; f < d_df2.num_alt_float_fields; f++) {
+        for (int i = df2_start; i < df2_start + df2_count; i++) {
+            buffers.alt_float_buffer[f * df2_count + (i - df2_start)] = df2.alt_float[f].i_float[i];
+        }
+    }
+
+    // --- Prepare DF2 INFO-ALT Strings ---
+    buffers.alt_string_buffer.clear();
+    buffers.alt_string_offsets.assign(d_df2.num_alt_string_fields * df2_count, 0);
+    current_offset = 0;
+
+    for (int f = 0; f < d_df2.num_alt_string_fields; f++) {
+        for (int i = df2_start; i < df2_start + df2_count; i++) {
+            int flat_idx = f * df2_count + (i - df2_start);
+            buffers.alt_string_offsets[flat_idx] = current_offset;
+            
+            const std::string& val = df2.alt_string[f].i_string[i];
+            for (char c : val) buffers.alt_string_buffer.push_back(c);
+            buffers.alt_string_buffer.push_back('\0');
+            
+            current_offset += val.size() + 1;
+        }
+    }
+
+    // --- Package complex sample strings (delegates to buildSampleStrings) ---
+    buildSampleStrings(df1, df2, df3, df4,
+                       chunk_size, chunk_start, chunk_end, df2_start,
+                       buffers.sample_buffer, buffers.sample_offsets);
+}
+
+/*
+* The parser inherently builds forward dictionaries (e.g., String -> char ID) to 
+* compress the data in RAM. This method flips those dictionaries (char ID -> String) 
+* so that the GPU kernel can retrieve the original textual representation.
+*/
+void VCFReconstructorGPU::buildInverseMaps(const var_columns_df& df1) {
+    for (const auto& pair : df1.chrom_map) {
+        inv_chrom_map[pair.second] = pair.first;
+    }
+    for (const auto& pair : df1.filter_map) {
+        inv_filter_map[pair.second] = pair.first;
+    }
+    for (const auto& pair : polyphenCharMap) {
+        inv_polyphen_map[pair.second] = pair.first;
+    }
+    for (const auto& pair : csqCharMap) {
+        inv_csq_map[pair.second] = pair.first;
+    }
+    for (const auto& pair : tsaCharMap) {
+        inv_tsa_map[pair.second] = pair.first;
     }
 }
