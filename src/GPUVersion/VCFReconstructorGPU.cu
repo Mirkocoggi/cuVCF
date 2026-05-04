@@ -4,16 +4,30 @@
 #include "Maps.h"
 #include <sstream>
 #include <omp.h>
+#include <chrono>
+#include <cub/cub.cuh>
 
+//Constructor
 VCFReconstructorGPU::VCFReconstructorGPU(const std::string& output_vcf_path,
                                          const std::string& header_text)
     : output_vcf_path(output_vcf_path),
       header_text(header_text),
-      //DF1
       d_output(nullptr),
       d_line_lens(nullptr)
 {}
 
+/**
+ * @brief Safely frees device memory and nullifies the pointer.
+ * 
+ * This templated utility ensures that `cudaFree` is only called on valid 
+ * (non-null) pointers. By taking the pointer by reference (`T*&`), it 
+ * automatically sets the original pointer to `nullptr` after freeing, 
+ * preventing dangling pointer bugs or double-free errors during the 
+ * cleanup phase of the GPU pipeline.
+ * 
+ * @tparam T The data type of the device pointer.
+ * @param d_ptr Reference to the device pointer to be freed.
+ */
 template <typename T>
 inline void safe_cuda_free(T*& d_ptr) {
     if (d_ptr != nullptr) {
@@ -22,10 +36,18 @@ inline void safe_cuda_free(T*& d_ptr) {
     }
 }
 
+/**
+ * This method iterates through all device pointers (d_*) associated with the 
+ * sparse output buffer, stream compaction arrays, and the flattened shadow 
+ * DataFrames (DF1, DF2, DF3). It relies on the `safe_cuda_free` utility to 
+ * avoid double-free errors.
+ */
 void VCFReconstructorGPU::freeDevice(){
-    //DF1
+    // --- Sparse Output Buffers ---
       safe_cuda_free(d_output);
       safe_cuda_free(d_line_lens);
+
+      // --- DF1 (Core Variants & INFO) ---
       safe_cuda_free(d_df1.var_number);
       safe_cuda_free(d_df1.chrom);
       safe_cuda_free(d_df1.pos);
@@ -38,7 +60,8 @@ void VCFReconstructorGPU::freeDevice(){
       safe_cuda_free(d_df1.in_int);
       safe_cuda_free(d_df1.in_float);
       safe_cuda_free(d_df1.in_flag);
-    //DF2
+    
+      // --- DF2 (Alternative Alleles & INFO-ALT) ---
       safe_cuda_free(d_df2.var_id);
       safe_cuda_free(d_df2.alt_data);
       safe_cuda_free(d_df2.alt_offsets);
@@ -46,15 +69,29 @@ void VCFReconstructorGPU::freeDevice(){
       safe_cuda_free(d_df2.alt_count);
       safe_cuda_free(d_df2.alt_int);
       safe_cuda_free(d_df2.alt_float);
-    //DF3
+
+    // --- DF3/DF4 (Packed Sample Data) ---
         safe_cuda_free(d_df3.sample_data);
         safe_cuda_free(d_df3.sample_offsets);
+
+    // --- Compacting (Prefix Sum Buffers) ---
+        safe_cuda_free(d_compacted);
+        safe_cuda_free(d_output_offsets);
 }
 
+//Destructor
 VCFReconstructorGPU::~VCFReconstructorGPU() {
-    freeDevice();
+    freeDevice(); // Clean up VRAM
+
+    // Clean up host-side dynamically allocated compaction buffer
+    if (h_compacted) safe_cuda_free(h_compacted);
 }
 
+/*
+* The parser inherently builds forward dictionaries (e.g., String -> char ID) to 
+* compress the data in RAM. This method flips those dictionaries (char ID -> String) 
+* so that the GPU kernel can retrieve the original textual representation.
+*/
 void VCFReconstructorGPU::buildInverseMaps(const var_columns_df& df1) {
     for (const auto& pair : df1.chrom_map) {
         inv_chrom_map[pair.second] = pair.first;
@@ -73,6 +110,7 @@ void VCFReconstructorGPU::buildInverseMaps(const var_columns_df& df1) {
     }
 }
 
+// Device Allocation & Data Transfer Setup
 void VCFReconstructorGPU::allocateDevice(const var_columns_df& df1,
                                           const alt_columns_df& df2,
                                           const sample_columns_df& df3,
@@ -80,32 +118,39 @@ void VCFReconstructorGPU::allocateDevice(const var_columns_df& df1,
                                           int chunk_start,
                                           int chunk_end,
                                           int df2_start) {
-    // Output buffer
+
+    // --- Output buffers ---
+    // Allocate space for the sparse output buffer where each row takes up MAX_LINE_LEN chars.
     gpuErrchk( cudaMalloc((void**)&d_output,    chunk_size * MAX_LINE_LEN * sizeof(char)));
     gpuErrchk( cudaMalloc((void**)&d_line_lens, chunk_size * sizeof(unsigned int)));
+    gpuErrchk(cudaMalloc((void**)&d_output_offsets, (chunk_size + 1) * sizeof(unsigned int)));
 
-    // DF1 scalar
+    // Note: d_compacted is dynamically allocated in writeChunk() because its size
+    // relies on the sum of line_lens, which is known only after the prefix scan.
+
+    // --- DF1 scalar fields ---
     gpuErrchk( cudaMalloc((void**)&d_df1.var_number, chunk_size * sizeof(unsigned int)));
     gpuErrchk( cudaMalloc((void**)&d_df1.chrom,      chunk_size * sizeof(char)));
     gpuErrchk( cudaMalloc((void**)&d_df1.pos,        chunk_size * sizeof(unsigned int)));
     gpuErrchk( cudaMalloc((void**)&d_df1.qual,       chunk_size * sizeof(__half)));
     gpuErrchk( cudaMalloc((void**)&d_df1.filter,     chunk_size * sizeof(char)));
 
-    // DF1 id (stringhe variabili)
+    // --- DF1 ID (Variable-length strings) ---
+    // Pre-calculate total memory required to hold all null-terminated ID strings in this chunk
     size_t id_total_chars = 0;
     for (int i = chunk_start; i < chunk_end; i++)
         id_total_chars += df1.id[i].size() + 1;
     gpuErrchk( cudaMalloc((void**)&d_df1.id_data,    id_total_chars * sizeof(char)));
     gpuErrchk( cudaMalloc((void**)&d_df1.id_offsets, chunk_size * sizeof(unsigned int)));
 
-    // DF1 ref (stringhe variabili)
+    // --- DF1 REF (Variable-length strings) ---
     size_t ref_total_chars = 0;
     for (int i = chunk_start; i < chunk_end; i++)
         ref_total_chars += df1.ref[i].size() + 1;
     gpuErrchk( cudaMalloc((void**)&d_df1.ref_data,    ref_total_chars * sizeof(char)));
     gpuErrchk( cudaMalloc((void**)&d_df1.ref_offsets, chunk_size * sizeof(unsigned int)));
 
-    // DF1 INFO fields
+    // --- DF1 INFO fields ---
     d_df1.num_int_fields   = df1.in_int.size();
     d_df1.num_float_fields = df1.in_float.size();
     d_df1.num_flag_fields  = df1.in_flag.size();
@@ -114,7 +159,7 @@ void VCFReconstructorGPU::allocateDevice(const var_columns_df& df1,
     gpuErrchk( cudaMalloc((void**)&d_df1.in_flag,     d_df1.num_flag_fields  * chunk_size * sizeof(bool)));
 
 
-    // DF2 - conta entries nel chunk
+    // --- DF2 (Alternative alleles count & allocation) ---
     int df2_count = 0;
     size_t alt_total_chars = 0;
     for (size_t j = df2_start; j < df2.var_id.size() && (int)df2.var_id[j] < chunk_end; j++) {
@@ -136,8 +181,8 @@ void VCFReconstructorGPU::allocateDevice(const var_columns_df& df1,
     gpuErrchk( cudaMalloc((void**)&d_df2.alt_int,          d_df2.num_alt_int_fields   * df2_count * sizeof(int)));
     gpuErrchk( cudaMalloc((void**)&d_df2.alt_float,        d_df2.num_alt_float_fields * df2_count * sizeof(__half)));
 
-    // Stima upper-bound: chunk_size * num_samples * MAX_SAMPLE_STRING_LEN
-    // MAX_SAMPLE_STRING_LEN dipende dal tuo dataset, sull'IRBT direi 256 byte abbondanti
+    // --- DF3 (Sample Strings upper bound) ---
+    // Calculate a safe upper bound size for sample strings to prevent OOM errors.
     size_t max_sample_chars = (size_t)chunk_size * df3.numSample * MAX_SAMPLE_STRING_LEN;
 
     gpuErrchk( cudaMalloc(&d_df3.sample_data,    max_sample_chars * sizeof(char)));
@@ -156,7 +201,7 @@ void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
     int chunk_end   = buffers.chunk_end;
     int df2_start   = buffers.df2_start;
 
-    // DF1 id
+    // --- Prepare DF1 ID buffer ---
     buffers.id_buffer.clear();
     buffers.id_offsets.resize(chunk_size);
     {
@@ -169,7 +214,7 @@ void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
         }
     }
 
-    // DF1 ref
+    // --- Prepare DF1 REF buffer ---
     buffers.ref_buffer.clear();
     buffers.ref_offsets.resize(chunk_size);
     {
@@ -182,7 +227,8 @@ void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
         }
     }
 
-    // DF1 INFO int
+    // --- Prepare DF1 INFO integers ---
+    // Flatten multi-dimensional array into a 1D contiguous block
     buffers.in_int_buffer.assign(d_df1.num_int_fields * chunk_size, 0);
     for (int f = 0; f < d_df1.num_int_fields; f++) {
         for (int i = chunk_start; i < chunk_end; i++) {
@@ -190,7 +236,7 @@ void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
         }
     }
 
-    // DF1 INFO float
+    // --- Prepare DF1 INFO floats ---
     buffers.in_float_buffer.assign(d_df1.num_float_fields * chunk_size, __half(0));
     for (int f = 0; f < d_df1.num_float_fields; f++) {
         for (int i = chunk_start; i < chunk_end; i++) {
@@ -198,7 +244,7 @@ void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
         }
     }
 
-    // DF1 INFO flag
+    // --- Prepare DF1 INFO flags ---
     buffers.in_flag_buffer.assign(d_df1.num_flag_fields * chunk_size, 0);
     for (int f = 0; f < d_df1.num_flag_fields; f++) {
         for (int i = chunk_start; i < chunk_end; i++) {
@@ -206,12 +252,12 @@ void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
         }
     }
 
-    // DF2 count
+    // --- Prepare DF2 counts ---
     int df2_count = 0;
     for (size_t j = df2_start; j < df2.var_id.size() && (int)df2.var_id[j] < chunk_end; j++) df2_count++;
     buffers.df2_count = df2_count;
 
-    // DF2 alt strings
+    // --- Prepare DF2 ALT strings ---
     buffers.alt_data_buffer.clear();
     buffers.alt_data_offsets.resize(df2_count);
     {
@@ -224,7 +270,7 @@ void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
         }
     }
 
-    // alt_start / alt_count
+    // --- Setup alt_start and alt_count mapping arrays ---
     buffers.alt_start_buf.assign(chunk_size, 0);
     buffers.alt_count_buf.assign(chunk_size, 0);
     {
@@ -237,7 +283,7 @@ void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
         }
     }
 
-    // DF2 alt int
+    // --- Prepare DF2 ALT INFO fields ---
     buffers.alt_int_buffer.assign(d_df2.num_alt_int_fields * df2_count, 0);
     for (int f = 0; f < d_df2.num_alt_int_fields; f++) {
         for (int i = df2_start; i < df2_start + df2_count; i++) {
@@ -245,7 +291,6 @@ void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
         }
     }
 
-    // DF2 alt float
     buffers.alt_float_buffer.assign(d_df2.num_alt_float_fields * df2_count, __half(0));
     for (int f = 0; f < d_df2.num_alt_float_fields; f++) {
         for (int i = df2_start; i < df2_start + df2_count; i++) {
@@ -253,7 +298,7 @@ void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
         }
     }
 
-    // DF3 sample strings
+    // --- Package complex sample strings (delegates to buildSampleStrings) ---
     buildSampleStrings(df1, df2, df3, df4,
                        chunk_size, chunk_start, chunk_end, df2_start,
                        buffers.sample_buffer, buffers.sample_offsets);
@@ -267,7 +312,7 @@ void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
     int df2_start   = buffers.df2_start;
     int df2_count   = buffers.df2_count;
 
-    // DF1 diretti
+    // --- DF1 Direct Copies (Fixed-size arrays) ---
     gpuErrchk(cudaMemcpy(d_df1.var_number, df1.var_number.data() + chunk_start,
                          chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
     gpuErrchk(cudaMemcpy(d_df1.chrom, df1.chrom.data() + chunk_start,
@@ -279,7 +324,7 @@ void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
     gpuErrchk(cudaMemcpy(d_df1.filter, df1.filter.data() + chunk_start,
                          chunk_size * sizeof(char), cudaMemcpyHostToDevice));
 
-    // DF1 staging
+    // --- DF1 Staging Copies (Variable-length flattened data) ---
     gpuErrchk(cudaMemcpy(d_df1.id_data, buffers.id_buffer.data(),
                          buffers.id_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
     gpuErrchk(cudaMemcpy(d_df1.id_offsets, buffers.id_offsets.data(),
@@ -289,6 +334,7 @@ void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
     gpuErrchk(cudaMemcpy(d_df1.ref_offsets, buffers.ref_offsets.data(),
                          chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
 
+    // --- DF1 INFO Copies ---
     gpuErrchk(cudaMemcpy(d_df1.in_int, buffers.in_int_buffer.data(),
                          d_df1.num_int_fields * chunk_size * sizeof(int), cudaMemcpyHostToDevice));
     gpuErrchk(cudaMemcpy(d_df1.in_float, buffers.in_float_buffer.data(),
@@ -296,7 +342,7 @@ void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
     gpuErrchk(cudaMemcpy(d_df1.in_flag, buffers.in_flag_buffer.data(),
                          d_df1.num_flag_fields * chunk_size * sizeof(uint8_t), cudaMemcpyHostToDevice));
 
-    // DF2
+    // --- DF2 Direct and Staging Copies ---
     gpuErrchk(cudaMemcpy(d_df2.var_id, df2.var_id.data() + df2_start,
                          df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice));
 
@@ -315,13 +361,23 @@ void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
     gpuErrchk(cudaMemcpy(d_df2.alt_float, buffers.alt_float_buffer.data(),
                          d_df2.num_alt_float_fields * df2_count * sizeof(__half), cudaMemcpyHostToDevice));
 
-    // DF3 sample
+    // --- DF3 Sample Data Copies ---
     gpuErrchk(cudaMemcpy(d_df3.sample_data, buffers.sample_buffer.data(),
                          buffers.sample_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
     gpuErrchk(cudaMemcpy(d_df3.sample_offsets, buffers.sample_offsets.data(),
                          buffers.sample_offsets.size() * sizeof(unsigned int), cudaMemcpyHostToDevice));
 }
 
+/**
+ * @brief Device utility to copy a null-terminated string.
+ * 
+ * Functions similarly to the standard C `strcpy`, copying characters from the 
+ * source string to the destination buffer until a null terminator `\0` is reached.
+ * 
+ * @param dst Pointer to the destination memory buffer.
+ * @param src Pointer to the null-terminated source string.
+ * @return int The number of characters written to the destination buffer.
+ */
 __device__ int device_strcpy(char* dst, const char* src) {
     int i = 0;
     while (src[i] != '\0') {
@@ -331,6 +387,17 @@ __device__ int device_strcpy(char* dst, const char* src) {
     return i;
 }
    
+/**
+ * @brief Device utility to convert an integer to a character string (itoa).
+ * 
+ * Handles base-10 conversion of integer values, including negative numbers 
+ * and zero. The digits are extracted in reverse order and then properly 
+ * placed into the destination buffer.
+ * 
+ * @param n   The integer value to convert.
+ * @param dst Pointer to the destination character buffer.
+ * @return int The length of the resulting string written to the buffer.
+ */
 __device__ int device_itoa(int n, char* dst){
     char tmp[20];
     int dst_pos = 0;
@@ -360,6 +427,17 @@ __device__ int device_itoa(int n, char* dst){
     return dst_pos + tmp_len;
 }
 
+/**
+ * @brief Device utility to convert a float (fp32) to a string (ftoa).
+ * 
+ * Handles floating-point formatting by splitting the number into its integer 
+ * and fractional components. It uses `device_itoa` to process each part and 
+ * inserts a decimal point. Includes a specific check for the missing value sentinel (`-1.0f`).
+ * 
+ * @param f   The floating-point number to format.
+ * @param dst Pointer to the destination character buffer.
+ * @return int The total length of the resulting string.
+ */
 __device__ int device_ftoa(float f, char* dst){
 
     if(f == -1.0f){
@@ -381,6 +459,63 @@ __device__ int device_ftoa(float f, char* dst){
     return int_len + frac_len + 1;
 }   
 
+/**
+ * @brief Stream compaction kernel to consolidate sparse VCF string buffers.
+ * 
+ * `reconstructKernel` outputs strings into a sparse 2D buffer (`d_output`) where 
+ * each row occupies a fixed, maximum length (`max_line_len`) to prevent data races. 
+ * This kernel reads the actual length of each generated string (`line_lens`) and 
+ * its designated starting position (`offsets`, calculated via prefix sum) to pack 
+ * everything into a contiguous, dense 1D array (`dst`).
+ * 
+ * @param src         Pointer to the sparse input buffer (d_output).
+ * @param line_lens   Array holding the actual string length of each row.
+ * @param offsets     Prefix-summed array indicating where each compacted row should start.
+ * @param dst         Pointer to the dense destination buffer (d_compacted).
+ * @param chunk_size  Total number of variants (rows) processed in this block.
+ * @param max_line_len The fixed stride used in the sparse `src` buffer.
+ */
+__global__ void compactKernel(
+    const char* __restrict__ src,       
+    const unsigned int* __restrict__ line_lens,
+    const unsigned int* __restrict__ offsets, 
+    char* __restrict__ dst,               
+    int chunk_size,
+    int max_line_len)
+{
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = gridDim.x * blockDim.x;
+
+    // Grid-stride loop handles chunks larger than the total number of launched threads
+    for (int i = tid; i < chunk_size; i += stride) {
+        unsigned int len = line_lens[i];
+        unsigned int dst_off = offsets[i];
+        const char* s = src + i * max_line_len;
+        char* d = dst + dst_off;
+        for (unsigned int k = 0; k < len; k++) {
+            d[k] = s[k];
+        }
+    }
+}
+
+/**
+ * @brief Main execution kernel that constructs VCF formatted strings per variant.
+ * 
+ * This kernel performs the core text reconstruction using a grid-stride loop. 
+ * While each iteration processes a single variant row, a single CUDA thread 
+ * may process multiple variants if the chunk size exceeds the total number of 
+ * launched threads. It reads the raw data from the shadowed DataFrame structures, 
+ * translates integer codes back to strings using the mapped dictionaries, handles 
+ * multi-allelic expansions, and concatenates the final VCF string into a sparse buffer.
+ * 
+ * @param maps       Dictionaries for translating codes to strings (Chrom, Filter).
+ * @param df1        Device memory view of the core variants DataFrame.
+ * @param df2        Device memory view of the alternative alleles DataFrame.
+ * @param df3        Device memory view containing pre-packed format/sample data.
+ * @param output     The sparse destination buffer for the generated text.
+ * @param line_lens  Output array where the thread records the final length of each generated string.
+ * @param chunk_size The total number of variants to process in this execution block.
+ */
 __global__ void reconstructKernel(
     DeviceMaps maps,
     DeviceVarColumns df1,
@@ -393,27 +528,29 @@ __global__ void reconstructKernel(
     int stride = blockDim.x * gridDim.x;
 
     for (int i = tid; i < chunk_size; i += stride){
+        // Pointer to the start of this thread's designated row in the sparse matrix
         char* line = output + i * MAX_LINE_LEN;
         int pos = 0;
 
-        //CHROM
+        // --- 1. CHROM ---
         unsigned char chrom_code = df1.chrom[i];
         pos += device_strcpy(line + pos, maps.chrom_strings + maps.chrom_offsets[chrom_code]);
         line[pos++] = '\t';
 
-        //POS
+        // --- 2. POS ---
         pos += device_itoa(df1.pos[i], line + pos);
         line[pos++] = '\t';
 
-        // ID
+        // --- 3. ID ---
         pos += device_strcpy(line + pos, df1.id_data + df1.id_offsets[i]);
         line[pos++] = '\t';
 
-        //REF
+        // --- 4. REF ---
         pos += device_strcpy(line + pos, df1.ref_data + df1.ref_offsets[i]);
         line[pos++] = '\t';
 
-        //ALT
+        // --- 5. ALT ---
+        // Handle multiple alternative alleles separated by commas
         int alt_begin = df2.alt_start[i];
         int alt_end   = alt_begin + df2.alt_count[i];
         bool first_alt = true;
@@ -424,20 +561,20 @@ __global__ void reconstructKernel(
         }
         line[pos++] = '\t';
 
-        //QUAL
+        // --- 6. QUAL ---
         float q = df1.qual[i];
         pos += device_ftoa(q, line + pos);
         line[pos++] = '\t';
 
-        //FILTER
+        // --- 7. FILTER ---
         unsigned char filter_code = df1.filter[i];
         pos += device_strcpy(line + pos, maps.filter_strings + maps.filter_offsets[filter_code]);
         line[pos++] = '\t';
 
-        //INFO
+        // --- 8. INFO ---
         bool first_info = true;
         
-        //Flag
+        // Append variant-level Flag fields (e.g., SOMATIC)
         for (int f = 0; f < df1.num_flag_fields; f++){
             if (df1.in_flag[f * chunk_size + i]){
                 if(!first_info){
@@ -448,7 +585,7 @@ __global__ void reconstructKernel(
             }
         }
 
-        //Int
+        // Append variant-level Integer fields
         for (int f = 0; f < df1.num_int_fields; f++){
             if (df1.in_int[f * chunk_size + i] != -1){
                 if(!first_info){
@@ -461,7 +598,7 @@ __global__ void reconstructKernel(
             }
         }
 
-        //Float
+        // Append variant-level Float fields
         for (int f = 0; f < df1.num_float_fields; f++){
             if (__half2float(df1.in_float[f * chunk_size + i]) != -1.0f){
                 if(!first_info){
@@ -474,9 +611,9 @@ __global__ void reconstructKernel(
             }
         }
 
-        //Alt Int (DF2)
+        // Append allele-specific Integer fields from DF2 (comma-separated if multi-allelic)
         for (int f = 0; f < df2.num_alt_int_fields; f++){
-            // Verifica se almeno un valore nel gruppo è diverso da -1
+            // Validate if the group contains any actual data
             bool any_valid = false;
             for (int j = alt_begin; j < alt_end; j++){
                 if (df2.alt_int[f * df2.num_entries + j] != -1){
@@ -505,7 +642,7 @@ __global__ void reconstructKernel(
             }
         }
 
-        //Alt Float (DF2)
+        // Append allele-specific Float fields from DF2
         for (int f = 0; f < df2.num_alt_float_fields; f++){
             bool any_valid = false;
             for (int j = alt_begin; j < alt_end; j++){
@@ -535,11 +672,12 @@ __global__ void reconstructKernel(
             }
         }
 
+        // If no INFO fields were present, write the missing indicator
         if(first_info){
             line[pos++] = '.';
         }
 
-        //FORMAT + SAMPLES
+        // --- 9. FORMAT & SAMPLES ---
         if (df3.num_samples > 0) {
             line[pos++] = '\t';
             pos += device_strcpy(line + pos, df3.format_str);
@@ -547,31 +685,86 @@ __global__ void reconstructKernel(
             for (int s = 0; s < df3.num_samples; s++) {
                 line[pos++] = '\t';
                 int idx = i * df3.num_samples + s;
-                pos += device_strcpy(line + pos,
-                                    df3.sample_data + df3.sample_offsets[idx]);
+                // Copy the pre-packed string for this specific variant-sample combination
+                pos += device_strcpy(line + pos, df3.sample_data + df3.sample_offsets[idx]);
             }
         }
 
+        // Finalize the row and record its total length
         line[pos++] = '\n';
         line_lens[i] = pos;
     }
 }
 
 void VCFReconstructorGPU::writeChunk(int num_variants, std::ofstream& out){
-    char* h_output = new char[num_variants * MAX_LINE_LEN];
-    unsigned int* h_line_lens = new unsigned int[num_variants];
+    // 1. Prefix scan of line_lens on d_line_lens -> d_output_offsets
+    //    We use CUB ExclusiveSum: offset[0]=0, offset[i] = sum(line_lens[0..i-1])
+    void* d_temp_storage = nullptr;
+    size_t temp_storage_bytes = 0;
 
-    gpuErrchk( cudaMemcpy(h_output, d_output, num_variants * MAX_LINE_LEN * sizeof(char), cudaMemcpyDeviceToHost));
-    gpuErrchk( cudaMemcpy(h_line_lens, d_line_lens, num_variants * sizeof(unsigned int), cudaMemcpyDeviceToHost));
+    // First call: only to get temp_storage_bytes required by CUB
+    cub::DeviceScan::ExclusiveSum(
+        d_temp_storage, temp_storage_bytes,
+        d_line_lens, d_output_offsets, num_variants);
 
-    for (int i = 0; i < num_variants; i++){
-        out.write(h_output + i * MAX_LINE_LEN, h_line_lens[i]);
+    gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
+
+    // Second call: actual prefix scan
+    cub::DeviceScan::ExclusiveSum(
+        d_temp_storage, temp_storage_bytes,
+        d_line_lens, d_output_offsets, num_variants);
+
+    // 2. Calculate total_bytes = last_offset + last_len
+    //    Retrieve the last two elements from the device to compute the exact buffer size
+    unsigned int last_offset, last_len;
+    gpuErrchk(cudaMemcpy(&last_offset, d_output_offsets + (num_variants - 1),
+                         sizeof(unsigned int), cudaMemcpyDeviceToHost));
+    gpuErrchk(cudaMemcpy(&last_len, d_line_lens + (num_variants - 1),
+                         sizeof(unsigned int), cudaMemcpyDeviceToHost));
+    size_t total_bytes = last_offset + last_len;
+
+    // 3. Allocate d_compacted to the exact required size
+    gpuErrchk(cudaMalloc((void**)&d_compacted, total_bytes * sizeof(char)));
+
+    // 3. Allocate d_compacted to the exact required size
+    int block_size = 32;
+    int num_blocks = (num_variants + block_size - 1) / block_size;
+    compactKernel<<<num_blocks, block_size>>>(
+        d_output, d_line_lens, d_output_offsets,
+        d_compacted, num_variants, MAX_LINE_LEN);
+    gpuErrchk(cudaPeekAtLastError());
+
+    // 5. Grow the host buffer if necessary
+    if (total_bytes > h_compacted_capacity) {
+        if (h_compacted) free(h_compacted);
+        h_compacted_capacity = total_bytes + total_bytes / 4; // 25% margin
+        h_compacted = (char*)malloc(h_compacted_capacity);
     }
 
-    delete[] h_output;
-    delete[] h_line_lens;
+    // 6. Single D2H copy of the compacted buffer
+    gpuErrchk(cudaMemcpy(h_compacted, d_compacted,
+                         total_bytes * sizeof(char), cudaMemcpyDeviceToHost));
+
+    // 7. Single write to file
+    out.write(h_compacted, total_bytes);
+
+    // 8. Cleanup temporary buffers
+    gpuErrchk(cudaFree(d_temp_storage));
+    gpuErrchk(cudaFree(d_compacted));
+    d_compacted = nullptr;
 }
 
+/**
+ * @brief Parses and groups format fields to determine their cardinality.
+ * 
+ * Groups fields based on their base name (stripping trailing digits) and 
+ * cross-references them with the parsed FORMAT numbers from the VCF header.
+ * 
+ * @tparam FieldVec The type of the vector containing the fields.
+ * @param fields The vector of fields to group.
+ * @param format_numbers Map associating FORMAT IDs to their 'Number' value.
+ * @return std::vector<VCFReconstructorGPU::GroupInfo> A vector describing the grouped fields and their rules.
+ */
 template <typename FieldVec>
 static std::vector<VCFReconstructorGPU::GroupInfo> buildGroups(
     const FieldVec& fields,
@@ -605,6 +798,7 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
          const sample_columns_df& df3,
          const alt_format_df& df4){
 
+    // Initialize mappings and formatting rules based on the header
     buildInverseMaps(df1);
     buildSampleNames(df3);
     format_numbers = parseFormatNumbers(header_text);
@@ -614,6 +808,7 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
     df4_int_groups   = buildGroups(df4.samp_int,   format_numbers);
     df4_float_groups = buildGroups(df4.samp_float, format_numbers);
 
+    // Open file and write initial VCF headers
     std::ofstream vcf_file(output_vcf_path);
     if (!vcf_file.is_open()) {
         throw std::runtime_error("Error opening output VCF file: " + output_vcf_path);
@@ -633,7 +828,7 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
 
-    //Costruzione Format string
+    // Construct the FORMAT string
     gt_in_df3 = !df3.sample_GT.empty();
     gt_in_df4 = !gt_in_df3 && !df4.sample_GT.GT.empty();
     has_gt    = gt_in_df3 || gt_in_df4;
@@ -705,8 +900,8 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
     d_df3.format_str_len = format_str.size();
     d_df3.num_samples    = df3.numSample;
 
-    // ====== Costanti per dataset (una sola volta) ======
-    // names
+    // ====== Dataset Constants (Allocated and copied once) ======
+    // Field names buffers
     {
         std::vector<char> int_names_buffer(df1.in_int.size() * MAX_NAME_LEN, '\0');
         for (size_t f = 0; f < df1.in_int.size(); f++) {
@@ -748,7 +943,7 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
         d_df2.num_alt_float_fields = df2.alt_float.size();
     }
 
-    // mappe inverse
+    // Inverse maps buffers
     {
         std::vector<char> chrom_strings_buf;
         std::vector<unsigned int> chrom_offsets_buf(256, 0);
@@ -787,7 +982,7 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
         gpuErrchk(cudaMemcpy(d_maps.filter_offsets, filter_offsets_buf.data(), 256 * sizeof(unsigned int), cudaMemcpyHostToDevice));
     }
 
-
+    // Main execution loop: Process data in chunks
     int df2_start = 0;
     for (int chunk_start = 0; chunk_start < (int)df1.var_number.size(); chunk_start += CHUNK_SIZE){
         int chunk_end = std::min(chunk_start + CHUNK_SIZE, (int)df1.var_number.size());
@@ -798,28 +993,38 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
             df2_start++;
         }
 
-        float ms_alloc, ms_h2d, ms_kernel, ms_write, ms_free;
+        float ms_alloc, ms_u2d, ms_kernel, ms_write, ms_free;
 
+        // Allocation phase
         cudaEventRecord(start);
         allocateDevice(df1, df2, df3, chunk_size, chunk_start, chunk_end, df2_start);
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&ms_alloc, start, stop);
 
-        cudaEventRecord(start);
+
         host_buffers.chunk_size  = chunk_size;
         host_buffers.chunk_start = chunk_start;
         host_buffers.chunk_end   = chunk_end;
         host_buffers.df2_start   = df2_start;
+
+        // Host preparation phase
+        auto t0 = std::chrono::high_resolution_clock::now();
         prepareHostBuffers(df1, df2, df3, df4, host_buffers);
+        auto t1 = std::chrono::high_resolution_clock::now();
+        double ms_prep = std::chrono::duration<double, std::milli>(t1 - t0).count();
+           
+        // Upload phase
+        cudaEventRecord(start);
         uploadToDevice(df1, df2, host_buffers);
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
-        cudaEventElapsedTime(&ms_h2d, start, stop);
+        cudaEventElapsedTime(&ms_u2d, start, stop);
 
         int block_size = 32;
         int num_blocks = (chunk_size + block_size - 1) / block_size;
 
+        // Kernel execution phase
         cudaEventRecord(start);
         reconstructKernel<<<num_blocks, block_size>>>(
             d_maps,
@@ -837,22 +1042,25 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
         gpuErrchk(cudaPeekAtLastError());
         gpuErrchk(cudaDeviceSynchronize());
 
+        // Stream compaction and write phase
         cudaEventRecord(start);
         writeChunk(chunk_size, vcf_file);
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&ms_write, start, stop);
 
+        // Cleanup phase
         cudaEventRecord(start);
         freeDevice();
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&ms_free, start, stop);
 
-        printf("alloc: %.2f | h2d: %.2f | kernel: %.2f | write: %.2f | free: %.2f\n",
-               ms_alloc, ms_h2d, ms_kernel, ms_write, ms_free);
+        printf("alloc: %.2f | u2d: %.2f | prep: %.2f | kernel: %.2f | write: %.2f | free: %.2f\n",
+               ms_alloc, ms_u2d, ms_prep, ms_kernel, ms_write, ms_free);
     }
 
+    // Final cleanup of global constants
     safe_cuda_free(d_df1.int_names);
     safe_cuda_free(d_df1.float_names);
     safe_cuda_free(d_df1.flag_names);
@@ -911,7 +1119,7 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
     int total_cells = chunk_size * num_samples;
     offsets.resize(total_cells);
 
-    // Pre-calcolo per-variante (sequenziale)
+    // Sequential pre-calculation per variant
     std::vector<size_t> per_var_num_alts(chunk_size, 0);
     std::vector<long>   per_var_start_df4(chunk_size, -1);
     {
@@ -937,7 +1145,7 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
         }
     }
 
-    // Passata 1 parallela: ogni thread scrive in scratch privato
+    // Parallel Pass 1: Each thread writes to its private scratch buffer
     std::vector<unsigned int> cell_lens(total_cells, 0);
     int num_threads = omp_get_max_threads();
     std::vector<std::vector<char>> scratch(num_threads);
@@ -969,7 +1177,7 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                 bool first_field = true;
                 auto write_sep = [&]() { if (!first_field) *w++ = ':'; first_field = false; };
 
-                // GT
+                // Handle Genotype (GT)
                 if (has_gt) {
                     char gt_code = -1;
                     if (gt_in_df3) {
@@ -989,7 +1197,7 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                     }
                 }
 
-                // DF3 int
+                // Process DF3 Integer fields
                 for (const auto& g : df3_int_groups) {
                     write_sep();
                     size_t group_size = g.col_end - g.col_start;
@@ -1006,7 +1214,7 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                     if (!any) *w++ = '.';
                 }
 
-                // DF3 float
+                // Process DF3 Float fields
                 for (const auto& g : df3_float_groups) {
                     write_sep();
                     size_t group_size = g.col_end - g.col_start;
@@ -1023,7 +1231,7 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                     if (!any) *w++ = '.';
                 }
 
-                // DF3 string
+                // Process DF3 String fields
                 for (size_t col = 0; col < df3.samp_string.size(); col++) {
                     write_sep();
                     const std::string& s_val = df3.samp_string[col].i_string[df3_idx];
@@ -1031,7 +1239,7 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                     else { memcpy(w, s_val.data(), s_val.size()); w += s_val.size(); }
                 }
 
-                // DF4
+                // Process DF4 Allele-specific fields
                 if (start_df4 != -1) {
                     for (const auto& g : df4_int_groups) {
                         write_sep();
@@ -1101,14 +1309,14 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
         }
     }
 
-    // Prefix sum
+    // Prefix sum to calculate global offsets
     size_t total_size = 0;
     for (int k = 0; k < total_cells; k++) {
         offsets[k] = (unsigned int)total_size;
         total_size += cell_lens[k];
     }
 
-    // Passata 2 parallela: copia da scratch al buffer finale
+    // Parallel Pass 2: Copy from thread-local scratch buffers to the final contiguous buffer
     buffer.resize(total_size);
     #pragma omp parallel for schedule(static)
     for (int tid = 0; tid < num_threads; tid++) {
