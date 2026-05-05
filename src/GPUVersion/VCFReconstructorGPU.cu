@@ -85,10 +85,21 @@ void VCFReconstructorGPU::freeDevice(){
 
 //Destructor
 VCFReconstructorGPU::~VCFReconstructorGPU() {
+    // If run() was interrupted, make sure the writer thread shuts down cleanly.
+    if (writer_thread.joinable()) {
+        {
+            std::lock_guard<std::mutex> lock(write_mutex);
+            writer_should_stop = true;
+        }
+        cv_job_available.notify_all();
+        writer_thread.join();
+    }
+
     freeDevice(); // Clean up VRAM
 
-    // Clean up host-side dynamically allocated compaction buffer
-    if (h_compacted) free(h_compacted);
+    for (int b = 0; b < NUM_WRITE_BUFFERS; b++) {
+        if (h_compacted_pool[b]) free(h_compacted_pool[b]);
+    }
 }
 
 // Device Allocation & Data Transfer Setup
@@ -708,6 +719,10 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
     }
     vcf_file << "\n";
 
+    writer_out = &vcf_file;
+    writer_should_stop = false;
+    writer_thread = std::thread(&VCFReconstructorGPU::writerLoop, this);
+
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
@@ -1000,7 +1015,7 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
 
         // Stream compaction and write phase
         cudaEventRecord(start);
-        writeChunk(chunk_size, vcf_file);
+        writeChunk(chunk_size);
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&ms_write, start, stop);
@@ -1037,29 +1052,30 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
 
+    // Signal the writer thread, wait for it to drain the queue, then close file.
+    {
+        std::lock_guard<std::mutex> lock(write_mutex);
+        writer_should_stop = true;
+    }
+    cv_job_available.notify_all();
+    writer_thread.join();
+
     vcf_file.close();
 }
 
-void VCFReconstructorGPU::writeChunk(int num_variants, std::ofstream& out){
-    // 1. Prefix scan of line_lens on d_line_lens -> d_output_offsets
-    //    We use CUB ExclusiveSum: offset[0]=0, offset[i] = sum(line_lens[0..i-1])
+void VCFReconstructorGPU::writeChunk(int num_variants) {
+    // ---- 1. Exclusive prefix scan: line_lens -> output_offsets ----
     void* d_temp_storage = nullptr;
     size_t temp_storage_bytes = 0;
-
-    // First call: only to get temp_storage_bytes required by CUB
     cub::DeviceScan::ExclusiveSum(
         d_temp_storage, temp_storage_bytes,
         d_line_lens, d_output_offsets, num_variants);
-
     gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
-
-    // Second call: actual prefix scan
     cub::DeviceScan::ExclusiveSum(
         d_temp_storage, temp_storage_bytes,
         d_line_lens, d_output_offsets, num_variants);
 
-    // 2. Calculate total_bytes = last_offset + last_len
-    //    Retrieve the last two elements from the device to compute the exact buffer size
+    // ---- 2. Total bytes = last offset + last length ----
     unsigned int last_offset, last_len;
     gpuErrchk(cudaMemcpy(&last_offset, d_output_offsets + (num_variants - 1),
                          sizeof(unsigned int), cudaMemcpyDeviceToHost));
@@ -1067,33 +1083,50 @@ void VCFReconstructorGPU::writeChunk(int num_variants, std::ofstream& out){
                          sizeof(unsigned int), cudaMemcpyDeviceToHost));
     size_t total_bytes = last_offset + last_len;
 
-    // 3. Allocate d_compacted to the exact required size
+    // ---- 3. Allocate compacted buffer on device, exact size ----
     gpuErrchk(cudaMalloc((void**)&d_compacted, total_bytes * sizeof(char)));
 
-    // 3. Allocate d_compacted to the exact required size
+    // ---- 4. Compaction kernel ----
     int block_size, num_blocks;
-    getOptimalLaunchConfig(compactKernel, num_variants,
-                       block_size, num_blocks);
+    getOptimalLaunchConfig(compactKernel, num_variants, block_size, num_blocks);
     compactKernel<<<num_blocks, block_size>>>(
         d_output, d_line_lens, d_output_offsets,
         d_compacted, num_variants, MAX_LINE_LEN);
     gpuErrchk(cudaPeekAtLastError());
 
-    // 5. Grow the host buffer if necessary
-    if (total_bytes > h_compacted_capacity) {
-        if (h_compacted) free(h_compacted);
-        h_compacted_capacity = total_bytes + total_bytes / 4; // 25% margin
-        h_compacted = (char*)malloc(h_compacted_capacity);
+    // ---- 5. Pick a host buffer slot. Wait if both are still being written ----
+    int buf_idx;
+    {
+        std::unique_lock<std::mutex> lock(write_mutex);
+        cv_buffer_free.wait(lock, [this, &buf_idx]() {
+            for (int b = 0; b < NUM_WRITE_BUFFERS; b++) {
+                if (!write_buffer_busy[b]) { buf_idx = b; return true; }
+            }
+            return false;
+        });
+        // Reserve the slot before releasing the lock.
+        write_buffer_busy[buf_idx] = true;
     }
 
-    // 6. Single D2H copy of the compacted buffer
-    gpuErrchk(cudaMemcpy(h_compacted, d_compacted,
+    // ---- 6. Grow the chosen host buffer if necessary ----
+    if (total_bytes > h_compacted_pool_capacity[buf_idx]) {
+        if (h_compacted_pool[buf_idx]) free(h_compacted_pool[buf_idx]);
+        h_compacted_pool_capacity[buf_idx] = total_bytes + total_bytes / 4;
+        h_compacted_pool[buf_idx] = (char*)malloc(h_compacted_pool_capacity[buf_idx]);
+    }
+
+    // ---- 7. D2H copy into the reserved slot ----
+    gpuErrchk(cudaMemcpy(h_compacted_pool[buf_idx], d_compacted,
                          total_bytes * sizeof(char), cudaMemcpyDeviceToHost));
 
-    // 7. Single write to file
-    out.write(h_compacted, total_bytes);
+    // ---- 8. Hand the job to the writer thread; do NOT write here ----
+    {
+        std::lock_guard<std::mutex> lock(write_mutex);
+        write_queue.push({buf_idx, total_bytes});
+    }
+    cv_job_available.notify_one();
 
-    // 8. Cleanup temporary buffers
+    // ---- 9. Cleanup device-side temporaries ----
     gpuErrchk(cudaFree(d_temp_storage));
     gpuErrchk(cudaFree(d_compacted));
     d_compacted = nullptr;
@@ -1604,6 +1637,43 @@ void VCFReconstructorGPU::buildInverseMaps(const var_columns_df& df1) {
     }
     for (const auto& pair : tsaCharMap) {
         inv_tsa_map[pair.second] = pair.first;
+    }
+}
+
+/**
+ * @brief Background thread that consumes compacted output buffers and writes them to disk.
+ *
+ * Implements a single-consumer queue: blocks on cv_job_available, drains the
+ * queue, performs sequential writes, and signals cv_buffer_free so the main
+ * thread can reuse a buffer slot. Exits when writer_should_stop is set and
+ * the queue is empty.
+ */
+void VCFReconstructorGPU::writerLoop() {
+    while (true) {
+        WriteJob job;
+
+        // Wait for a job or for the shutdown signal.
+        {
+            std::unique_lock<std::mutex> lock(write_mutex);
+            cv_job_available.wait(lock, [this]() {
+                return !write_queue.empty() || writer_should_stop;
+            });
+            if (write_queue.empty() && writer_should_stop) return;
+
+            job = write_queue.front();
+            write_queue.pop();
+        }
+
+        // Disk write happens outside the lock so the main thread is never
+        // blocked while we are flushing.
+        writer_out->write(h_compacted_pool[job.buffer_idx], job.total_bytes);
+
+        // Mark the slot as free and notify whoever is waiting on it.
+        {
+            std::lock_guard<std::mutex> lock(write_mutex);
+            write_buffer_busy[job.buffer_idx] = false;
+        }
+        cv_buffer_free.notify_all();
     }
 }
 

@@ -9,6 +9,10 @@
 #include <cuda_fp16.h>
 #include "VCFDataFrames.h"
 #include "GPUStructs.h"
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
 
 #define MAX_LINE_LEN 756
 #define MAX_NAME_LEN 16
@@ -153,8 +157,30 @@ private:
     char* d_compacted;               ///< Device buffer for the compacted, contiguous VCF text.
     unsigned int* d_output_offsets;  ///< Device array storing prefix-summed offsets for stream compaction.
 
-    size_t h_compacted_capacity = 0; ///< Current capacity of the host-side compacted buffer.
-    char* h_compacted = nullptr;     ///< Host buffer receiving the compacted chunk from the device before disk write.   
+    //size_t h_compacted_capacity = 0; ///< Current capacity of the host-side compacted buffer.
+    //char* h_compacted = nullptr;     ///< Host buffer receiving the compacted chunk from the device before disk write.   
+
+    // Writer thread infrastructure
+    struct WriteJob {
+        int buffer_idx;
+        size_t total_bytes;
+    };
+
+    static constexpr int NUM_WRITE_BUFFERS = 2;
+    char* h_compacted_pool[NUM_WRITE_BUFFERS] = {nullptr, nullptr};
+    size_t h_compacted_pool_capacity[NUM_WRITE_BUFFERS] = {0, 0};
+
+    std::queue<WriteJob> write_queue;
+    std::mutex write_mutex;
+    std::condition_variable cv_job_available;
+    std::condition_variable cv_buffer_free;
+    bool write_buffer_busy[NUM_WRITE_BUFFERS] = {false, false};
+    bool writer_should_stop = false;
+
+    std::thread writer_thread;
+    std::ofstream* writer_out = nullptr;
+
+    void writerLoop();
 
     /**
      * @brief Reconstructs the inverse maps from the DF1 dictionaries for host-side lookups.
@@ -219,7 +245,7 @@ private:
      * @param num_variants The number of variants processed in the current chunk.
      * @param out The output file stream (std::ofstream) where the VCF text will be appended.
      */
-    void writeChunk(int num_variants, std::ofstream& out);
+    void writeChunk(int num_variants);
 
     /**
      * @brief Populates the ordered_samp_names vector by mapping sample IDs to their string names.
