@@ -1,0 +1,93 @@
+@startuml
+title VCFReconstructorGPU - Pipeline di esecuzione
+
+skinparam sequence {
+    ArrowColor #2C3E50
+    ActorBorderColor #2C3E50
+    ParticipantBorderColor #2C3E50
+    ParticipantBackgroundColor #ECF0F1
+    LifeLineBackgroundColor #BDC3C7
+}
+
+actor User
+participant "main()" as Main
+participant "VCFReconstructorGPU\n(host)" as REC
+participant "OpenMP\nthread pool" as OMP
+participant "GPU device" as GPU
+participant "VCF file\n(disk)" as DISK
+
+User -> Main : run binary
+Main -> REC : run(df1, df2, df3, df4)
+
+== Setup phase (one-shot) ==
+
+REC -> REC : buildInverseMaps()
+REC -> REC : buildSampleNames()
+REC -> REC : parseFormatNumbers()
+REC -> REC : buildGroups()\n(GroupInfo for DF3/DF4)
+
+REC -> DISK : write VCF header\n+ #CHROM line
+
+REC -> GPU : cudaMalloc + cudaMemcpy\n(FORMAT string, names,\n inverse maps)
+note right
+  Allocated ONCE for the
+  whole dataset, never
+  freed between chunks
+end note
+
+== Chunk loop (60 iterations on IRBT) ==
+
+loop for each chunk of CHUNK_SIZE variants
+
+    REC -> GPU : allocateDevice()\n(per-chunk buffers)
+
+    REC -> OMP : prepareHostBuffers()
+    activate OMP
+
+    OMP -> OMP : pack id, ref, ALT strings
+    OMP -> OMP : transpose INFO arrays\n(field-major)
+    OMP -> OMP : compute alt_start /\nalt_count
+
+    OMP -> OMP : buildSampleStrings()
+    note right
+      Pass 1: each thread formats
+      its variants into private
+      scratch buffer
+      Pass 2: gather scratch ->
+      final packed buffer
+    end note
+
+    OMP --> REC : HostBuffers populated
+    deactivate OMP
+
+    REC -> GPU : uploadToDevice()\n(many cudaMemcpy)
+
+    REC -> GPU : reconstructKernel<<<...>>>
+    activate GPU
+    GPU -> GPU : 1 thread = 1 variant\nemit CHROM..INFO..FORMAT..samples
+    GPU -> GPU : line_lens[i] = pos
+    GPU --> REC : kernel done
+    deactivate GPU
+
+    REC -> GPU : writeChunk()
+    activate GPU
+
+    GPU -> GPU : cub::DeviceScan::ExclusiveSum\n(line_lens -> output_offsets)
+    GPU -> GPU : compactKernel<<<...>>>\n(pack live bytes only)
+    deactivate GPU
+
+    GPU -> REC : cudaMemcpy D2H\n(only total_bytes,\nNOT chunk_size * MAX_LINE_LEN)
+    REC -> DISK : out.write(h_compacted, total_bytes)\n(single contiguous write)
+
+    REC -> GPU : freeDevice()\n(per-chunk buffers)
+
+end
+
+== Cleanup ==
+
+REC -> GPU : free dataset constants
+REC -> DISK : close file
+REC --> Main : done
+Main --> User
+
+@enduml

@@ -1,0 +1,57 @@
+@startuml
+title Per-chunk pipeline (CPU vs GPU stages)
+
+skinparam activity {
+    BackgroundColor<<CPU>> #D6EAF8
+    BackgroundColor<<GPU>> #FADBD8
+    BackgroundColor<<IO>> #D5F5E3
+    BorderColor #2C3E50
+}
+
+start
+
+:allocateDevice()<<GPU>>;
+note right: cudaMalloc per output,\nDF1/DF2/DF3 chunk-local
+
+:prepareHostBuffers()<<CPU>>;
+note right: ~12 ms (dominante)\nCPU + OpenMP a 4 thread
+
+partition "prepareHostBuffers (CPU)" {
+    :pack id / ref / ALT strings;
+    :transpose INFO (field-major);
+    :compute alt_start / alt_count;
+    :buildSampleStrings()<<CPU>>;
+    note right
+      Pass 1: parallel format
+      into per-thread scratch
+      Pass 2: parallel gather
+      into final packed buffer
+    end note
+}
+
+:uploadToDevice()<<GPU>>;
+note right: ~2 ms\n~15 cudaMemcpy H2D
+
+:reconstructKernel<<<...>>><<GPU>>;
+note right
+  ~0.7 ms
+  1 thread = 1 variant
+  emits one VCF line each
+end note
+
+partition "writeChunk (GPU + I/O)" {
+    :cub::DeviceScan::ExclusiveSum<<GPU>>;
+    note right: prefix sum on line_lens
+    :compactKernel<<<...>>><<GPU>>;
+    note right: pack live bytes only
+    :cudaMemcpy D2H (compacted)<<GPU>>;
+    :out.write(h_compacted)<<IO>>;
+    note right: single contiguous write
+}
+
+:freeDevice()<<GPU>>;
+note right: free per-chunk buffers
+
+stop
+
+@enduml

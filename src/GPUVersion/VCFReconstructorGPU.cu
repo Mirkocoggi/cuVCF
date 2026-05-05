@@ -88,7 +88,7 @@ VCFReconstructorGPU::~VCFReconstructorGPU() {
     freeDevice(); // Clean up VRAM
 
     // Clean up host-side dynamically allocated compaction buffer
-    if (h_compacted) safe_cuda_free(h_compacted);
+    if (h_compacted) free(h_compacted);
 }
 
 // Device Allocation & Data Transfer Setup
@@ -607,64 +607,6 @@ __global__ void reconstructKernel(
     }
 }
 
-void VCFReconstructorGPU::writeChunk(int num_variants, std::ofstream& out){
-    // 1. Prefix scan of line_lens on d_line_lens -> d_output_offsets
-    //    We use CUB ExclusiveSum: offset[0]=0, offset[i] = sum(line_lens[0..i-1])
-    void* d_temp_storage = nullptr;
-    size_t temp_storage_bytes = 0;
-
-    // First call: only to get temp_storage_bytes required by CUB
-    cub::DeviceScan::ExclusiveSum(
-        d_temp_storage, temp_storage_bytes,
-        d_line_lens, d_output_offsets, num_variants);
-
-    gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
-
-    // Second call: actual prefix scan
-    cub::DeviceScan::ExclusiveSum(
-        d_temp_storage, temp_storage_bytes,
-        d_line_lens, d_output_offsets, num_variants);
-
-    // 2. Calculate total_bytes = last_offset + last_len
-    //    Retrieve the last two elements from the device to compute the exact buffer size
-    unsigned int last_offset, last_len;
-    gpuErrchk(cudaMemcpy(&last_offset, d_output_offsets + (num_variants - 1),
-                         sizeof(unsigned int), cudaMemcpyDeviceToHost));
-    gpuErrchk(cudaMemcpy(&last_len, d_line_lens + (num_variants - 1),
-                         sizeof(unsigned int), cudaMemcpyDeviceToHost));
-    size_t total_bytes = last_offset + last_len;
-
-    // 3. Allocate d_compacted to the exact required size
-    gpuErrchk(cudaMalloc((void**)&d_compacted, total_bytes * sizeof(char)));
-
-    // 3. Allocate d_compacted to the exact required size
-    int block_size = 32;
-    int num_blocks = (num_variants + block_size - 1) / block_size;
-    compactKernel<<<num_blocks, block_size>>>(
-        d_output, d_line_lens, d_output_offsets,
-        d_compacted, num_variants, MAX_LINE_LEN);
-    gpuErrchk(cudaPeekAtLastError());
-
-    // 5. Grow the host buffer if necessary
-    if (total_bytes > h_compacted_capacity) {
-        if (h_compacted) free(h_compacted);
-        h_compacted_capacity = total_bytes + total_bytes / 4; // 25% margin
-        h_compacted = (char*)malloc(h_compacted_capacity);
-    }
-
-    // 6. Single D2H copy of the compacted buffer
-    gpuErrchk(cudaMemcpy(h_compacted, d_compacted,
-                         total_bytes * sizeof(char), cudaMemcpyDeviceToHost));
-
-    // 7. Single write to file
-    out.write(h_compacted, total_bytes);
-
-    // 8. Cleanup temporary buffers
-    gpuErrchk(cudaFree(d_temp_storage));
-    gpuErrchk(cudaFree(d_compacted));
-    d_compacted = nullptr;
-}
-
 /**
  * @brief Parses and groups format fields to determine their cardinality.
  * 
@@ -702,6 +644,37 @@ static std::vector<VCFReconstructorGPU::GroupInfo> buildGroups(
         col = end;
     }
     return out;
+}
+
+/**
+ * @brief Computes optimal launch parameters for a given kernel on the current GPU.
+ *
+ * Wraps cudaOccupancyMaxPotentialBlockSize to derive the block size that
+ * maximizes occupancy and the minimum grid size required to saturate the
+ * device. The kernel relies on a grid-stride loop to handle workloads larger
+ * than the launched grid.
+ *
+ * @param kernel       Function pointer to the kernel to be launched.
+ * @param work_size    Total number of work items (e.g. variants in the chunk).
+ * @param block_size   OUT: recommended block size for this kernel.
+ * @param grid_size    OUT: grid size that saturates the GPU.
+ */
+template <typename KernelT>
+void getOptimalLaunchConfig(KernelT kernel, int work_size,
+                            int& block_size, int& grid_size) {
+    int min_grid_size = 0;
+    int optimal_block = 0;
+    cudaOccupancyMaxPotentialBlockSize(
+        &min_grid_size, &optimal_block,
+        kernel, 0, 0);
+
+    block_size = optimal_block;
+    // Cap grid size at what's needed for the workload, so we don't over-launch
+    // for tiny chunks. Otherwise scale to GPU saturation level.
+    int needed_grid = (work_size + block_size - 1) / block_size;
+    grid_size = std::min(needed_grid, min_grid_size);
+    // Ensure at least 1 block.
+    if (grid_size < 1) grid_size = 1;
 }
 
 void VCFReconstructorGPU::run(const var_columns_df& df1,
@@ -956,6 +929,15 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
         safe_map_alloc((void**)&d_maps.tsa_strings,    (void**)&d_maps.tsa_offsets,    tsa_strings_buf,    tsa_offsets_buf);
     }
 
+    {
+        int bs, gs;
+        getOptimalLaunchConfig(reconstructKernel, CHUNK_SIZE, bs, gs);
+        printf("[reconstructKernel] block_size=%d, grid_size=%d\n", bs, gs);
+        
+        getOptimalLaunchConfig(compactKernel, CHUNK_SIZE, bs, gs);
+        printf("[compactKernel]    block_size=%d, grid_size=%d\n", bs, gs);
+    }
+
     // Main execution loop: Process data in chunks
     int df2_start = 0;
     for (int chunk_start = 0; chunk_start < (int)df1.var_number.size(); chunk_start += CHUNK_SIZE){
@@ -995,8 +977,8 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&ms_u2d, start, stop);
 
-        int block_size = 32;
-        int num_blocks = (chunk_size + block_size - 1) / block_size;
+        int block_size, num_blocks;
+        getOptimalLaunchConfig(reconstructKernel, chunk_size, block_size, num_blocks);
 
         // Kernel execution phase
         cudaEventRecord(start);
@@ -1056,6 +1038,65 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
     cudaEventDestroy(stop);
 
     vcf_file.close();
+}
+
+void VCFReconstructorGPU::writeChunk(int num_variants, std::ofstream& out){
+    // 1. Prefix scan of line_lens on d_line_lens -> d_output_offsets
+    //    We use CUB ExclusiveSum: offset[0]=0, offset[i] = sum(line_lens[0..i-1])
+    void* d_temp_storage = nullptr;
+    size_t temp_storage_bytes = 0;
+
+    // First call: only to get temp_storage_bytes required by CUB
+    cub::DeviceScan::ExclusiveSum(
+        d_temp_storage, temp_storage_bytes,
+        d_line_lens, d_output_offsets, num_variants);
+
+    gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
+
+    // Second call: actual prefix scan
+    cub::DeviceScan::ExclusiveSum(
+        d_temp_storage, temp_storage_bytes,
+        d_line_lens, d_output_offsets, num_variants);
+
+    // 2. Calculate total_bytes = last_offset + last_len
+    //    Retrieve the last two elements from the device to compute the exact buffer size
+    unsigned int last_offset, last_len;
+    gpuErrchk(cudaMemcpy(&last_offset, d_output_offsets + (num_variants - 1),
+                         sizeof(unsigned int), cudaMemcpyDeviceToHost));
+    gpuErrchk(cudaMemcpy(&last_len, d_line_lens + (num_variants - 1),
+                         sizeof(unsigned int), cudaMemcpyDeviceToHost));
+    size_t total_bytes = last_offset + last_len;
+
+    // 3. Allocate d_compacted to the exact required size
+    gpuErrchk(cudaMalloc((void**)&d_compacted, total_bytes * sizeof(char)));
+
+    // 3. Allocate d_compacted to the exact required size
+    int block_size, num_blocks;
+    getOptimalLaunchConfig(compactKernel, num_variants,
+                       block_size, num_blocks);
+    compactKernel<<<num_blocks, block_size>>>(
+        d_output, d_line_lens, d_output_offsets,
+        d_compacted, num_variants, MAX_LINE_LEN);
+    gpuErrchk(cudaPeekAtLastError());
+
+    // 5. Grow the host buffer if necessary
+    if (total_bytes > h_compacted_capacity) {
+        if (h_compacted) free(h_compacted);
+        h_compacted_capacity = total_bytes + total_bytes / 4; // 25% margin
+        h_compacted = (char*)malloc(h_compacted_capacity);
+    }
+
+    // 6. Single D2H copy of the compacted buffer
+    gpuErrchk(cudaMemcpy(h_compacted, d_compacted,
+                         total_bytes * sizeof(char), cudaMemcpyDeviceToHost));
+
+    // 7. Single write to file
+    out.write(h_compacted, total_bytes);
+
+    // 8. Cleanup temporary buffers
+    gpuErrchk(cudaFree(d_temp_storage));
+    gpuErrchk(cudaFree(d_compacted));
+    d_compacted = nullptr;
 }
 
 void VCFReconstructorGPU::buildSampleNames(const sample_columns_df& df3) {

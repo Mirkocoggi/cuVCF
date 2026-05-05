@@ -10,9 +10,9 @@
 #include "VCFDataFrames.h"
 #include "GPUStructs.h"
 
-#define MAX_LINE_LEN 1024
+#define MAX_LINE_LEN 756
 #define MAX_NAME_LEN 16
-#define MAX_SAMPLE_STRING_LEN 256
+#define MAX_SAMPLE_STRING_LEN 64
 #define CHUNK_SIZE   10000
 
 /**
