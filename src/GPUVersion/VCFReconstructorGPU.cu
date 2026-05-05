@@ -932,10 +932,10 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
     {
         int bs, gs;
         getOptimalLaunchConfig(reconstructKernel, CHUNK_SIZE, bs, gs);
-        printf("[reconstructKernel] block_size=%d, grid_size=%d\n", bs, gs);
+        printf("[reconstructKernel] block_size=%d, num_blocks=%d\n", bs, gs);
         
         getOptimalLaunchConfig(compactKernel, CHUNK_SIZE, bs, gs);
-        printf("[compactKernel]    block_size=%d, grid_size=%d\n", bs, gs);
+        printf("[compactKernel]    block_size=%d, num_blocks=%d\n", bs, gs);
     }
 
     // Main execution loop: Process data in chunks

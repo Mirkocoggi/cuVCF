@@ -13,7 +13,7 @@
 #define MAX_LINE_LEN 756
 #define MAX_NAME_LEN 16
 #define MAX_SAMPLE_STRING_LEN 64
-#define CHUNK_SIZE   10000
+#define CHUNK_SIZE   100000
 
 /**
  * @brief Staging structure residing in system RAM (Host).
