@@ -1127,6 +1127,57 @@ std::map<std::string, std::string> VCFReconstructorGPU::parseFormatNumbers(const
 }
 
 /**
+ * @brief Fast integer-to-ASCII conversion (host code).
+ *
+ * Drop-in replacement for snprintf(dst, _, "%d", n) within buildSampleStrings,
+ * avoiding the format-string parsing overhead that dominates a hot path with
+ * millions of calls per chunk. Handles negatives by emitting a leading '-'.
+ *
+ * @param n Integer value to convert.
+ * @param dst Destination buffer (caller-owned, must have at least 12 bytes).
+ * @return Number of bytes written (excluding any terminator; none is added).
+ */
+static inline int fast_itoa(int n, char* dst) {
+    if (n == 0) { dst[0] = '0'; return 1; }
+    char tmp[12];
+    int tmp_len = 0;
+    int dst_pos = 0;
+    if (n < 0) { dst[0] = '-'; n = -n; dst_pos = 1; }
+    while (n > 0) {
+        tmp[tmp_len++] = '0' + n % 10;
+        n /= 10;
+    }
+    for (int j = 0; j < tmp_len; j++) {
+        dst[dst_pos + j] = tmp[tmp_len - j - 1];
+    }
+    return dst_pos + tmp_len;
+}
+
+/**
+ * @brief Fast float-to-ASCII conversion (host code).
+ *
+ * Mirrors device_ftoa: handles the -1.0f missing sentinel as ".", otherwise
+ * prints the integer part, a dot, and up to 6 fractional digits in fixed
+ * point. Avoids snprintf's "%g" overhead at the cost of slightly different
+ * formatting (always 6 fractional digits, no scientific notation).
+ *
+ * @param f Float value to convert.
+ * @param dst Destination buffer (caller-owned, must have at least 24 bytes).
+ * @return Number of bytes written.
+ */
+static inline int fast_ftoa(float f, char* dst) {
+    if (f == -1.0f) { dst[0] = '.'; return 1; }
+    int int_part = (int)f;
+    int int_len = fast_itoa(int_part, dst);
+    dst[int_len] = '.';
+    float frac_part = f - int_part;
+    if (frac_part < 0) frac_part = -frac_part;
+    int frac_int = (int)(frac_part * 1000000);
+    int frac_len = fast_itoa(frac_int, dst + int_len + 1);
+    return int_len + frac_len + 1;
+}
+
+/**
  * @param df1         Core variants DataFrame.
  * @param df2         Alternative alleles DataFrame.
  * @param df3         Sample core DataFrame.
@@ -1258,7 +1309,7 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                             int v = df3.samp_int[cc].i_int[df3_idx];
                             if (v == -1) continue;
                             if (!first_v) *w++ = ','; first_v = false;
-                            w += snprintf(w, 16, "%d", v);
+                            w += fast_itoa(v, w);
                             any = true;
                         }
                         if (!any) *w++ = '.';
@@ -1275,7 +1326,7 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                             float v = (float)df3.samp_float[cc].i_float[df3_idx];
                             if (v == -1.0f) continue;
                             if (!first_v) *w++ = ','; first_v = false;
-                            w += snprintf(w, 32, "%g", v);
+                            w += fast_ftoa(v, w);
                             any = true;
                         }
                         if (!any) *w++ = '.';
@@ -1301,7 +1352,7 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                                         if (any) *w++ = ',';
                                         int v = df4.samp_int[cc].i_int[k];
                                         if (v == -1) *w++ = '.';
-                                        else w += snprintf(w, 16, "%d", v);
+                                        else w += fast_itoa(v, w);
                                         any = true;
                                     }
                                 }
@@ -1320,7 +1371,7 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                                         if (any) *w++ = ',';
                                         float v = (float)df4.samp_float[cc].i_float[k];
                                         if (v == -1.0f) *w++ = '.';
-                                        else w += snprintf(w, 32, "%g", v);
+                                        else w += fast_ftoa(v, w);
                                         any = true;
                                     }
                                 }
@@ -1555,3 +1606,4 @@ void VCFReconstructorGPU::buildInverseMaps(const var_columns_df& df1) {
         inv_tsa_map[pair.second] = pair.first;
     }
 }
+
