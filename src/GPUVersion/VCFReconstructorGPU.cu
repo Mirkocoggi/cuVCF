@@ -994,6 +994,8 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
 
         int block_size, num_blocks;
         getOptimalLaunchConfig(reconstructKernel, chunk_size, block_size, num_blocks);
+        //block_size = 32;
+        //num_blocks = 64;
 
         // Kernel execution phase
         cudaEventRecord(start);
@@ -1329,7 +1331,6 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                     }
                 }
 
-                // PROCEDI CON IL RESTO SOLO SE IL GENOTIPO E' VALIDO
                 if (!skip_rest) {
                     // Process DF3 Integer fields
                     for (const auto& g : df3_int_groups) {
