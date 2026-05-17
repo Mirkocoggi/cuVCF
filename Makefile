@@ -6,6 +6,8 @@ NVCC     = nvcc
 CXXFLAGS = -std=c++17 -Wall -O2 -fopenmp
 # Aggiunto -arch=native per assicurare il supporto a __half sulla tua GPU
 NVCCFLAGS= -std=c++17 -O2 -Xcompiler -fopenmp -arch=native
+# -lineinfo keeps symbol/line info for Nsight Compute source correlation without disabling opts
+NVCCFLAGS_PROF = $(NVCCFLAGS) -lineinfo
 INCLUDES = -Iinclude -Isrc/CPUVersion -Isrc/GPUVersion
 BUILD    = build
 
@@ -19,8 +21,9 @@ SRCS_GPU = src/GPUVersion/main_gpu.cu \
            src/CPUVersion/CSVParser.cpp \
            src/Utils.cpp
 
-TARGET_CPU = $(BUILD)/test_parser
-TARGET_GPU = $(BUILD)/test_parser_gpu
+TARGET_CPU  = $(BUILD)/test_parser
+TARGET_GPU  = $(BUILD)/test_parser_gpu
+TARGET_PROF = $(BUILD)/test_parser_gpu_prof
 
 all: $(TARGET_CPU) $(TARGET_GPU)
 
@@ -36,8 +39,13 @@ $(TARGET_CPU): $(SRCS_CPU)
 
 $(TARGET_GPU): $(SRCS_GPU)
 	@mkdir -p $(BUILD)
-	$(NVCC) $(NVCCFLAGS) $(INCLUDES) $(SRCS_GPU) -o $(TARGET_GPU) -lImath
+	$(NVCC) $(NVCCFLAGS) $(INCLUDES) $(SRCS_GPU) -o $(TARGET_GPU) -lImath -lnvToolsExt
 	@echo "GPU build completata!"
+
+profile: $(SRCS_GPU)
+	@mkdir -p $(BUILD)
+	$(NVCC) $(NVCCFLAGS_PROF) $(INCLUDES) $(SRCS_GPU) -o $(TARGET_PROF) -lImath -lnvToolsExt
+	@echo "Profile build completata → $(TARGET_PROF)"
 
 clean:
 	rm -rf $(BUILD)/*

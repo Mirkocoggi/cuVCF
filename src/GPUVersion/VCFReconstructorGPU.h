@@ -18,6 +18,8 @@
 #define MAX_NAME_LEN 16
 #define MAX_SAMPLE_STRING_LEN 64
 #define CHUNK_SIZE   100000
+#define BLOCK_SIZE   64
+#define NUM_BLOCKS   128
 
 /**
  * @brief Staging structure residing in system RAM (Host).

@@ -5,7 +5,7 @@
 #include <sstream>
 #include <omp.h>
 #include <chrono>
-#include <cub/cub.cuh>
+#include <cub/cub.cuh>  // also pulls in nvtx3/nvToolsExt.h → nvtxRangePushA / nvtxRangePop
 
 //Constructor
 VCFReconstructorGPU::VCFReconstructorGPU(const std::string& output_vcf_path,
@@ -657,37 +657,6 @@ static std::vector<VCFReconstructorGPU::GroupInfo> buildGroups(
     return out;
 }
 
-/**
- * @brief Computes optimal launch parameters for a given kernel on the current GPU.
- *
- * Wraps cudaOccupancyMaxPotentialBlockSize to derive the block size that
- * maximizes occupancy and the minimum grid size required to saturate the
- * device. The kernel relies on a grid-stride loop to handle workloads larger
- * than the launched grid.
- *
- * @param kernel       Function pointer to the kernel to be launched.
- * @param work_size    Total number of work items (e.g. variants in the chunk).
- * @param block_size   OUT: recommended block size for this kernel.
- * @param grid_size    OUT: grid size that saturates the GPU.
- */
-template <typename KernelT>
-void getOptimalLaunchConfig(KernelT kernel, int work_size,
-                            int& block_size, int& grid_size) {
-    int min_grid_size = 0;
-    int optimal_block = 0;
-    cudaOccupancyMaxPotentialBlockSize(
-        &min_grid_size, &optimal_block,
-        kernel, 0, 0);
-
-    block_size = optimal_block;
-    // Cap grid size at what's needed for the workload, so we don't over-launch
-    // for tiny chunks. Otherwise scale to GPU saturation level.
-    int needed_grid = (work_size + block_size - 1) / block_size;
-    grid_size = std::min(needed_grid, min_grid_size);
-    // Ensure at least 1 block.
-    if (grid_size < 1) grid_size = 1;
-}
-
 void VCFReconstructorGPU::run(const var_columns_df& df1,
          const alt_columns_df& df2,
          const sample_columns_df& df3,
@@ -697,6 +666,9 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
     buildInverseMaps(df1);
     buildSampleNames(df3);
     format_numbers = parseFormatNumbers(header_text);
+
+    //Profiling
+    printf("=== block_size=%d | num_blocks=%d | chunk_size=%d ===\n", BLOCK_SIZE, NUM_BLOCKS, CHUNK_SIZE);
 
     df3_int_groups   = buildGroups(df3.samp_int,   format_numbers);
     df3_float_groups = buildGroups(df3.samp_float, format_numbers);
@@ -944,15 +916,6 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
         safe_map_alloc((void**)&d_maps.tsa_strings,    (void**)&d_maps.tsa_offsets,    tsa_strings_buf,    tsa_offsets_buf);
     }
 
-    {
-        int bs, gs;
-        getOptimalLaunchConfig(reconstructKernel, CHUNK_SIZE, bs, gs);
-        printf("[reconstructKernel] block_size=%d, num_blocks=%d\n", bs, gs);
-        
-        getOptimalLaunchConfig(compactKernel, CHUNK_SIZE, bs, gs);
-        printf("[compactKernel]    block_size=%d, num_blocks=%d\n", bs, gs);
-    }
-
     // Main execution loop: Process data in chunks
     int df2_start = 0;
     for (int chunk_start = 0; chunk_start < (int)df1.var_number.size(); chunk_start += CHUNK_SIZE){
@@ -967,11 +930,13 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
         float ms_alloc, ms_u2d, ms_kernel, ms_write, ms_free;
 
         // Allocation phase
+        nvtxRangePushA("allocate");
         cudaEventRecord(start);
         allocateDevice(df1, df2, df3, chunk_size, chunk_start, chunk_end, df2_start);
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&ms_alloc, start, stop);
+        nvtxRangePop();
 
 
         host_buffers.chunk_size  = chunk_size;
@@ -980,26 +945,26 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
         host_buffers.df2_start   = df2_start;
 
         // Host preparation phase
+        nvtxRangePushA("prep_host");
         auto t0 = std::chrono::high_resolution_clock::now();
         prepareHostBuffers(df1, df2, df3, df4, host_buffers);
         auto t1 = std::chrono::high_resolution_clock::now();
         double ms_prep = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        nvtxRangePop();
            
         // Upload phase
+        nvtxRangePushA("upload_H2D");
         cudaEventRecord(start);
         uploadToDevice(df1, df2, host_buffers);
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&ms_u2d, start, stop);
-
-        int block_size, num_blocks;
-        getOptimalLaunchConfig(reconstructKernel, chunk_size, block_size, num_blocks);
-        //block_size = 32;
-        //num_blocks = 64;
+        nvtxRangePop();
 
         // Kernel execution phase
+        nvtxRangePushA("reconstruct_kernel");
         cudaEventRecord(start);
-        reconstructKernel<<<num_blocks, block_size>>>(
+        reconstructKernel<<<NUM_BLOCKS, BLOCK_SIZE>>>(
             d_maps,
             d_df1,
             d_df2,
@@ -1011,23 +976,28 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&ms_kernel, start, stop);
+        nvtxRangePop();
 
         gpuErrchk(cudaPeekAtLastError());
         gpuErrchk(cudaDeviceSynchronize());
 
         // Stream compaction and write phase
+        nvtxRangePushA("compact_write");
         cudaEventRecord(start);
         writeChunk(chunk_size);
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&ms_write, start, stop);
+        nvtxRangePop();
 
         // Cleanup phase
+        nvtxRangePushA("free_device");
         cudaEventRecord(start);
         freeDevice();
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&ms_free, start, stop);
+        nvtxRangePop();
 
         printf("alloc: %.2f | u2d: %.2f | prep: %.2f | kernel: %.2f | write: %.2f | free: %.2f\n",
                ms_alloc, ms_u2d, ms_prep, ms_kernel, ms_write, ms_free);
@@ -1089,9 +1059,7 @@ void VCFReconstructorGPU::writeChunk(int num_variants) {
     gpuErrchk(cudaMalloc((void**)&d_compacted, total_bytes * sizeof(char)));
 
     // ---- 4. Compaction kernel ----
-    int block_size, num_blocks;
-    getOptimalLaunchConfig(compactKernel, num_variants, block_size, num_blocks);
-    compactKernel<<<num_blocks, block_size>>>(
+    compactKernel<<<NUM_BLOCKS, BLOCK_SIZE>>>(
         d_output, d_line_lens, d_output_offsets,
         d_compacted, num_variants, MAX_LINE_LEN);
     gpuErrchk(cudaPeekAtLastError());
@@ -1667,7 +1635,9 @@ void VCFReconstructorGPU::writerLoop() {
 
         // Disk write happens outside the lock so the main thread is never
         // blocked while we are flushing.
+        nvtxRangePushA("Async Disk Write");
         writer_out->write(h_compacted_pool[job.buffer_idx], job.total_bytes);
+        nvtxRangePop();
 
         // Mark the slot as free and notify whoever is waiting on it.
         {
