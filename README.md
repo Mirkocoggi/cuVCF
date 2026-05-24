@@ -1,6 +1,6 @@
 # VCF Reconstructor
 
-Reconstructs a standard VCF file from the column-oriented DataFrames produced by **cuVCF**. Two backends are provided: a CPU backend parallelized with OpenMP, and a GPU backend built on CUDA.
+Reconstructs a standard VCF file from the column-oriented DataFrames produced by **cuVCF**. Two implementations are provided: a CPU version parallelized with OpenMP, and a CUDA version accelerated on GPU.
 
 ---
 
@@ -15,7 +15,7 @@ cuVCF compresses VCF data by splitting it into four typed, column-oriented DataF
 | **DF3** | Per-sample FORMAT fields constant across alleles (GT, DP, GQ, …) |
 | **DF4** | Per-sample, per-allele FORMAT fields (AD, …) |
 
-Both backends share the same parsing layer (`CSVParser`) and data structures (`VCFDataFrames.h`). The GPU backend further pre-formats all sample strings on the CPU using OpenMP before handing a single packed buffer to the CUDA kernel.
+Both versions share the same parsing layer (`CSVParser`) and data structures (`VCFDataFrames.h`). The CUDA version further pre-formats all sample strings on the CPU using OpenMP before handing a single packed buffer to the kernel.
 
 ---
 
@@ -69,7 +69,7 @@ CUB and NVTX are bundled with the CUDA Toolkit and require no separate installat
 
 No build system file is included yet; compile directly with the commands below.
 
-### CPU backend
+### CPU version
 
 ```bash
 g++ -std=c++17 -O2 -fopenmp \
@@ -82,7 +82,7 @@ g++ -std=c++17 -O2 -fopenmp \
     -lImath
 ```
 
-### GPU backend
+### CUDA version
 
 ```bash
 nvcc -std=c++17 -O2 -Xcompiler -fopenmp \
@@ -119,7 +119,7 @@ The maps file encodes compact char/int codes used internally to reduce memory fo
 
 ## Usage
 
-Both `main_cpu.cpp` and `main_gpu.cu` demonstrate the full call sequence. In production code the `CSVParser` section is replaced by the DataFrames already held in memory by cuVCF.
+Both `main_cpu.cpp` and `main_gpu.cu` demonstrate the full call sequence.
 
 ```cpp
 // 1. Parse encoding dictionaries and all four DataFrames
@@ -138,15 +138,15 @@ parser.parseMaps("data/mydata/maps_used.csv", df1, df3, df4);
 parser.loadAll(df1, df2, df3, df4);
 
 // 2. Reconstruct — choose one backend
-VCFReconstructor reconstructor("output.vcf", parser.header_text);   // CPU
-// VCFReconstructorGPU reconstructor("output.vcf", parser.header_text); // GPU
+VCFReconstructor reconstructor("output.vcf", parser.header_text);   // CPU version
+// VCFReconstructorGPU reconstructor("output.vcf", parser.header_text); // CUDA version
 
 reconstructor.run(df1, df2, df3, df4);
 ```
 
 ---
 
-## Configuration (GPU backend)
+## Configuration (CUDA version)
 
 The following compile-time constants in `VCFReconstructorGPU.h` control performance:
 
