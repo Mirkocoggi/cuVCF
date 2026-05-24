@@ -37,10 +37,11 @@ inline void safe_cuda_free(T*& d_ptr) {
 }
 
 /**
- * This method iterates through all device pointers (d_*) associated with the 
- * sparse output buffer, stream compaction arrays, and the flattened shadow 
- * DataFrames (DF1, DF2, DF3). It relies on the `safe_cuda_free` utility to 
- * avoid double-free errors.
+ * @brief Frees all device pointers for the current chunk and resets them to nullptr.
+ *
+ * Iterates through all device pointers (d_*) associated with the sparse output
+ * buffer, stream compaction arrays, and the flattened shadow DataFrames (DF1,
+ * DF2, DF3). Relies on safe_cuda_free to avoid double-free errors.
  */
 void VCFReconstructorGPU::freeDevice(){
     // --- Sparse Output Buffers ---
@@ -1181,14 +1182,20 @@ static inline int fast_ftoa(float f, char* dst) {
 }
 
 /**
+ * @brief Pre-processes and flattens complex multi-allelic sample data into a contiguous character buffer.
+ *
+ * Uses a two-pass OpenMP strategy: Pass 1 writes each sample string into a
+ * per-thread scratch buffer while recording its length; Pass 2 computes a
+ * global prefix sum and memcpy's each cell to its final position in buffer.
+ *
  * @param df1         Core variants DataFrame.
  * @param df2         Alternative alleles DataFrame.
  * @param df3         Sample core DataFrame.
  * @param df4         Intersected sample-allele DataFrame.
  * @param chunk_size  Number of variants in the current block.
  * @param chunk_start Starting index in DF1.
- * @param chunk_end   Ending index in DF1.
- * @param df2_start   Starting index in DF2.
+ * @param chunk_end   Ending index in DF1 (exclusive).
+ * @param df2_start   Starting index in DF2 corresponding to chunk_start.
  * @param buffer      Output vector that will hold the flattened character data.
  * @param offsets     Output vector that will hold the prefix-summed offsets for the character buffer.
  */
@@ -1586,11 +1593,15 @@ void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
                        buffers.sample_buffer, buffers.sample_offsets);
 }
 
-/*
-* The parser inherently builds forward dictionaries (e.g., String -> char ID) to 
-* compress the data in RAM. This method flips those dictionaries (char ID -> String) 
-* so that the GPU kernel can retrieve the original textual representation.
-*/
+/**
+ * @brief Rebuilds inverse lookup dictionaries from the DF1 forward maps.
+ *
+ * The parser builds forward dictionaries (String -> char ID) to compress data in
+ * RAM. This method flips those dictionaries (char ID -> String) so that the GPU
+ * kernel can retrieve the original textual representation during reconstruction.
+ *
+ * @param df1 The parsed var_columns_df containing the forward dictionaries.
+ */
 void VCFReconstructorGPU::buildInverseMaps(const var_columns_df& df1) {
     for (const auto& pair : df1.chrom_map) {
         inv_chrom_map[pair.second] = pair.first;

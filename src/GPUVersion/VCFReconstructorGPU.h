@@ -163,25 +163,31 @@ private:
     //char* h_compacted = nullptr;     ///< Host buffer receiving the compacted chunk from the device before disk write.   
 
     // Writer thread infrastructure
+    /**
+     * @brief Descriptor for a pending disk-write job dispatched to the writer thread.
+     */
     struct WriteJob {
-        int buffer_idx;
-        size_t total_bytes;
+        int    buffer_idx;  ///< Index into h_compacted_pool identifying the source buffer.
+        size_t total_bytes; ///< Number of bytes to write from the chosen buffer.
     };
 
     static constexpr int NUM_WRITE_BUFFERS = 2;
-    char* h_compacted_pool[NUM_WRITE_BUFFERS] = {nullptr, nullptr};
-    size_t h_compacted_pool_capacity[NUM_WRITE_BUFFERS] = {0, 0};
+    char*  h_compacted_pool[NUM_WRITE_BUFFERS]          = {nullptr, nullptr}; ///< Double-buffered host memory pool for compacted VCF text.
+    size_t h_compacted_pool_capacity[NUM_WRITE_BUFFERS] = {0, 0};             ///< Current allocated capacity of each pool slot in bytes.
 
-    std::queue<WriteJob> write_queue;
-    std::mutex write_mutex;
-    std::condition_variable cv_job_available;
-    std::condition_variable cv_buffer_free;
-    bool write_buffer_busy[NUM_WRITE_BUFFERS] = {false, false};
-    bool writer_should_stop = false;
+    std::queue<WriteJob>    write_queue;        ///< Queue of pending write jobs consumed by the writer thread.
+    std::mutex              write_mutex;        ///< Protects write_queue, write_buffer_busy, and writer_should_stop.
+    std::condition_variable cv_job_available;  ///< Notified when a new job is pushed onto write_queue.
+    std::condition_variable cv_buffer_free;    ///< Notified when a buffer slot becomes available for reuse.
+    bool write_buffer_busy[NUM_WRITE_BUFFERS] = {false, false}; ///< Tracks which pool slots are currently held by the writer thread.
+    bool writer_should_stop = false;           ///< Set to true to signal the writer thread to exit after draining the queue.
 
-    std::thread writer_thread;
-    std::ofstream* writer_out = nullptr;
+    std::thread   writer_thread; ///< Background thread responsible for writing compacted chunks to disk.
+    std::ofstream* writer_out = nullptr; ///< Non-owning pointer to the output file stream managed by run().
 
+    /**
+     * @brief Background thread entry point; drains the write queue and flushes chunks to disk.
+     */
     void writerLoop();
 
     /**
@@ -191,7 +197,7 @@ private:
      */
     void buildInverseMaps(const var_columns_df& df1);
 
-/**
+    /**
      * @brief Allocates all required memory buffers on the CUDA device for the current chunk.
      * 
      * @param df1 Core variants DataFrame.
@@ -211,8 +217,8 @@ private:
                         int df2_start);
 
     /**
-    * @brief Safely deallocates all CUDA device memory to prevent memory leaks.
-    */
+     * @brief Safely deallocates all CUDA device memory to prevent memory leaks.
+     */
     void freeDevice();
 
     /**
@@ -245,7 +251,6 @@ private:
      * @brief Performs stream compaction using Prefix Sum (CUB) and writes the processed, contiguous chunk to disk.
      * 
      * @param num_variants The number of variants processed in the current chunk.
-     * @param out The output file stream (std::ofstream) where the VCF text will be appended.
      */
     void writeChunk(int num_variants);
 

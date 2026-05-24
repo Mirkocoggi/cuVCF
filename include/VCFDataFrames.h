@@ -31,64 +31,80 @@ const int FLOAT_FORMAT_ALT = 13;
 
 using namespace std;
 
+/** @brief Stores a named boolean (flag) INFO column across all variants. */
 struct info_flag
 {
-    vector<bool> i_flag;
-    string name;
+    vector<bool> i_flag; ///< Per-variant flag values.
+    string name;         ///< Field name (e.g., "SOMATIC").
 };
 
+/** @brief Stores a named string INFO column across all variants. */
 struct info_string
 {
-    vector<string> i_string;
-    string name;
+    vector<string> i_string; ///< Per-variant string values.
+    string name;             ///< Field name.
 };
 
+/** @brief Stores a named half-precision float INFO column across all variants. */
 struct info_float
 {
-    vector<half> i_float;
-    string name;
+    vector<half> i_float; ///< Per-variant float values (fp16).
+    string name;          ///< Field name.
 };
 
+/** @brief Stores a named integer INFO column across all variants. */
 struct info_int
 {
-    vector<int> i_int;
-    string name;
+    vector<int> i_int; ///< Per-variant integer values. -1 encodes a missing value.
+    string name;       ///< Field name.
 };
 
+/** @brief Stores a named boolean FORMAT column for a specific allele group across all (variant, sample) pairs. */
 struct samp_Flag
 {
-    vector<bool> i_flag;
-    string name;
-    int numb;
+    vector<bool> i_flag; ///< Per-(variant, sample) flag values.
+    string name;         ///< Field name.
+    int numb;            ///< Allele index or column group number.
 };
 
+/** @brief Stores a named string FORMAT column for a specific allele group across all (variant, sample) pairs. */
 struct samp_String
 {
-    vector<string> i_string;
-    string name;
-    int numb;
+    vector<string> i_string; ///< Per-(variant, sample) string values.
+    string name;             ///< Field name.
+    int numb;                ///< Allele index or column group number.
 };
 
+/** @brief Stores a named half-precision float FORMAT column for a specific allele group across all (variant, sample) pairs. */
 struct samp_Float
 {
-    vector<half> i_float;
-    string name;
-    int numb;
+    vector<half> i_float; ///< Per-(variant, sample) float values (fp16).
+    string name;          ///< Field name.
+    int numb;             ///< Allele index or column group number.
 };
 
+/** @brief Stores a named integer FORMAT column for a specific allele group across all (variant, sample) pairs. */
 struct samp_Int
 {
-    vector<int> i_int;
-    string name;
-    int numb;
+    vector<int> i_int; ///< Per-(variant, sample) integer values. -1 encodes a missing value.
+    string name;       ///< Field name.
+    int numb;          ///< Allele index or column group number.
 };
 
-struct samp_GT 
+/** @brief Stores encoded genotype (GT) values across all (variant, sample) pairs. */
+struct samp_GT
 {
-    vector<char> GT;
-    int numb;    
+    vector<char> GT; ///< Encoded GT values; each char maps to a GT string via GTMap.
+    int numb;        ///< Number of samples or allele group index.
 };
 
+/**
+ * @brief Aggregated metadata parsed from the VCF ##INFO and ##FORMAT header lines.
+ *
+ * Holds the IDs, Numbers, and Types declared in the header together with
+ * pre-computed counts of each field category, used to guide DataFrame
+ * allocation and reconstruction.
+ */
 struct header_element
 {
     vector<string> ID;
@@ -169,32 +185,45 @@ public:
  
 };
 
+/**
+ * @brief Column-oriented data frame for alternate allele data (DF2).
+ *
+ * Each row corresponds to one alternate allele entry.  Multi-allelic variants
+ * produce multiple consecutive rows sharing the same var_id.
+ */
 class alt_columns_df
 {
     public:
-    vector<unsigned int> var_id;
-    vector<char> alt_id;
-    vector<string> alt;
-    vector<info_float> alt_float;
-    vector<info_flag> alt_flag; //non gestite per ora
-    vector<info_string> alt_string;
-    vector<info_int> alt_int;
-    int numAlt;
+    vector<unsigned int> var_id;    ///< Variant ID this allele belongs to.
+    vector<char>         alt_id;    ///< Allele index within its variant (0-based).
+    vector<string>       alt;       ///< ALT allele string (e.g., "A", "<DEL>").
+    vector<info_float>   alt_float; ///< Allele-specific float INFO fields.
+    vector<info_flag>    alt_flag;  ///< Allele-specific flag INFO fields (not yet handled).
+    vector<info_string>  alt_string;///< Allele-specific string INFO fields.
+    vector<info_int>     alt_int;   ///< Allele-specific integer INFO fields.
+    int numAlt;                     ///< Total number of allele rows in this DataFrame.
 };
 
-class sample_columns_df //aka df3
+/**
+ * @brief Column-oriented data frame for core per-sample FORMAT fields (DF3).
+ *
+ * Stores FORMAT data that is the same across all alternate alleles for a given
+ * (variant, sample) pair. The flat layout is indexed as
+ * [variant_index * numSample + sample_index].
+ */
+class sample_columns_df
 {
     public:
-    vector<unsigned int> var_id;
-    vector<unsigned short> samp_id;
-    vector<samp_Float> samp_float;
-    vector<samp_Flag> samp_flag;
-    vector<samp_String> samp_string;
-    vector<samp_Int> samp_int;
-    std::map<std::string, unsigned short> sampNames;
-    map<string, char> GTMap;
-    vector<samp_GT> sample_GT;
-    int numSample; //numero di sample per riga
+    vector<unsigned int>  var_id;      ///< Variant ID for each row.
+    vector<unsigned short> samp_id;   ///< Sample ID for each row.
+    vector<samp_Float>    samp_float; ///< Named float FORMAT columns.
+    vector<samp_Flag>     samp_flag;  ///< Named flag FORMAT columns.
+    vector<samp_String>   samp_string;///< Named string FORMAT columns.
+    vector<samp_Int>      samp_int;   ///< Named integer FORMAT columns.
+    std::map<std::string, unsigned short> sampNames; ///< Maps sample name to its integer ID.
+    map<string, char>     GTMap;       ///< Maps GT strings (e.g., "0|1") to compact char codes.
+    vector<samp_GT>       sample_GT;  ///< Encoded genotype column; present when GT is in DF3.
+    int numSample; ///< Number of samples per variant row.
 
     void initMapGT(){
         int value = 0;
@@ -226,20 +255,27 @@ class sample_columns_df //aka df3
     }
 };
 
-class alt_format_df //aka df4 in progress
+/**
+ * @brief Column-oriented data frame for per-allele sample FORMAT fields (DF4).
+ *
+ * Stores FORMAT data that varies per alternate allele for each (variant, sample)
+ * pair. Each row is uniquely identified by the combination of var_id, samp_id,
+ * and alt_id.
+ */
+class alt_format_df
 {
     public:
-    vector<unsigned int> var_id;
-    vector<unsigned short> samp_id;
-    vector<char> alt_id;
-    vector<samp_Float> samp_float;
-    vector<samp_Flag> samp_flag;
-    vector<samp_String> samp_string;
-    vector<samp_Int> samp_int;
-    std::map<std::string, unsigned short> sampNames;
-    samp_GT sample_GT;
-    map<string, char> GTMap;
-    int numSample; 
+    vector<unsigned int>  var_id;     ///< Variant ID for each row.
+    vector<unsigned short> samp_id;  ///< Sample ID for each row.
+    vector<char>           alt_id;   ///< Allele index for each row.
+    vector<samp_Float>     samp_float; ///< Named float FORMAT columns (allele-specific).
+    vector<samp_Flag>      samp_flag;  ///< Named flag FORMAT columns (allele-specific).
+    vector<samp_String>    samp_string;///< Named string FORMAT columns (allele-specific).
+    vector<samp_Int>       samp_int;   ///< Named integer FORMAT columns (allele-specific).
+    std::map<std::string, unsigned short> sampNames; ///< Maps sample name to its integer ID.
+    samp_GT               sample_GT; ///< Encoded genotype column; present when GT is in DF4.
+    map<string, char>     GTMap;     ///< Maps GT strings to compact char codes.
+    int numSample; ///< Number of samples per variant row.
 
 
     void initMapGT(){
