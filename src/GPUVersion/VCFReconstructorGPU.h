@@ -195,6 +195,11 @@ private:
     size_t cap_temp_storage = 0;
     unsigned char* d_temp_storage = nullptr; ///< Persistent scratch storage for cub::DeviceScan, grown on demand.
 
+    // Explicit CUDA streams (created in run(), destroyed at teardown). Not yet
+    // attached to any operation: kernels and memcpys still run on the default
+    // stream until the pipeline is switched over to using these.
+    cudaStream_t streams[2] = {nullptr, nullptr};
+
     // Writer thread infrastructure
     /**
      * @brief Descriptor for a pending disk-write job dispatched to the writer thread.

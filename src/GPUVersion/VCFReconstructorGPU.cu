@@ -37,6 +37,17 @@ inline void safe_cuda_free(T*& d_ptr) {
 }
 
 /**
+ * @brief Destroys a CUDA stream if it was created, and nulls the handle so a
+ * later call (e.g. from the destructor's safety net) is a no-op.
+ */
+inline void safe_stream_destroy(cudaStream_t& s) {
+    if (s != nullptr) {
+        gpuErrchk(cudaStreamDestroy(s));
+        s = nullptr;
+    }
+}
+
+/**
  * @brief Grows a persistent device buffer in place if it is too small, otherwise
  * leaves it untouched.
  *
@@ -127,6 +138,9 @@ VCFReconstructorGPU::~VCFReconstructorGPU() {
     }
 
     freeDevice(); // Clean up VRAM
+
+    safe_stream_destroy(streams[0]);
+    safe_stream_destroy(streams[1]);
 
     for (int b = 0; b < NUM_WRITE_BUFFERS; b++) {
         if (h_compacted_pool[b]) cudaFreeHost(h_compacted_pool[b]);
@@ -978,6 +992,10 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
     // Pin the DF1/DF2 arrays that get copied to the device every chunk.
     registerHostInputBuffers(df1, df2);
 
+    // Explicit streams (not attached to any operation yet, see run() loop).
+    gpuErrchk(cudaStreamCreate(&streams[0]));
+    gpuErrchk(cudaStreamCreate(&streams[1]));
+
     // Main execution loop: Process data in chunks
     TimingResult timing;
     timing.setup_ms = std::chrono::duration<double, std::milli>(
@@ -1073,6 +1091,9 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
 
     // Undo registerHostInputBuffers() now that the loop is done with df1/df2.
     unregisterHostInputBuffers(df1, df2);
+
+    safe_stream_destroy(streams[0]);
+    safe_stream_destroy(streams[1]);
 
     // Final cleanup of global constants
     safe_cuda_free(d_df1.int_names);
