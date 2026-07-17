@@ -285,76 +285,84 @@ void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
     int df2_start   = buffers.df2_start;
     int df2_count   = buffers.df2_count;
 
+    // All transfers below are issued as cudaMemcpyAsync on streams[0]. The
+    // sources are pinned host memory (HostBuffers uses PinnedAllocator; the
+    // direct df1/df2 arrays are pinned via registerHostInputBuffers()), so
+    // these calls genuinely queue asynchronously instead of falling back to a
+    // synchronous copy. Nothing yet relies on that asynchrony completing
+    // concurrently with other work (see writeChunk()/run() for the sync
+    // points), that overlap is introduced in a later step.
+
     // --- DF1 Direct Copies (Fixed-size arrays) ---
-    gpuErrchk(cudaMemcpy(d_df1.var_number, df1.var_number.data() + chunk_start,
-                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
-    gpuErrchk(cudaMemcpy(d_df1.chrom, df1.chrom.data() + chunk_start,
-                         chunk_size * sizeof(char), cudaMemcpyHostToDevice));
-    gpuErrchk(cudaMemcpy(d_df1.pos, df1.pos.data() + chunk_start,
-                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
-    gpuErrchk(cudaMemcpy(d_df1.qual, df1.qual.data() + chunk_start,
-                         chunk_size * sizeof(__half), cudaMemcpyHostToDevice));
-    gpuErrchk(cudaMemcpy(d_df1.filter, df1.filter.data() + chunk_start,
-                         chunk_size * sizeof(char), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpyAsync(d_df1.var_number, df1.var_number.data() + chunk_start,
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df1.chrom, df1.chrom.data() + chunk_start,
+                         chunk_size * sizeof(char), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df1.pos, df1.pos.data() + chunk_start,
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df1.qual, df1.qual.data() + chunk_start,
+                         chunk_size * sizeof(__half), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df1.filter, df1.filter.data() + chunk_start,
+                         chunk_size * sizeof(char), cudaMemcpyHostToDevice, streams[0]));
 
     // --- DF1 Staging Copies (Variable-length flattened data) ---
-    gpuErrchk(cudaMemcpy(d_df1.id_data, buffers.id_buffer.data(),
-                         buffers.id_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
-    gpuErrchk(cudaMemcpy(d_df1.id_offsets, buffers.id_offsets.data(),
-                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
-    gpuErrchk(cudaMemcpy(d_df1.ref_data, buffers.ref_buffer.data(),
-                         buffers.ref_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
-    gpuErrchk(cudaMemcpy(d_df1.ref_offsets, buffers.ref_offsets.data(),
-                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpyAsync(d_df1.id_data, buffers.id_buffer.data(),
+                         buffers.id_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df1.id_offsets, buffers.id_offsets.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df1.ref_data, buffers.ref_buffer.data(),
+                         buffers.ref_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df1.ref_offsets, buffers.ref_offsets.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
 
     // --- DF1 INFO Copies ---
-    gpuErrchk(cudaMemcpy(d_df1.in_int, buffers.in_int_buffer.data(),
-                         d_df1.num_int_fields * chunk_size * sizeof(int), cudaMemcpyHostToDevice));
-    gpuErrchk(cudaMemcpy(d_df1.in_float, buffers.in_float_buffer.data(),
-                         d_df1.num_float_fields * chunk_size * sizeof(__half), cudaMemcpyHostToDevice));
-    gpuErrchk(cudaMemcpy(d_df1.in_flag, buffers.in_flag_buffer.data(),
-                         d_df1.num_flag_fields * chunk_size * sizeof(uint8_t), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpyAsync(d_df1.in_int, buffers.in_int_buffer.data(),
+                         d_df1.num_int_fields * chunk_size * sizeof(int), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df1.in_float, buffers.in_float_buffer.data(),
+                         d_df1.num_float_fields * chunk_size * sizeof(__half), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df1.in_flag, buffers.in_flag_buffer.data(),
+                         d_df1.num_flag_fields * chunk_size * sizeof(uint8_t), cudaMemcpyHostToDevice, streams[0]));
 
     // --- DF1 String INFO Copies ---
     if (buffers.in_string_buffer.size() > 0) {
-        gpuErrchk(cudaMemcpy(d_df1.in_string_data, buffers.in_string_buffer.data(),
-                            buffers.in_string_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
+        gpuErrchk(cudaMemcpyAsync(d_df1.in_string_data, buffers.in_string_buffer.data(),
+                            buffers.in_string_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, streams[0]));
     }
-    gpuErrchk(cudaMemcpy(d_df1.in_string_offsets, buffers.in_string_offsets.data(),
-                        d_df1.num_string_fields * chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpyAsync(d_df1.in_string_offsets, buffers.in_string_offsets.data(),
+                        d_df1.num_string_fields * chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
 
     // --- DF2 Direct and Staging Copies ---
-    gpuErrchk(cudaMemcpy(d_df2.var_id, df2.var_id.data() + df2_start,
-                         df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpyAsync(d_df2.var_id, df2.var_id.data() + df2_start,
+                         df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
 
-    gpuErrchk(cudaMemcpy(d_df2.alt_data, buffers.alt_data_buffer.data(),
-                         buffers.alt_data_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
-    gpuErrchk(cudaMemcpy(d_df2.alt_offsets, buffers.alt_data_offsets.data(),
-                         df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpyAsync(d_df2.alt_data, buffers.alt_data_buffer.data(),
+                         buffers.alt_data_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df2.alt_offsets, buffers.alt_data_offsets.data(),
+                         df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
 
-    gpuErrchk(cudaMemcpy(d_df2.alt_start, buffers.alt_start_buf.data(),
-                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
-    gpuErrchk(cudaMemcpy(d_df2.alt_count, buffers.alt_count_buf.data(),
-                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpyAsync(d_df2.alt_start, buffers.alt_start_buf.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df2.alt_count, buffers.alt_count_buf.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
 
-    gpuErrchk(cudaMemcpy(d_df2.alt_int, buffers.alt_int_buffer.data(),
-                         d_df2.num_alt_int_fields * df2_count * sizeof(int), cudaMemcpyHostToDevice));
-    gpuErrchk(cudaMemcpy(d_df2.alt_float, buffers.alt_float_buffer.data(),
-                         d_df2.num_alt_float_fields * df2_count * sizeof(__half), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpyAsync(d_df2.alt_int, buffers.alt_int_buffer.data(),
+                         d_df2.num_alt_int_fields * df2_count * sizeof(int), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df2.alt_float, buffers.alt_float_buffer.data(),
+                         d_df2.num_alt_float_fields * df2_count * sizeof(__half), cudaMemcpyHostToDevice, streams[0]));
 
     // --- DF2 String INFO-ALT Copies ---
     if (buffers.alt_string_buffer.size() > 0) {
-        gpuErrchk(cudaMemcpy(d_df2.alt_string_data, buffers.alt_string_buffer.data(),
-                            buffers.alt_string_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
+        gpuErrchk(cudaMemcpyAsync(d_df2.alt_string_data, buffers.alt_string_buffer.data(),
+                            buffers.alt_string_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, streams[0]));
     }
-    gpuErrchk(cudaMemcpy(d_df2.alt_string_offsets, buffers.alt_string_offsets.data(),
-                        d_df2.num_alt_string_fields * df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpyAsync(d_df2.alt_string_offsets, buffers.alt_string_offsets.data(),
+                        d_df2.num_alt_string_fields * df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
 
     // --- DF3 Sample Data Copies ---
-    gpuErrchk(cudaMemcpy(d_df3.sample_data, buffers.sample_buffer.data(),
-                         buffers.sample_buffer.size() * sizeof(char), cudaMemcpyHostToDevice));
-    gpuErrchk(cudaMemcpy(d_df3.sample_offsets, buffers.sample_offsets.data(),
-                         buffers.sample_offsets.size() * sizeof(unsigned int), cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpyAsync(d_df3.sample_data, buffers.sample_buffer.data(),
+                         buffers.sample_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df3.sample_offsets, buffers.sample_offsets.data(),
+                         buffers.sample_offsets.size() * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
 }
 
 /**
@@ -1036,19 +1044,19 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
         double ms_prep = std::chrono::duration<double, std::milli>(t1 - t0).count();
         nvtxRangePop();
            
-        // Upload phase
+        // Upload phase (async, on streams[0])
         nvtxRangePushA("upload_H2D");
-        cudaEventRecord(start);
+        cudaEventRecord(start, streams[0]);
         uploadToDevice(df1, df2, host_buffers);
-        cudaEventRecord(stop);
+        cudaEventRecord(stop, streams[0]);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&ms_u2d, start, stop);
         nvtxRangePop();
 
-        // Kernel execution phase
+        // Kernel execution phase (streams[0])
         nvtxRangePushA("reconstruct_kernel");
-        cudaEventRecord(start);
-        reconstructKernel<<<NUM_BLOCKS, BLOCK_SIZE>>>(
+        cudaEventRecord(start, streams[0]);
+        reconstructKernel<<<NUM_BLOCKS, BLOCK_SIZE, 0, streams[0]>>>(
             d_maps,
             d_df1,
             d_df2,
@@ -1057,19 +1065,24 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
             d_line_lens,
             chunk_size
         );
-        cudaEventRecord(stop);
+        cudaEventRecord(stop, streams[0]);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&ms_kernel, start, stop);
         nvtxRangePop();
 
         gpuErrchk(cudaPeekAtLastError());
+        // Still a full-device barrier for now (removed once the loop is
+        // restructured to actually overlap chunks with each other): with
+        // everything ordered on a single stream this is already redundant
+        // with the cudaEventSynchronize(stop) above, kept here to change
+        // nothing else about control flow in this step.
         gpuErrchk(cudaDeviceSynchronize());
 
-        // Stream compaction and write phase
+        // Stream compaction and write phase (streams[0])
         nvtxRangePushA("compact_write");
-        cudaEventRecord(start);
+        cudaEventRecord(start, streams[0]);
         writeChunk(chunk_size);
-        cudaEventRecord(stop);
+        cudaEventRecord(stop, streams[0]);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&ms_write, start, stop);
         nvtxRangePop();
@@ -1135,25 +1148,29 @@ void VCFReconstructorGPU::writeChunk(int num_variants) {
     size_t temp_storage_bytes = 0;
     cub::DeviceScan::ExclusiveSum(
         nullptr, temp_storage_bytes,
-        d_line_lens, d_output_offsets, num_variants);
+        d_line_lens, d_output_offsets, num_variants, streams[0]);
     ensureDeviceCapacity(d_temp_storage, cap_temp_storage, temp_storage_bytes);
     cub::DeviceScan::ExclusiveSum(
         d_temp_storage, temp_storage_bytes,
-        d_line_lens, d_output_offsets, num_variants);
+        d_line_lens, d_output_offsets, num_variants, streams[0]);
 
     // ---- 2. Total bytes = last offset + last length ----
+    // Data-dependent sync point: the host needs these two values right away
+    // to size d_compacted and the compaction kernel's grid, so the async
+    // copies are immediately followed by a stream sync (cheap: 8 bytes).
     unsigned int last_offset, last_len;
-    gpuErrchk(cudaMemcpy(&last_offset, d_output_offsets + (num_variants - 1),
-                         sizeof(unsigned int), cudaMemcpyDeviceToHost));
-    gpuErrchk(cudaMemcpy(&last_len, d_line_lens + (num_variants - 1),
-                         sizeof(unsigned int), cudaMemcpyDeviceToHost));
+    gpuErrchk(cudaMemcpyAsync(&last_offset, d_output_offsets + (num_variants - 1),
+                         sizeof(unsigned int), cudaMemcpyDeviceToHost, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(&last_len, d_line_lens + (num_variants - 1),
+                         sizeof(unsigned int), cudaMemcpyDeviceToHost, streams[0]));
+    gpuErrchk(cudaStreamSynchronize(streams[0]));
     size_t total_bytes = last_offset + last_len;
 
     // ---- 3. Ensure the compacted buffer on device is large enough ----
     ensureDeviceCapacity(d_compacted, cap_compacted, total_bytes);
 
     // ---- 4. Compaction kernel ----
-    compactKernel<<<NUM_BLOCKS, BLOCK_SIZE>>>(
+    compactKernel<<<NUM_BLOCKS, BLOCK_SIZE, 0, streams[0]>>>(
         d_output, d_line_lens, d_output_offsets,
         d_compacted, num_variants, MAX_LINE_LEN);
     gpuErrchk(cudaPeekAtLastError());
@@ -1183,8 +1200,11 @@ void VCFReconstructorGPU::writeChunk(int num_variants) {
     }
 
     // ---- 7. D2H copy into the reserved slot ----
-    gpuErrchk(cudaMemcpy(h_compacted_pool[buf_idx], d_compacted,
-                         total_bytes * sizeof(char), cudaMemcpyDeviceToHost));
+    // Async, but must be finished before the writer thread can read the
+    // buffer, so sync the stream right before handing off the job below.
+    gpuErrchk(cudaMemcpyAsync(h_compacted_pool[buf_idx], d_compacted,
+                         total_bytes * sizeof(char), cudaMemcpyDeviceToHost, streams[0]));
+    gpuErrchk(cudaStreamSynchronize(streams[0]));
 
     // ---- 8. Hand the job to the writer thread; do NOT write here ----
     {
