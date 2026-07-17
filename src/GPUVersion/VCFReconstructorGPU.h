@@ -9,6 +9,7 @@
 #include <cuda_fp16.h>
 #include "VCFDataFrames.h"
 #include "GPUStructs.h"
+#include "PinnedAllocator.h"
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -21,38 +22,47 @@
 #define BLOCK_SIZE   256
 #define NUM_BLOCKS   256
 
+// Vectors backed by pinned (page-locked) host memory: every one of these is
+// used as a cudaMemcpy source in uploadToDevice(), so pinning them is what
+// will let those transfers become truly asynchronous (cudaMemcpyAsync) later.
+using PinnedCharVec = std::vector<char, PinnedAllocator<char>>;
+using PinnedUintVec = std::vector<unsigned int, PinnedAllocator<unsigned int>>;
+using PinnedIntVec  = std::vector<int, PinnedAllocator<int>>;
+using PinnedHalfVec = std::vector<__half, PinnedAllocator<__half>>;
+using PinnedU8Vec   = std::vector<uint8_t, PinnedAllocator<uint8_t>>;
+
 /**
  * @brief Staging structure residing in system RAM (Host).
- * 
+ *
  * Buffers and prepares data in chunks before sending them to the CUDA device.
  * Optimizes writes and avoids bottlenecks in PCIe transfers.
  */
 struct HostBuffers {
     // DF1
-    std::vector<char>          id_buffer;       ///< Temporary host buffer for variant IDs
-    std::vector<unsigned int>  id_offsets;      ///< Temporary offsets for variant IDs
-    std::vector<char>          ref_buffer;      ///< Temporary host buffer for REF
-    std::vector<unsigned int>  ref_offsets;     ///< Temporary offsets for REF
-    std::vector<int>           in_int_buffer;   ///< Temporary buffer for integer INFO
-    std::vector<__half>        in_float_buffer; ///< Temporary buffer for float INFO
-    std::vector<uint8_t>       in_flag_buffer;  ///< Temporary buffer for flag INFO
-    std::vector<char>         in_string_buffer;   ///< Temporary flat host buffer for INFO strings.
-    std::vector<unsigned int> in_string_offsets;  ///< Temporary offsets for INFO strings.
+    PinnedCharVec id_buffer;       ///< Temporary host buffer for variant IDs
+    PinnedUintVec id_offsets;      ///< Temporary offsets for variant IDs
+    PinnedCharVec ref_buffer;      ///< Temporary host buffer for REF
+    PinnedUintVec ref_offsets;     ///< Temporary offsets for REF
+    PinnedIntVec  in_int_buffer;   ///< Temporary buffer for integer INFO
+    PinnedHalfVec in_float_buffer; ///< Temporary buffer for float INFO
+    PinnedU8Vec   in_flag_buffer;  ///< Temporary buffer for flag INFO
+    PinnedCharVec in_string_buffer;   ///< Temporary flat host buffer for INFO strings.
+    PinnedUintVec in_string_offsets;  ///< Temporary offsets for INFO strings.
 
     // DF2
-    int                        df2_count = 0;      ///< Number of alleles in the current chunk
-    std::vector<char>          alt_data_buffer;    ///< Temporary host buffer for ALT
-    std::vector<unsigned int>  alt_data_offsets;   ///< Offsets for ALT
-    std::vector<unsigned int>  alt_start_buf;      ///< Start mapping variants->alleles
-    std::vector<unsigned int>  alt_count_buf;      ///< Count mapping variants->alleles
-    std::vector<int>           alt_int_buffer;     ///< Temporary buffer for INFO-ALT int
-    std::vector<__half>        alt_float_buffer;   ///< Temporary buffer for INFO-ALT float
-    std::vector<char>         alt_string_buffer;  ///< Temporary flat host buffer for INFO-ALT strings.
-    std::vector<unsigned int> alt_string_offsets; ///< Temporary offsets for INFO-ALT strings.
+    int           df2_count = 0;      ///< Number of alleles in the current chunk
+    PinnedCharVec alt_data_buffer;    ///< Temporary host buffer for ALT
+    PinnedUintVec alt_data_offsets;   ///< Offsets for ALT
+    PinnedUintVec alt_start_buf;      ///< Start mapping variants->alleles
+    PinnedUintVec alt_count_buf;      ///< Count mapping variants->alleles
+    PinnedIntVec  alt_int_buffer;     ///< Temporary buffer for INFO-ALT int
+    PinnedHalfVec alt_float_buffer;   ///< Temporary buffer for INFO-ALT float
+    PinnedCharVec alt_string_buffer;  ///< Temporary flat host buffer for INFO-ALT strings.
+    PinnedUintVec alt_string_offsets; ///< Temporary offsets for INFO-ALT strings.
 
     // DF3
-    std::vector<char>          sample_buffer;      ///< Pre-calculated patient data buffer
-    std::vector<unsigned int>  sample_offsets;     ///< Offsets for patient strings
+    PinnedCharVec sample_buffer;      ///< Pre-calculated patient data buffer
+    PinnedUintVec sample_offsets;     ///< Offsets for patient strings
 
     // Chunk Metadata
     int chunk_size  = 0;  ///< Size of the variant chunk
@@ -318,9 +328,26 @@ private:
                         int chunk_start,
                         int chunk_end,
                         int df2_start,
-                        std::vector<char>& buffer,
-                        std::vector<unsigned int>& offsets);
-    
+                        PinnedCharVec& buffer,
+                        PinnedUintVec& offsets);
+
+    /**
+     * @brief Pins (page-locks) the DF1/DF2 host arrays that are copied directly
+     * to the device every chunk in uploadToDevice() (var_number, chrom, pos,
+     * qual, filter, var_id). Called once at the start of run(); paired with
+     * unregisterHostInputBuffers() at the end.
+     *
+     * @param df1 Core variants DataFrame.
+     * @param df2 Alternative alleles DataFrame.
+     */
+    void registerHostInputBuffers(const var_columns_df& df1, const alt_columns_df& df2);
+
+    /**
+     * @brief Undoes registerHostInputBuffers(); must be called before df1/df2's
+     * underlying memory could be freed or reallocated by the caller.
+     */
+    void unregisterHostInputBuffers(const var_columns_df& df1, const alt_columns_df& df2);
+
 };
 
 #endif

@@ -129,8 +129,36 @@ VCFReconstructorGPU::~VCFReconstructorGPU() {
     freeDevice(); // Clean up VRAM
 
     for (int b = 0; b < NUM_WRITE_BUFFERS; b++) {
-        if (h_compacted_pool[b]) free(h_compacted_pool[b]);
+        if (h_compacted_pool[b]) cudaFreeHost(h_compacted_pool[b]);
     }
+}
+
+// Pins (page-locks) the DF1/DF2 arrays that uploadToDevice() copies directly
+// to the device every chunk, so those cudaMemcpy calls can later become truly
+// asynchronous. Guarded with !empty() because cudaHostRegister rejects a
+// zero-byte range.
+void VCFReconstructorGPU::registerHostInputBuffers(const var_columns_df& df1, const alt_columns_df& df2) {
+    if (!df1.var_number.empty())
+        gpuErrchk(cudaHostRegister((void*)df1.var_number.data(), df1.var_number.size() * sizeof(df1.var_number[0]), cudaHostRegisterDefault));
+    if (!df1.chrom.empty())
+        gpuErrchk(cudaHostRegister((void*)df1.chrom.data(), df1.chrom.size() * sizeof(df1.chrom[0]), cudaHostRegisterDefault));
+    if (!df1.pos.empty())
+        gpuErrchk(cudaHostRegister((void*)df1.pos.data(), df1.pos.size() * sizeof(df1.pos[0]), cudaHostRegisterDefault));
+    if (!df1.qual.empty())
+        gpuErrchk(cudaHostRegister((void*)df1.qual.data(), df1.qual.size() * sizeof(df1.qual[0]), cudaHostRegisterDefault));
+    if (!df1.filter.empty())
+        gpuErrchk(cudaHostRegister((void*)df1.filter.data(), df1.filter.size() * sizeof(df1.filter[0]), cudaHostRegisterDefault));
+    if (!df2.var_id.empty())
+        gpuErrchk(cudaHostRegister((void*)df2.var_id.data(), df2.var_id.size() * sizeof(df2.var_id[0]), cudaHostRegisterDefault));
+}
+
+void VCFReconstructorGPU::unregisterHostInputBuffers(const var_columns_df& df1, const alt_columns_df& df2) {
+    if (!df1.var_number.empty()) gpuErrchk(cudaHostUnregister((void*)df1.var_number.data()));
+    if (!df1.chrom.empty())      gpuErrchk(cudaHostUnregister((void*)df1.chrom.data()));
+    if (!df1.pos.empty())        gpuErrchk(cudaHostUnregister((void*)df1.pos.data()));
+    if (!df1.qual.empty())       gpuErrchk(cudaHostUnregister((void*)df1.qual.data()));
+    if (!df1.filter.empty())     gpuErrchk(cudaHostUnregister((void*)df1.filter.data()));
+    if (!df2.var_id.empty())     gpuErrchk(cudaHostUnregister((void*)df2.var_id.data()));
 }
 
 // One-time device allocation for buffers bounded by CHUNK_SIZE and per-dataset
@@ -947,6 +975,9 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
     // Persistent device buffers: allocated once here instead of every chunk.
     initDeviceBuffers(df1, df2, df3);
 
+    // Pin the DF1/DF2 arrays that get copied to the device every chunk.
+    registerHostInputBuffers(df1, df2);
+
     // Main execution loop: Process data in chunks
     TimingResult timing;
     timing.setup_ms = std::chrono::duration<double, std::milli>(
@@ -1040,6 +1071,9 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
     // initDeviceBuffers(), grown on demand in allocateDevice()/writeChunk()).
     freeDevice();
 
+    // Undo registerHostInputBuffers() now that the loop is done with df1/df2.
+    unregisterHostInputBuffers(df1, df2);
+
     // Final cleanup of global constants
     safe_cuda_free(d_df1.int_names);
     safe_cuda_free(d_df1.float_names);
@@ -1118,10 +1152,13 @@ void VCFReconstructorGPU::writeChunk(int num_variants) {
     }
 
     // ---- 6. Grow the chosen host buffer if necessary ----
+    // Pinned (cudaHostAlloc) rather than plain malloc: this is the buffer the
+    // D2H copy lands in, so it needs to be page-locked for that copy to be
+    // eligible for cudaMemcpyAsync.
     if (total_bytes > h_compacted_pool_capacity[buf_idx]) {
-        if (h_compacted_pool[buf_idx]) free(h_compacted_pool[buf_idx]);
+        if (h_compacted_pool[buf_idx]) gpuErrchk(cudaFreeHost(h_compacted_pool[buf_idx]));
         h_compacted_pool_capacity[buf_idx] = total_bytes + total_bytes / 4;
-        h_compacted_pool[buf_idx] = (char*)malloc(h_compacted_pool_capacity[buf_idx]);
+        gpuErrchk(cudaHostAlloc((void**)&h_compacted_pool[buf_idx], h_compacted_pool_capacity[buf_idx], cudaHostAllocDefault));
     }
 
     // ---- 7. D2H copy into the reserved slot ----
@@ -1243,8 +1280,8 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                                              int chunk_start,
                                              int chunk_end,
                                              int df2_start,
-                                             std::vector<char>& buffer,
-                                             std::vector<unsigned int>& offsets) {
+                                             PinnedCharVec& buffer,
+                                             PinnedUintVec& offsets) {
     int num_samples = df3.numSample;
     int total_cells = chunk_size * num_samples;
     offsets.resize(total_cells);
