@@ -10,10 +10,10 @@ int main() {
     alt_format_df df4;
 
     CSVParser parser(
-        "data/IRBT3/df1.csv",
-        "data/IRBT3/df2.csv",
-        "data/IRBT3/df3.csv",
-        "data/IRBT3/df4.csv",
+        "data/IRBT/df1.csv",
+        "data/IRBT/df2.csv",
+        "data/IRBT/df3.csv",
+        "data/IRBT/df4.csv",
         "data/IRBT/irbt_header.txt"
     );
 

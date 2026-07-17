@@ -37,6 +37,31 @@ inline void safe_cuda_free(T*& d_ptr) {
 }
 
 /**
+ * @brief Grows a persistent device buffer in place if it is too small, otherwise
+ * leaves it untouched.
+ *
+ * Replaces the previous per-chunk cudaMalloc/cudaFree pattern for buffers whose
+ * required size varies chunk to chunk (ID/REF/ALT/INFO string totals, allele
+ * counts): the buffer is only reallocated when a chunk needs more space than is
+ * currently allocated, so most chunks pay no allocation cost at all.
+ *
+ * @tparam T Element type of the buffer.
+ * @param d_ptr Reference to the device pointer to grow.
+ * @param capacity Reference to the tracked capacity (in elements of T).
+ * @param needed_elems Number of elements required for the current chunk.
+ */
+template <typename T>
+inline void ensureDeviceCapacity(T*& d_ptr, size_t& capacity, size_t needed_elems) {
+    if (needed_elems > capacity) {
+        safe_cuda_free(d_ptr);
+        capacity = needed_elems;
+        if (capacity > 0) {
+            gpuErrchk(cudaMalloc((void**)&d_ptr, capacity * sizeof(T)));
+        }
+    }
+}
+
+/**
  * @brief Frees all device pointers for the current chunk and resets them to nullptr.
  *
  * Iterates through all device pointers (d_*) associated with the sparse output
@@ -80,8 +105,13 @@ void VCFReconstructorGPU::freeDevice(){
     safe_cuda_free(d_df3.sample_data);
     safe_cuda_free(d_df3.sample_offsets);
 
-    // NOTE: d_compacted is already freed inside writeChunk() 
-    // to keep its lifecycle local to the I/O operation.
+    // --- Compaction scratch (persistent across chunks, see writeChunk()) ---
+    safe_cuda_free(d_compacted);
+    safe_cuda_free(d_temp_storage);
+    cap_id_data = cap_ref_data = cap_in_string_data = 0;
+    cap_df2_var_id = cap_alt_data = cap_alt_offsets = 0;
+    cap_alt_int = cap_alt_float = cap_alt_string_data = cap_alt_string_offsets = 0;
+    cap_compacted = cap_temp_storage = 0;
 }
 
 //Destructor
@@ -103,111 +133,106 @@ VCFReconstructorGPU::~VCFReconstructorGPU() {
     }
 }
 
-// Device Allocation & Data Transfer Setup
+// One-time device allocation for buffers bounded by CHUNK_SIZE and per-dataset
+// field counts. Called once before the main chunk loop (see run()).
+void VCFReconstructorGPU::initDeviceBuffers(const var_columns_df& df1,
+                                             const alt_columns_df& df2,
+                                             const sample_columns_df& df3) {
+    // --- Output buffers ---
+    // Sized to CHUNK_SIZE, the maximum number of variants any chunk can hold
+    // (the final chunk of the dataset may be smaller, never larger).
+    gpuErrchk( cudaMalloc((void**)&d_output,    (size_t)CHUNK_SIZE * MAX_LINE_LEN * sizeof(char)));
+    gpuErrchk( cudaMalloc((void**)&d_line_lens, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
+    gpuErrchk(cudaMalloc((void**)&d_output_offsets, (size_t)(CHUNK_SIZE + 1) * sizeof(unsigned int)));
+
+    // --- DF1 scalar fields ---
+    gpuErrchk( cudaMalloc((void**)&d_df1.var_number, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
+    gpuErrchk( cudaMalloc((void**)&d_df1.chrom,      (size_t)CHUNK_SIZE * sizeof(char)));
+    gpuErrchk( cudaMalloc((void**)&d_df1.pos,        (size_t)CHUNK_SIZE * sizeof(unsigned int)));
+    gpuErrchk( cudaMalloc((void**)&d_df1.qual,       (size_t)CHUNK_SIZE * sizeof(__half)));
+    gpuErrchk( cudaMalloc((void**)&d_df1.filter,     (size_t)CHUNK_SIZE * sizeof(char)));
+    gpuErrchk( cudaMalloc((void**)&d_df1.id_offsets, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
+    gpuErrchk( cudaMalloc((void**)&d_df1.ref_offsets,(size_t)CHUNK_SIZE * sizeof(unsigned int)));
+
+    // --- DF1 INFO fields (field counts are per-dataset constants) ---
+    d_df1.num_int_fields   = df1.in_int.size();
+    d_df1.num_float_fields = df1.in_float.size();
+    d_df1.num_flag_fields  = df1.in_flag.size();
+    d_df1.num_string_fields = df1.in_string.size();
+    gpuErrchk( cudaMalloc((void**)&d_df1.in_int,      (size_t)d_df1.num_int_fields   * CHUNK_SIZE * sizeof(int)));
+    gpuErrchk( cudaMalloc((void**)&d_df1.in_float,    (size_t)d_df1.num_float_fields * CHUNK_SIZE * sizeof(__half)));
+    gpuErrchk( cudaMalloc((void**)&d_df1.in_flag,     (size_t)d_df1.num_flag_fields  * CHUNK_SIZE * sizeof(bool)));
+    gpuErrchk(cudaMalloc((void**)&d_df1.in_string_offsets, (size_t)d_df1.num_string_fields * CHUNK_SIZE * sizeof(unsigned int)));
+
+    // --- DF2 fixed-size fields ---
+    d_df2.num_alt_int_fields    = df2.alt_int.size();
+    d_df2.num_alt_float_fields  = df2.alt_float.size();
+    d_df2.num_alt_string_fields = df2.alt_string.size();
+    gpuErrchk(cudaMalloc((void**)&d_df2.alt_start, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
+    gpuErrchk(cudaMalloc((void**)&d_df2.alt_count, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
+
+    // --- DF3 (Sample strings upper bound) ---
+    d_df3.num_samples = df3.numSample;
+    size_t max_sample_chars = (size_t)CHUNK_SIZE * df3.numSample * MAX_SAMPLE_STRING_LEN;
+    gpuErrchk( cudaMalloc(&d_df3.sample_data,    max_sample_chars * sizeof(char)));
+    gpuErrchk( cudaMalloc(&d_df3.sample_offsets, (size_t)CHUNK_SIZE * df3.numSample * sizeof(unsigned int)));
+}
+
+// Per-chunk device preparation: grows the variable-length buffers (whose required
+// size depends on the current chunk's ID/REF/ALT/INFO string content and allele
+// count) only when needed, instead of cudaMalloc/cudaFree on every chunk.
 void VCFReconstructorGPU::allocateDevice(const var_columns_df& df1,
                                           const alt_columns_df& df2,
-                                          const sample_columns_df& df3,
-                                          int chunk_size,
                                           int chunk_start,
                                           int chunk_end,
                                           int df2_start) {
 
-    // --- Output buffers ---
-    // Allocate space for the sparse output buffer where each row takes up MAX_LINE_LEN chars.
-    gpuErrchk( cudaMalloc((void**)&d_output,    chunk_size * MAX_LINE_LEN * sizeof(char)));
-    gpuErrchk( cudaMalloc((void**)&d_line_lens, chunk_size * sizeof(unsigned int)));
-    gpuErrchk(cudaMalloc((void**)&d_output_offsets, (chunk_size + 1) * sizeof(unsigned int)));
-
-    // Note: d_compacted is dynamically allocated in writeChunk() because its size
-    // relies on the sum of line_lens, which is known only after the prefix scan.
-
-    // --- DF1 scalar fields ---
-    gpuErrchk( cudaMalloc((void**)&d_df1.var_number, chunk_size * sizeof(unsigned int)));
-    gpuErrchk( cudaMalloc((void**)&d_df1.chrom,      chunk_size * sizeof(char)));
-    gpuErrchk( cudaMalloc((void**)&d_df1.pos,        chunk_size * sizeof(unsigned int)));
-    gpuErrchk( cudaMalloc((void**)&d_df1.qual,       chunk_size * sizeof(__half)));
-    gpuErrchk( cudaMalloc((void**)&d_df1.filter,     chunk_size * sizeof(char)));
-
     // --- DF1 ID (Variable-length strings) ---
-    // Pre-calculate total memory required to hold all null-terminated ID strings in this chunk
     size_t id_total_chars = 0;
     for (int i = chunk_start; i < chunk_end; i++)
         id_total_chars += df1.id[i].size() + 1;
-    gpuErrchk( cudaMalloc((void**)&d_df1.id_data,    id_total_chars * sizeof(char)));
-    gpuErrchk( cudaMalloc((void**)&d_df1.id_offsets, chunk_size * sizeof(unsigned int)));
+    ensureDeviceCapacity(d_df1.id_data, cap_id_data, id_total_chars);
 
     // --- DF1 REF (Variable-length strings) ---
     size_t ref_total_chars = 0;
     for (int i = chunk_start; i < chunk_end; i++)
         ref_total_chars += df1.ref[i].size() + 1;
-    gpuErrchk( cudaMalloc((void**)&d_df1.ref_data,    ref_total_chars * sizeof(char)));
-    gpuErrchk( cudaMalloc((void**)&d_df1.ref_offsets, chunk_size * sizeof(unsigned int)));
-
-    // --- DF1 INFO fields ---
-    d_df1.num_int_fields   = df1.in_int.size();
-    d_df1.num_float_fields = df1.in_float.size();
-    d_df1.num_flag_fields  = df1.in_flag.size();
-    gpuErrchk( cudaMalloc((void**)&d_df1.in_int,      d_df1.num_int_fields   * chunk_size * sizeof(int)));
-    gpuErrchk( cudaMalloc((void**)&d_df1.in_float,    d_df1.num_float_fields * chunk_size * sizeof(__half)));
-    gpuErrchk( cudaMalloc((void**)&d_df1.in_flag,     d_df1.num_flag_fields  * chunk_size * sizeof(bool)));
+    ensureDeviceCapacity(d_df1.ref_data, cap_ref_data, ref_total_chars);
 
     // --- DF1 INFO Strings ---
-    d_df1.num_string_fields = df1.in_string.size();
     size_t info_str_total_chars = 0;
     for (int f = 0; f < d_df1.num_string_fields; f++) {
         for (int i = chunk_start; i < chunk_end; i++) {
             info_str_total_chars += df1.in_string[f].i_string[i].size() + 1; // +1 for the '\0' terminator
         }
     }
-    if (info_str_total_chars > 0) {
-        gpuErrchk(cudaMalloc((void**)&d_df1.in_string_data, info_str_total_chars * sizeof(char)));
-    }
-    gpuErrchk(cudaMalloc((void**)&d_df1.in_string_offsets, d_df1.num_string_fields * chunk_size * sizeof(unsigned int)));
+    ensureDeviceCapacity(d_df1.in_string_data, cap_in_string_data, info_str_total_chars);
 
-
-    // --- DF2 (Alternative alleles count & allocation) ---
+    // --- DF2 (Alternative alleles for this chunk) ---
     int df2_count = 0;
     size_t alt_total_chars = 0;
     for (size_t j = df2_start; j < df2.var_id.size() && (int)df2.var_id[j] < chunk_end; j++) {
         alt_total_chars += df2.alt[j].size() + 1;
         df2_count++;
     }
-
     d_df2.num_entries = df2_count;
-    d_df2.num_alt_int_fields   = df2.alt_int.size();
-    d_df2.num_alt_float_fields = df2.alt_float.size();
 
-    gpuErrchk( cudaMalloc((void**)&d_df2.var_id,       df2_count * sizeof(unsigned int)));
-    gpuErrchk( cudaMalloc((void**)&d_df2.alt_data,         alt_total_chars * sizeof(char)));
-    gpuErrchk( cudaMalloc((void**)&d_df2.alt_offsets,      df2_count * sizeof(unsigned int)));
-
-    gpuErrchk(cudaMalloc((void**)&d_df2.alt_start, chunk_size * sizeof(unsigned int)));
-    gpuErrchk(cudaMalloc((void**)&d_df2.alt_count, chunk_size * sizeof(unsigned int)));
-
-    gpuErrchk( cudaMalloc((void**)&d_df2.alt_int,          d_df2.num_alt_int_fields   * df2_count * sizeof(int)));
-    gpuErrchk( cudaMalloc((void**)&d_df2.alt_float,        d_df2.num_alt_float_fields * df2_count * sizeof(__half)));
+    ensureDeviceCapacity(d_df2.var_id,      cap_df2_var_id,  (size_t)df2_count);
+    ensureDeviceCapacity(d_df2.alt_data,    cap_alt_data,    alt_total_chars);
+    ensureDeviceCapacity(d_df2.alt_offsets, cap_alt_offsets, (size_t)df2_count);
+    ensureDeviceCapacity(d_df2.alt_int,   cap_alt_int,   (size_t)d_df2.num_alt_int_fields   * df2_count);
+    ensureDeviceCapacity(d_df2.alt_float, cap_alt_float, (size_t)d_df2.num_alt_float_fields * df2_count);
 
     // --- DF2 INFO-ALT Strings ---
-    d_df2.num_alt_string_fields = df2.alt_string.size();
     size_t alt_info_str_total_chars = 0;
     for (int f = 0; f < d_df2.num_alt_string_fields; f++) {
         for (int i = df2_start; i < df2_start + df2_count; i++) {
             alt_info_str_total_chars += df2.alt_string[f].i_string[i].size() + 1;
         }
     }
-    if (alt_info_str_total_chars > 0) {
-        gpuErrchk(cudaMalloc((void**)&d_df2.alt_string_data, alt_info_str_total_chars * sizeof(char)));
-    }
-    gpuErrchk(cudaMalloc((void**)&d_df2.alt_string_offsets, d_df2.num_alt_string_fields * df2_count * sizeof(unsigned int)));
-
-    // --- DF3 (Sample Strings upper bound) ---
-    // Calculate a safe upper bound size for sample strings to prevent OOM errors.
-    size_t max_sample_chars = (size_t)chunk_size * df3.numSample * MAX_SAMPLE_STRING_LEN;
-
-    gpuErrchk( cudaMalloc(&d_df3.sample_data,    max_sample_chars * sizeof(char)));
-    gpuErrchk( cudaMalloc(&d_df3.sample_offsets, chunk_size * df3.numSample * sizeof(unsigned int)));
-    d_df3.num_samples = df3.numSample;
-
+    ensureDeviceCapacity(d_df2.alt_string_data, cap_alt_string_data, alt_info_str_total_chars);
+    ensureDeviceCapacity(d_df2.alt_string_offsets, cap_alt_string_offsets,
+                          (size_t)d_df2.num_alt_string_fields * df2_count);
 }
 
 void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
@@ -919,6 +944,9 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
         safe_map_alloc((void**)&d_maps.tsa_strings,    (void**)&d_maps.tsa_offsets,    tsa_strings_buf,    tsa_offsets_buf);
     }
 
+    // Persistent device buffers: allocated once here instead of every chunk.
+    initDeviceBuffers(df1, df2, df3);
+
     // Main execution loop: Process data in chunks
     TimingResult timing;
     timing.setup_ms = std::chrono::duration<double, std::milli>(
@@ -933,12 +961,13 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
             df2_start++;
         }
 
-        float ms_alloc, ms_u2d, ms_kernel, ms_write, ms_free;
+        float ms_alloc, ms_u2d, ms_kernel, ms_write;
 
-        // Allocation phase
+        // Allocation phase (now just ensures variable-length buffers are big
+        // enough; typically a no-op after the first couple of chunks)
         nvtxRangePushA("allocate");
         cudaEventRecord(start);
-        allocateDevice(df1, df2, df3, chunk_size, chunk_start, chunk_end, df2_start);
+        allocateDevice(df1, df2, chunk_start, chunk_end, df2_start);
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&ms_alloc, start, stop);
@@ -996,24 +1025,20 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
         cudaEventElapsedTime(&ms_write, start, stop);
         nvtxRangePop();
 
-        // Cleanup phase
-        nvtxRangePushA("free_device");
-        cudaEventRecord(start);
-        freeDevice();
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        cudaEventElapsedTime(&ms_free, start, stop);
-        nvtxRangePop();
-
         timing.alloc_ms  += ms_alloc;
         timing.u2d_ms    += ms_u2d;
         timing.prep_ms   += ms_prep;
         timing.kernel_ms += ms_kernel;
         timing.write_ms  += ms_write;
-        timing.free_ms   += ms_free;
+        // free_ms is no longer measured per chunk: device buffers are now
+        // persistent and freed once after the loop (folded into drain_ms).
     }
 
     auto t_drain_start = std::chrono::high_resolution_clock::now();
+
+    // Free the persistent per-chunk device buffers (allocated once in
+    // initDeviceBuffers(), grown on demand in allocateDevice()/writeChunk()).
+    freeDevice();
 
     // Final cleanup of global constants
     safe_cuda_free(d_df1.int_names);
@@ -1052,12 +1077,11 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
 
 void VCFReconstructorGPU::writeChunk(int num_variants) {
     // ---- 1. Exclusive prefix scan: line_lens -> output_offsets ----
-    void* d_temp_storage = nullptr;
     size_t temp_storage_bytes = 0;
     cub::DeviceScan::ExclusiveSum(
-        d_temp_storage, temp_storage_bytes,
+        nullptr, temp_storage_bytes,
         d_line_lens, d_output_offsets, num_variants);
-    gpuErrchk(cudaMalloc(&d_temp_storage, temp_storage_bytes));
+    ensureDeviceCapacity(d_temp_storage, cap_temp_storage, temp_storage_bytes);
     cub::DeviceScan::ExclusiveSum(
         d_temp_storage, temp_storage_bytes,
         d_line_lens, d_output_offsets, num_variants);
@@ -1070,8 +1094,8 @@ void VCFReconstructorGPU::writeChunk(int num_variants) {
                          sizeof(unsigned int), cudaMemcpyDeviceToHost));
     size_t total_bytes = last_offset + last_len;
 
-    // ---- 3. Allocate compacted buffer on device, exact size ----
-    gpuErrchk(cudaMalloc((void**)&d_compacted, total_bytes * sizeof(char)));
+    // ---- 3. Ensure the compacted buffer on device is large enough ----
+    ensureDeviceCapacity(d_compacted, cap_compacted, total_bytes);
 
     // ---- 4. Compaction kernel ----
     compactKernel<<<NUM_BLOCKS, BLOCK_SIZE>>>(
@@ -1111,10 +1135,8 @@ void VCFReconstructorGPU::writeChunk(int num_variants) {
     }
     cv_job_available.notify_one();
 
-    // ---- 9. Cleanup device-side temporaries ----
-    gpuErrchk(cudaFree(d_temp_storage));
-    gpuErrchk(cudaFree(d_compacted));
-    d_compacted = nullptr;
+    // d_temp_storage and d_compacted are persistent class members now (grown
+    // on demand above); they are freed once in freeDevice(), not per chunk.
 }
 
 void VCFReconstructorGPU::buildSampleNames(const sample_columns_df& df3) {

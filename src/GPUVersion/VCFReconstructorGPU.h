@@ -167,11 +167,23 @@ private:
     std::vector<GroupInfo> df4_float_groups; ///< Grouping logic for DF4 float fields.
 
     // Compaction and Disk I/O variables
-    char* d_compacted;               ///< Device buffer for the compacted, contiguous VCF text.
+    char* d_compacted = nullptr;     ///< Device buffer for the compacted, contiguous VCF text. Persistent, grown on demand.
     unsigned int* d_output_offsets;  ///< Device array storing prefix-summed offsets for stream compaction.
 
     //size_t h_compacted_capacity = 0; ///< Current capacity of the host-side compacted buffer.
-    //char* h_compacted = nullptr;     ///< Host buffer receiving the compacted chunk from the device before disk write.   
+    //char* h_compacted = nullptr;     ///< Host buffer receiving the compacted chunk from the device before disk write.
+
+    // --- Persistent device buffer capacities ---
+    // allocateDevice() no longer runs cudaMalloc/cudaFree every chunk. Fixed-size
+    // buffers (bounded by CHUNK_SIZE) are allocated once in initDeviceBuffers().
+    // Variable-length buffers below persist across chunks and only grow (never
+    // shrink) when a chunk needs more space than currently allocated.
+    size_t cap_id_data = 0, cap_ref_data = 0, cap_in_string_data = 0;
+    size_t cap_df2_var_id = 0, cap_alt_data = 0, cap_alt_offsets = 0;
+    size_t cap_alt_int = 0, cap_alt_float = 0, cap_alt_string_data = 0, cap_alt_string_offsets = 0;
+    size_t cap_compacted = 0;
+    size_t cap_temp_storage = 0;
+    unsigned char* d_temp_storage = nullptr; ///< Persistent scratch storage for cub::DeviceScan, grown on demand.
 
     // Writer thread infrastructure
     /**
@@ -209,26 +221,38 @@ private:
     void buildInverseMaps(const var_columns_df& df1);
 
     /**
-     * @brief Allocates all required memory buffers on the CUDA device for the current chunk.
-     * 
+     * @brief Allocates the device buffers whose size only depends on CHUNK_SIZE and
+     * per-dataset field counts (chromosome/INFO/FORMAT field counts, sample count),
+     * never on a specific chunk's content. Called once before the main chunk loop.
+     *
+     * @param df1 Core variants DataFrame (used for INFO field counts).
+     * @param df2 Alternative alleles DataFrame (used for INFO-ALT field counts).
+     * @param df3 Sample core DataFrame (used for the sample count).
+     */
+    void initDeviceBuffers(const var_columns_df& df1,
+                           const alt_columns_df& df2,
+                           const sample_columns_df& df3);
+
+    /**
+     * @brief Ensures the variable-length device buffers (whose required size depends
+     * on the current chunk's content: ID/REF/ALT/INFO string totals, allele count)
+     * are large enough for the current chunk, growing them only when needed.
+     *
      * @param df1 Core variants DataFrame.
      * @param df2 Alternative alleles DataFrame.
-     * @param df3 Sample core DataFrame.
-     * @param chunk_size Number of variants to process in the current execution block.
      * @param chunk_start Starting index in DF1.
      * @param chunk_end Ending index in DF1.
      * @param df2_start Starting index in DF2 corresponding to chunk_start.
      */
     void allocateDevice(const var_columns_df& df1,
                         const alt_columns_df& df2,
-                        const sample_columns_df& df3,
-                        int chunk_size,
                         int chunk_start,
                         int chunk_end,
                         int df2_start);
 
     /**
      * @brief Safely deallocates all CUDA device memory to prevent memory leaks.
+     * Called once after the main chunk loop (and from the destructor as a safety net).
      */
     void freeDevice();
 
