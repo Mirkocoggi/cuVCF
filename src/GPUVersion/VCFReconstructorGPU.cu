@@ -658,10 +658,12 @@ static std::vector<VCFReconstructorGPU::GroupInfo> buildGroups(
     return out;
 }
 
-void VCFReconstructorGPU::run(const var_columns_df& df1,
+TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
          const alt_columns_df& df2,
          const sample_columns_df& df3,
          const alt_format_df& df4){
+
+    auto t_setup_start = std::chrono::high_resolution_clock::now();
 
     // Initialize mappings and formatting rules based on the header
     buildInverseMaps(df1);
@@ -918,6 +920,9 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
     }
 
     // Main execution loop: Process data in chunks
+    TimingResult timing;
+    timing.setup_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::high_resolution_clock::now() - t_setup_start).count();
     int df2_start = 0;
     for (int chunk_start = 0; chunk_start < (int)df1.var_number.size(); chunk_start += CHUNK_SIZE){
         int chunk_end = std::min(chunk_start + CHUNK_SIZE, (int)df1.var_number.size());
@@ -1000,9 +1005,15 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
         cudaEventElapsedTime(&ms_free, start, stop);
         nvtxRangePop();
 
-        printf("alloc: %.2f | u2d: %.2f | prep: %.2f | kernel: %.2f | write: %.2f | free: %.2f\n",
-               ms_alloc, ms_u2d, ms_prep, ms_kernel, ms_write, ms_free);
+        timing.alloc_ms  += ms_alloc;
+        timing.u2d_ms    += ms_u2d;
+        timing.prep_ms   += ms_prep;
+        timing.kernel_ms += ms_kernel;
+        timing.write_ms  += ms_write;
+        timing.free_ms   += ms_free;
     }
+
+    auto t_drain_start = std::chrono::high_resolution_clock::now();
 
     // Final cleanup of global constants
     safe_cuda_free(d_df1.int_names);
@@ -1034,6 +1045,9 @@ void VCFReconstructorGPU::run(const var_columns_df& df1,
     writer_thread.join();
 
     vcf_file.close();
+    timing.drain_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::high_resolution_clock::now() - t_drain_start).count();
+    return timing;
 }
 
 void VCFReconstructorGPU::writeChunk(int num_variants) {

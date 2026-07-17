@@ -17,9 +17,9 @@
 #define MAX_LINE_LEN 756
 #define MAX_NAME_LEN 16
 #define MAX_SAMPLE_STRING_LEN 64
-#define CHUNK_SIZE   100000
-#define BLOCK_SIZE   64
-#define NUM_BLOCKS   128
+#define CHUNK_SIZE   10000
+#define BLOCK_SIZE   256
+#define NUM_BLOCKS   256
 
 /**
  * @brief Staging structure residing in system RAM (Host).
@@ -61,10 +61,21 @@ struct HostBuffers {
     int df2_start   = 0;  ///< Synchronized starting index in DF2
 };
 
+struct TimingResult {
+    double setup_ms  = 0;
+    double alloc_ms  = 0;
+    double u2d_ms    = 0;
+    double prep_ms   = 0;
+    double kernel_ms = 0;
+    double write_ms  = 0;
+    double free_ms   = 0;
+    double drain_ms  = 0;
+};
+
 /**
  * @brief Manages the VCF reconstruction pipeline leveraging GPU acceleration.
- * 
- * This class loads the DataFrames extracted from CSVs, splits them into chunks, 
+ *
+ * This class loads the DataFrames extracted from CSVs, splits them into chunks,
  * and instructs the CUDA device to build the VCF file strings in a highly parallel manner.
  */
 class VCFReconstructorGPU {
@@ -106,10 +117,10 @@ public:
      * @param df3 Base DataFrame for samples
      * @param df4 Intersected DataFrame for samples x alleles
      */
-    void run(const var_columns_df& df1,
-             const alt_columns_df& df2,
-             const sample_columns_df& df3,
-             const alt_format_df& df4);
+    TimingResult run(const var_columns_df& df1,
+                     const alt_columns_df& df2,
+                     const sample_columns_df& df3,
+                     const alt_format_df& df4);
 
 private:
     std::string output_vcf_path; ///< Path to the generated output VCF file.
