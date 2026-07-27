@@ -11,9 +11,7 @@
 VCFReconstructorGPU::VCFReconstructorGPU(const std::string& output_vcf_path,
                                          const std::string& header_text)
     : output_vcf_path(output_vcf_path),
-      header_text(header_text),
-      d_output(nullptr),
-      d_line_lens(nullptr)
+      header_text(header_text)
 {}
 
 /**
@@ -80,49 +78,51 @@ inline void ensureDeviceCapacity(T*& d_ptr, size_t& capacity, size_t needed_elem
  * DF2, DF3). Relies on safe_cuda_free to avoid double-free errors.
  */
 void VCFReconstructorGPU::freeDevice(){
-    // --- Sparse Output Buffers ---
-    safe_cuda_free(d_output);
-    safe_cuda_free(d_line_lens);
-    safe_cuda_free(d_output_offsets); 
+    for (int s = 0; s < 2; s++) {
+        // --- Sparse Output Buffers ---
+        safe_cuda_free(d_output[s]);
+        safe_cuda_free(d_line_lens[s]);
+        safe_cuda_free(d_output_offsets[s]);
 
-    // --- DF1 (Core Variants & INFO) ---
-    safe_cuda_free(d_df1.var_number);
-    safe_cuda_free(d_df1.chrom);
-    safe_cuda_free(d_df1.pos);
-    safe_cuda_free(d_df1.id_data);
-    safe_cuda_free(d_df1.id_offsets);
-    safe_cuda_free(d_df1.ref_data);
-    safe_cuda_free(d_df1.ref_offsets);
-    safe_cuda_free(d_df1.qual);
-    safe_cuda_free(d_df1.filter);
-    safe_cuda_free(d_df1.in_int);
-    safe_cuda_free(d_df1.in_float);
-    safe_cuda_free(d_df1.in_flag);
-    safe_cuda_free(d_df1.in_string_data);
-    safe_cuda_free(d_df1.in_string_offsets);
-    
-    // --- DF2 (Alternative Alleles & INFO-ALT) ---
-    safe_cuda_free(d_df2.var_id);
-    safe_cuda_free(d_df2.alt_data);
-    safe_cuda_free(d_df2.alt_offsets);
-    safe_cuda_free(d_df2.alt_start);
-    safe_cuda_free(d_df2.alt_count);
-    safe_cuda_free(d_df2.alt_int);
-    safe_cuda_free(d_df2.alt_float);
-    safe_cuda_free(d_df2.alt_string_data);
-    safe_cuda_free(d_df2.alt_string_offsets);
+        // --- DF1 (Core Variants & INFO) ---
+        safe_cuda_free(d_df1[s].var_number);
+        safe_cuda_free(d_df1[s].chrom);
+        safe_cuda_free(d_df1[s].pos);
+        safe_cuda_free(d_df1[s].id_data);
+        safe_cuda_free(d_df1[s].id_offsets);
+        safe_cuda_free(d_df1[s].ref_data);
+        safe_cuda_free(d_df1[s].ref_offsets);
+        safe_cuda_free(d_df1[s].qual);
+        safe_cuda_free(d_df1[s].filter);
+        safe_cuda_free(d_df1[s].in_int);
+        safe_cuda_free(d_df1[s].in_float);
+        safe_cuda_free(d_df1[s].in_flag);
+        safe_cuda_free(d_df1[s].in_string_data);
+        safe_cuda_free(d_df1[s].in_string_offsets);
 
-    // --- DF3/DF4 (Packed Sample Data) ---
-    safe_cuda_free(d_df3.sample_data);
-    safe_cuda_free(d_df3.sample_offsets);
+        // --- DF2 (Alternative Alleles & INFO-ALT) ---
+        safe_cuda_free(d_df2[s].var_id);
+        safe_cuda_free(d_df2[s].alt_data);
+        safe_cuda_free(d_df2[s].alt_offsets);
+        safe_cuda_free(d_df2[s].alt_start);
+        safe_cuda_free(d_df2[s].alt_count);
+        safe_cuda_free(d_df2[s].alt_int);
+        safe_cuda_free(d_df2[s].alt_float);
+        safe_cuda_free(d_df2[s].alt_string_data);
+        safe_cuda_free(d_df2[s].alt_string_offsets);
 
-    // --- Compaction scratch (persistent across chunks, see writeChunk()) ---
-    safe_cuda_free(d_compacted);
-    safe_cuda_free(d_temp_storage);
-    cap_id_data = cap_ref_data = cap_in_string_data = 0;
-    cap_df2_var_id = cap_alt_data = cap_alt_offsets = 0;
-    cap_alt_int = cap_alt_float = cap_alt_string_data = cap_alt_string_offsets = 0;
-    cap_compacted = cap_temp_storage = 0;
+        // --- DF3/DF4 (Packed Sample Data) ---
+        safe_cuda_free(d_df3[s].sample_data);
+        safe_cuda_free(d_df3[s].sample_offsets);
+
+        // --- Compaction scratch (persistent across chunks, see writeChunk()) ---
+        safe_cuda_free(d_compacted[s]);
+        safe_cuda_free(d_temp_storage[s]);
+        cap_id_data[s] = cap_ref_data[s] = cap_in_string_data[s] = 0;
+        cap_df2_var_id[s] = cap_alt_data[s] = cap_alt_offsets[s] = 0;
+        cap_alt_int[s] = cap_alt_float[s] = cap_alt_string_data[s] = cap_alt_string_offsets[s] = 0;
+        cap_compacted[s] = cap_temp_storage[s] = 0;
+    }
 }
 
 //Destructor
@@ -176,79 +176,84 @@ void VCFReconstructorGPU::unregisterHostInputBuffers(const var_columns_df& df1, 
 }
 
 // One-time device allocation for buffers bounded by CHUNK_SIZE and per-dataset
-// field counts. Called once before the main chunk loop (see run()).
+// field counts. Called once before the main chunk loop (see run()). Allocates
+// both slots identically so the pipeline can alternate between them.
 void VCFReconstructorGPU::initDeviceBuffers(const var_columns_df& df1,
                                              const alt_columns_df& df2,
                                              const sample_columns_df& df3) {
-    // --- Output buffers ---
-    // Sized to CHUNK_SIZE, the maximum number of variants any chunk can hold
-    // (the final chunk of the dataset may be smaller, never larger).
-    gpuErrchk( cudaMalloc((void**)&d_output,    (size_t)CHUNK_SIZE * MAX_LINE_LEN * sizeof(char)));
-    gpuErrchk( cudaMalloc((void**)&d_line_lens, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
-    gpuErrchk(cudaMalloc((void**)&d_output_offsets, (size_t)(CHUNK_SIZE + 1) * sizeof(unsigned int)));
+    for (int s = 0; s < 2; s++) {
+        // --- Output buffers ---
+        // Sized to CHUNK_SIZE, the maximum number of variants any chunk can hold
+        // (the final chunk of the dataset may be smaller, never larger).
+        gpuErrchk( cudaMalloc((void**)&d_output[s],    (size_t)CHUNK_SIZE * MAX_LINE_LEN * sizeof(char)));
+        gpuErrchk( cudaMalloc((void**)&d_line_lens[s], (size_t)CHUNK_SIZE * sizeof(unsigned int)));
+        gpuErrchk(cudaMalloc((void**)&d_output_offsets[s], (size_t)(CHUNK_SIZE + 1) * sizeof(unsigned int)));
 
-    // --- DF1 scalar fields ---
-    gpuErrchk( cudaMalloc((void**)&d_df1.var_number, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
-    gpuErrchk( cudaMalloc((void**)&d_df1.chrom,      (size_t)CHUNK_SIZE * sizeof(char)));
-    gpuErrchk( cudaMalloc((void**)&d_df1.pos,        (size_t)CHUNK_SIZE * sizeof(unsigned int)));
-    gpuErrchk( cudaMalloc((void**)&d_df1.qual,       (size_t)CHUNK_SIZE * sizeof(__half)));
-    gpuErrchk( cudaMalloc((void**)&d_df1.filter,     (size_t)CHUNK_SIZE * sizeof(char)));
-    gpuErrchk( cudaMalloc((void**)&d_df1.id_offsets, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
-    gpuErrchk( cudaMalloc((void**)&d_df1.ref_offsets,(size_t)CHUNK_SIZE * sizeof(unsigned int)));
+        // --- DF1 scalar fields ---
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].var_number, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].chrom,      (size_t)CHUNK_SIZE * sizeof(char)));
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].pos,        (size_t)CHUNK_SIZE * sizeof(unsigned int)));
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].qual,       (size_t)CHUNK_SIZE * sizeof(__half)));
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].filter,     (size_t)CHUNK_SIZE * sizeof(char)));
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].id_offsets, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].ref_offsets,(size_t)CHUNK_SIZE * sizeof(unsigned int)));
 
-    // --- DF1 INFO fields (field counts are per-dataset constants) ---
-    d_df1.num_int_fields   = df1.in_int.size();
-    d_df1.num_float_fields = df1.in_float.size();
-    d_df1.num_flag_fields  = df1.in_flag.size();
-    d_df1.num_string_fields = df1.in_string.size();
-    gpuErrchk( cudaMalloc((void**)&d_df1.in_int,      (size_t)d_df1.num_int_fields   * CHUNK_SIZE * sizeof(int)));
-    gpuErrchk( cudaMalloc((void**)&d_df1.in_float,    (size_t)d_df1.num_float_fields * CHUNK_SIZE * sizeof(__half)));
-    gpuErrchk( cudaMalloc((void**)&d_df1.in_flag,     (size_t)d_df1.num_flag_fields  * CHUNK_SIZE * sizeof(bool)));
-    gpuErrchk(cudaMalloc((void**)&d_df1.in_string_offsets, (size_t)d_df1.num_string_fields * CHUNK_SIZE * sizeof(unsigned int)));
+        // --- DF1 INFO fields (field counts are per-dataset constants) ---
+        d_df1[s].num_int_fields   = df1.in_int.size();
+        d_df1[s].num_float_fields = df1.in_float.size();
+        d_df1[s].num_flag_fields  = df1.in_flag.size();
+        d_df1[s].num_string_fields = df1.in_string.size();
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].in_int,      (size_t)d_df1[s].num_int_fields   * CHUNK_SIZE * sizeof(int)));
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].in_float,    (size_t)d_df1[s].num_float_fields * CHUNK_SIZE * sizeof(__half)));
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].in_flag,     (size_t)d_df1[s].num_flag_fields  * CHUNK_SIZE * sizeof(bool)));
+        gpuErrchk(cudaMalloc((void**)&d_df1[s].in_string_offsets, (size_t)d_df1[s].num_string_fields * CHUNK_SIZE * sizeof(unsigned int)));
 
-    // --- DF2 fixed-size fields ---
-    d_df2.num_alt_int_fields    = df2.alt_int.size();
-    d_df2.num_alt_float_fields  = df2.alt_float.size();
-    d_df2.num_alt_string_fields = df2.alt_string.size();
-    gpuErrchk(cudaMalloc((void**)&d_df2.alt_start, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
-    gpuErrchk(cudaMalloc((void**)&d_df2.alt_count, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
+        // --- DF2 fixed-size fields ---
+        d_df2[s].num_alt_int_fields    = df2.alt_int.size();
+        d_df2[s].num_alt_float_fields  = df2.alt_float.size();
+        d_df2[s].num_alt_string_fields = df2.alt_string.size();
+        gpuErrchk(cudaMalloc((void**)&d_df2[s].alt_start, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
+        gpuErrchk(cudaMalloc((void**)&d_df2[s].alt_count, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
 
-    // --- DF3 (Sample strings upper bound) ---
-    d_df3.num_samples = df3.numSample;
-    size_t max_sample_chars = (size_t)CHUNK_SIZE * df3.numSample * MAX_SAMPLE_STRING_LEN;
-    gpuErrchk( cudaMalloc(&d_df3.sample_data,    max_sample_chars * sizeof(char)));
-    gpuErrchk( cudaMalloc(&d_df3.sample_offsets, (size_t)CHUNK_SIZE * df3.numSample * sizeof(unsigned int)));
+        // --- DF3 (Sample strings upper bound) ---
+        d_df3[s].num_samples = df3.numSample;
+        size_t max_sample_chars = (size_t)CHUNK_SIZE * df3.numSample * MAX_SAMPLE_STRING_LEN;
+        gpuErrchk( cudaMalloc(&d_df3[s].sample_data,    max_sample_chars * sizeof(char)));
+        gpuErrchk( cudaMalloc(&d_df3[s].sample_offsets, (size_t)CHUNK_SIZE * df3.numSample * sizeof(unsigned int)));
+    }
 }
 
-// Per-chunk device preparation: grows the variable-length buffers (whose required
-// size depends on the current chunk's ID/REF/ALT/INFO string content and allele
-// count) only when needed, instead of cudaMalloc/cudaFree on every chunk.
+// Per-chunk device preparation: grows the variable-length buffers of the given
+// slot (whose required size depends on the current chunk's ID/REF/ALT/INFO
+// string content and allele count) only when needed, instead of
+// cudaMalloc/cudaFree on every chunk.
 void VCFReconstructorGPU::allocateDevice(const var_columns_df& df1,
                                           const alt_columns_df& df2,
                                           int chunk_start,
                                           int chunk_end,
-                                          int df2_start) {
+                                          int df2_start,
+                                          int slot) {
 
     // --- DF1 ID (Variable-length strings) ---
     size_t id_total_chars = 0;
     for (int i = chunk_start; i < chunk_end; i++)
         id_total_chars += df1.id[i].size() + 1;
-    ensureDeviceCapacity(d_df1.id_data, cap_id_data, id_total_chars);
+    ensureDeviceCapacity(d_df1[slot].id_data, cap_id_data[slot], id_total_chars);
 
     // --- DF1 REF (Variable-length strings) ---
     size_t ref_total_chars = 0;
     for (int i = chunk_start; i < chunk_end; i++)
         ref_total_chars += df1.ref[i].size() + 1;
-    ensureDeviceCapacity(d_df1.ref_data, cap_ref_data, ref_total_chars);
+    ensureDeviceCapacity(d_df1[slot].ref_data, cap_ref_data[slot], ref_total_chars);
 
     // --- DF1 INFO Strings ---
     size_t info_str_total_chars = 0;
-    for (int f = 0; f < d_df1.num_string_fields; f++) {
+    for (int f = 0; f < d_df1[slot].num_string_fields; f++) {
         for (int i = chunk_start; i < chunk_end; i++) {
             info_str_total_chars += df1.in_string[f].i_string[i].size() + 1; // +1 for the '\0' terminator
         }
     }
-    ensureDeviceCapacity(d_df1.in_string_data, cap_in_string_data, info_str_total_chars);
+    ensureDeviceCapacity(d_df1[slot].in_string_data, cap_in_string_data[slot], info_str_total_chars);
 
     // --- DF2 (Alternative alleles for this chunk) ---
     int df2_count = 0;
@@ -257,112 +262,113 @@ void VCFReconstructorGPU::allocateDevice(const var_columns_df& df1,
         alt_total_chars += df2.alt[j].size() + 1;
         df2_count++;
     }
-    d_df2.num_entries = df2_count;
+    d_df2[slot].num_entries = df2_count;
 
-    ensureDeviceCapacity(d_df2.var_id,      cap_df2_var_id,  (size_t)df2_count);
-    ensureDeviceCapacity(d_df2.alt_data,    cap_alt_data,    alt_total_chars);
-    ensureDeviceCapacity(d_df2.alt_offsets, cap_alt_offsets, (size_t)df2_count);
-    ensureDeviceCapacity(d_df2.alt_int,   cap_alt_int,   (size_t)d_df2.num_alt_int_fields   * df2_count);
-    ensureDeviceCapacity(d_df2.alt_float, cap_alt_float, (size_t)d_df2.num_alt_float_fields * df2_count);
+    ensureDeviceCapacity(d_df2[slot].var_id,      cap_df2_var_id[slot],  (size_t)df2_count);
+    ensureDeviceCapacity(d_df2[slot].alt_data,    cap_alt_data[slot],    alt_total_chars);
+    ensureDeviceCapacity(d_df2[slot].alt_offsets, cap_alt_offsets[slot], (size_t)df2_count);
+    ensureDeviceCapacity(d_df2[slot].alt_int,   cap_alt_int[slot],   (size_t)d_df2[slot].num_alt_int_fields   * df2_count);
+    ensureDeviceCapacity(d_df2[slot].alt_float, cap_alt_float[slot], (size_t)d_df2[slot].num_alt_float_fields * df2_count);
 
     // --- DF2 INFO-ALT Strings ---
     size_t alt_info_str_total_chars = 0;
-    for (int f = 0; f < d_df2.num_alt_string_fields; f++) {
+    for (int f = 0; f < d_df2[slot].num_alt_string_fields; f++) {
         for (int i = df2_start; i < df2_start + df2_count; i++) {
             alt_info_str_total_chars += df2.alt_string[f].i_string[i].size() + 1;
         }
     }
-    ensureDeviceCapacity(d_df2.alt_string_data, cap_alt_string_data, alt_info_str_total_chars);
-    ensureDeviceCapacity(d_df2.alt_string_offsets, cap_alt_string_offsets,
-                          (size_t)d_df2.num_alt_string_fields * df2_count);
+    ensureDeviceCapacity(d_df2[slot].alt_string_data, cap_alt_string_data[slot], alt_info_str_total_chars);
+    ensureDeviceCapacity(d_df2[slot].alt_string_offsets, cap_alt_string_offsets[slot],
+                          (size_t)d_df2[slot].num_alt_string_fields * df2_count);
 }
 
 void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
                                           const alt_columns_df& df2,
-                                          const HostBuffers& buffers) {
+                                          const HostBuffers& buffers,
+                                          int slot) {
     int chunk_size  = buffers.chunk_size;
     int chunk_start = buffers.chunk_start;
     int df2_start   = buffers.df2_start;
     int df2_count   = buffers.df2_count;
+    cudaStream_t stream = streams[slot];
 
-    // All transfers below are issued as cudaMemcpyAsync on streams[0]. The
-    // sources are pinned host memory (HostBuffers uses PinnedAllocator; the
-    // direct df1/df2 arrays are pinned via registerHostInputBuffers()), so
-    // these calls genuinely queue asynchronously instead of falling back to a
-    // synchronous copy. Nothing yet relies on that asynchrony completing
-    // concurrently with other work (see writeChunk()/run() for the sync
-    // points), that overlap is introduced in a later step.
+    // All transfers below are issued as cudaMemcpyAsync on this slot's stream.
+    // The sources are pinned host memory (HostBuffers uses PinnedAllocator;
+    // the direct df1/df2 arrays are pinned via registerHostInputBuffers()),
+    // so these calls genuinely queue asynchronously and, combined with the
+    // pipelined run() loop, can execute concurrently with the other slot's
+    // in-flight GPU work.
 
     // --- DF1 Direct Copies (Fixed-size arrays) ---
-    gpuErrchk(cudaMemcpyAsync(d_df1.var_number, df1.var_number.data() + chunk_start,
-                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
-    gpuErrchk(cudaMemcpyAsync(d_df1.chrom, df1.chrom.data() + chunk_start,
-                         chunk_size * sizeof(char), cudaMemcpyHostToDevice, streams[0]));
-    gpuErrchk(cudaMemcpyAsync(d_df1.pos, df1.pos.data() + chunk_start,
-                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
-    gpuErrchk(cudaMemcpyAsync(d_df1.qual, df1.qual.data() + chunk_start,
-                         chunk_size * sizeof(__half), cudaMemcpyHostToDevice, streams[0]));
-    gpuErrchk(cudaMemcpyAsync(d_df1.filter, df1.filter.data() + chunk_start,
-                         chunk_size * sizeof(char), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].var_number, df1.var_number.data() + chunk_start,
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].chrom, df1.chrom.data() + chunk_start,
+                         chunk_size * sizeof(char), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].pos, df1.pos.data() + chunk_start,
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].qual, df1.qual.data() + chunk_start,
+                         chunk_size * sizeof(__half), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].filter, df1.filter.data() + chunk_start,
+                         chunk_size * sizeof(char), cudaMemcpyHostToDevice, stream));
 
     // --- DF1 Staging Copies (Variable-length flattened data) ---
-    gpuErrchk(cudaMemcpyAsync(d_df1.id_data, buffers.id_buffer.data(),
-                         buffers.id_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, streams[0]));
-    gpuErrchk(cudaMemcpyAsync(d_df1.id_offsets, buffers.id_offsets.data(),
-                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
-    gpuErrchk(cudaMemcpyAsync(d_df1.ref_data, buffers.ref_buffer.data(),
-                         buffers.ref_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, streams[0]));
-    gpuErrchk(cudaMemcpyAsync(d_df1.ref_offsets, buffers.ref_offsets.data(),
-                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].id_data, buffers.id_buffer.data(),
+                         buffers.id_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].id_offsets, buffers.id_offsets.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].ref_data, buffers.ref_buffer.data(),
+                         buffers.ref_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].ref_offsets, buffers.ref_offsets.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
 
     // --- DF1 INFO Copies ---
-    gpuErrchk(cudaMemcpyAsync(d_df1.in_int, buffers.in_int_buffer.data(),
-                         d_df1.num_int_fields * chunk_size * sizeof(int), cudaMemcpyHostToDevice, streams[0]));
-    gpuErrchk(cudaMemcpyAsync(d_df1.in_float, buffers.in_float_buffer.data(),
-                         d_df1.num_float_fields * chunk_size * sizeof(__half), cudaMemcpyHostToDevice, streams[0]));
-    gpuErrchk(cudaMemcpyAsync(d_df1.in_flag, buffers.in_flag_buffer.data(),
-                         d_df1.num_flag_fields * chunk_size * sizeof(uint8_t), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].in_int, buffers.in_int_buffer.data(),
+                         d_df1[slot].num_int_fields * chunk_size * sizeof(int), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].in_float, buffers.in_float_buffer.data(),
+                         d_df1[slot].num_float_fields * chunk_size * sizeof(__half), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].in_flag, buffers.in_flag_buffer.data(),
+                         d_df1[slot].num_flag_fields * chunk_size * sizeof(uint8_t), cudaMemcpyHostToDevice, stream));
 
     // --- DF1 String INFO Copies ---
     if (buffers.in_string_buffer.size() > 0) {
-        gpuErrchk(cudaMemcpyAsync(d_df1.in_string_data, buffers.in_string_buffer.data(),
-                            buffers.in_string_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, streams[0]));
+        gpuErrchk(cudaMemcpyAsync(d_df1[slot].in_string_data, buffers.in_string_buffer.data(),
+                            buffers.in_string_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, stream));
     }
-    gpuErrchk(cudaMemcpyAsync(d_df1.in_string_offsets, buffers.in_string_offsets.data(),
-                        d_df1.num_string_fields * chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].in_string_offsets, buffers.in_string_offsets.data(),
+                        d_df1[slot].num_string_fields * chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
 
     // --- DF2 Direct and Staging Copies ---
-    gpuErrchk(cudaMemcpyAsync(d_df2.var_id, df2.var_id.data() + df2_start,
-                         df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df2[slot].var_id, df2.var_id.data() + df2_start,
+                         df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
 
-    gpuErrchk(cudaMemcpyAsync(d_df2.alt_data, buffers.alt_data_buffer.data(),
-                         buffers.alt_data_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, streams[0]));
-    gpuErrchk(cudaMemcpyAsync(d_df2.alt_offsets, buffers.alt_data_offsets.data(),
-                         df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df2[slot].alt_data, buffers.alt_data_buffer.data(),
+                         buffers.alt_data_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df2[slot].alt_offsets, buffers.alt_data_offsets.data(),
+                         df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
 
-    gpuErrchk(cudaMemcpyAsync(d_df2.alt_start, buffers.alt_start_buf.data(),
-                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
-    gpuErrchk(cudaMemcpyAsync(d_df2.alt_count, buffers.alt_count_buf.data(),
-                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df2[slot].alt_start, buffers.alt_start_buf.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df2[slot].alt_count, buffers.alt_count_buf.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
 
-    gpuErrchk(cudaMemcpyAsync(d_df2.alt_int, buffers.alt_int_buffer.data(),
-                         d_df2.num_alt_int_fields * df2_count * sizeof(int), cudaMemcpyHostToDevice, streams[0]));
-    gpuErrchk(cudaMemcpyAsync(d_df2.alt_float, buffers.alt_float_buffer.data(),
-                         d_df2.num_alt_float_fields * df2_count * sizeof(__half), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df2[slot].alt_int, buffers.alt_int_buffer.data(),
+                         d_df2[slot].num_alt_int_fields * df2_count * sizeof(int), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df2[slot].alt_float, buffers.alt_float_buffer.data(),
+                         d_df2[slot].num_alt_float_fields * df2_count * sizeof(__half), cudaMemcpyHostToDevice, stream));
 
     // --- DF2 String INFO-ALT Copies ---
     if (buffers.alt_string_buffer.size() > 0) {
-        gpuErrchk(cudaMemcpyAsync(d_df2.alt_string_data, buffers.alt_string_buffer.data(),
-                            buffers.alt_string_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, streams[0]));
+        gpuErrchk(cudaMemcpyAsync(d_df2[slot].alt_string_data, buffers.alt_string_buffer.data(),
+                            buffers.alt_string_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, stream));
     }
-    gpuErrchk(cudaMemcpyAsync(d_df2.alt_string_offsets, buffers.alt_string_offsets.data(),
-                        d_df2.num_alt_string_fields * df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df2[slot].alt_string_offsets, buffers.alt_string_offsets.data(),
+                        d_df2[slot].num_alt_string_fields * df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
 
     // --- DF3 Sample Data Copies ---
-    gpuErrchk(cudaMemcpyAsync(d_df3.sample_data, buffers.sample_buffer.data(),
-                         buffers.sample_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, streams[0]));
-    gpuErrchk(cudaMemcpyAsync(d_df3.sample_offsets, buffers.sample_offsets.data(),
-                         buffers.sample_offsets.size() * sizeof(unsigned int), cudaMemcpyHostToDevice, streams[0]));
+    gpuErrchk(cudaMemcpyAsync(d_df3[slot].sample_data, buffers.sample_buffer.data(),
+                         buffers.sample_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df3[slot].sample_offsets, buffers.sample_offsets.data(),
+                         buffers.sample_offsets.size() * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
 }
 
 /**
@@ -773,10 +779,6 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
     writer_should_stop = false;
     writer_thread = std::thread(&VCFReconstructorGPU::writerLoop, this);
 
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-
     // Construct the FORMAT string
     gt_in_df3 = !df3.sample_GT.empty();
     gt_in_df4 = !gt_in_df3 && !df4.sample_GT.GT.empty();
@@ -844,10 +846,20 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
         }
     }
 
-    gpuErrchk( cudaMalloc(&d_df3.format_str, (format_str.size() + 1) * sizeof(char)));
-    gpuErrchk( cudaMemcpy(d_df3.format_str, format_str.c_str(), format_str.size() + 1, cudaMemcpyHostToDevice));
-    d_df3.format_str_len = format_str.size();
-    d_df3.num_samples    = df3.numSample;
+    // Dataset constant: allocated once, the same device pointer is shared by
+    // both slots (read-only after this point, so concurrent kernels reading
+    // it from either stream is safe). Freed once at the end of run(), see the
+    // final cleanup block below.
+    {
+        char* p_format_str = nullptr;
+        gpuErrchk( cudaMalloc(&p_format_str, (format_str.size() + 1) * sizeof(char)));
+        gpuErrchk( cudaMemcpy(p_format_str, format_str.c_str(), format_str.size() + 1, cudaMemcpyHostToDevice));
+        for (int s = 0; s < 2; s++) {
+            d_df3[s].format_str     = p_format_str;
+            d_df3[s].format_str_len = format_str.size();
+            d_df3[s].num_samples    = df3.numSample;
+        }
+    }
 
     // ====== Dataset Constants (Allocated and copied once) ======
     {
@@ -884,25 +896,40 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
         std::vector<char> alt_string_names_buf(df2.alt_string.size() * MAX_NAME_LEN, '\0');
         for (size_t f = 0; f < df2.alt_string.size(); f++) strncpy(&alt_string_names_buf[f * MAX_NAME_LEN], df2.alt_string[f].name.c_str(), MAX_NAME_LEN - 1);
 
-        // Esecuzione allocazioni protette
-        safe_alloc_and_copy((void**)&d_df1.int_names,   int_names_buf);
-        safe_alloc_and_copy((void**)&d_df1.float_names, float_names_buf);
-        safe_alloc_and_copy((void**)&d_df1.flag_names,  flag_names_buf);
-        safe_alloc_and_copy((void**)&d_df1.string_names, string_names_buf);
+        // Esecuzione allocazioni protette (una sola volta; il puntatore
+        // risultante e' condiviso da entrambi gli slot, sono buffer costanti
+        // e read-only per tutta la durata di run()).
+        void *p_int_names = nullptr, *p_float_names = nullptr, *p_flag_names = nullptr, *p_string_names = nullptr;
+        void *p_alt_int_names = nullptr, *p_alt_float_names = nullptr, *p_alt_string_names = nullptr;
+        safe_alloc_and_copy(&p_int_names,   int_names_buf);
+        safe_alloc_and_copy(&p_float_names, float_names_buf);
+        safe_alloc_and_copy(&p_flag_names,  flag_names_buf);
+        safe_alloc_and_copy(&p_string_names, string_names_buf);
 
-        safe_alloc_and_copy((void**)&d_df2.alt_int_names,   alt_int_names_buf);
-        safe_alloc_and_copy((void**)&d_df2.alt_float_names, alt_float_names_buf);
-        safe_alloc_and_copy((void**)&d_df2.alt_string_names, alt_string_names_buf);
+        safe_alloc_and_copy(&p_alt_int_names,   alt_int_names_buf);
+        safe_alloc_and_copy(&p_alt_float_names, alt_float_names_buf);
+        safe_alloc_and_copy(&p_alt_string_names, alt_string_names_buf);
 
-        // Update counters
-        d_df1.num_int_fields    = df1.in_int.size();
-        d_df1.num_float_fields  = df1.in_float.size();
-        d_df1.num_flag_fields   = df1.in_flag.size();
-        d_df1.num_string_fields = df1.in_string.size();
-        
-        d_df2.num_alt_int_fields    = df2.alt_int.size();
-        d_df2.num_alt_float_fields  = df2.alt_float.size();
-        d_df2.num_alt_string_fields = df2.alt_string.size();
+        for (int s = 0; s < 2; s++) {
+            d_df1[s].int_names    = (char*)p_int_names;
+            d_df1[s].float_names  = (char*)p_float_names;
+            d_df1[s].flag_names   = (char*)p_flag_names;
+            d_df1[s].string_names = (char*)p_string_names;
+
+            d_df2[s].alt_int_names    = (char*)p_alt_int_names;
+            d_df2[s].alt_float_names  = (char*)p_alt_float_names;
+            d_df2[s].alt_string_names = (char*)p_alt_string_names;
+
+            // Update counters
+            d_df1[s].num_int_fields    = df1.in_int.size();
+            d_df1[s].num_float_fields  = df1.in_float.size();
+            d_df1[s].num_flag_fields   = df1.in_flag.size();
+            d_df1[s].num_string_fields = df1.in_string.size();
+
+            d_df2[s].num_alt_int_fields    = df2.alt_int.size();
+            d_df2[s].num_alt_float_fields  = df2.alt_float.size();
+            d_df2[s].num_alt_string_fields = df2.alt_string.size();
+        }
     }
 
     // Inverse maps buffers
@@ -1004,99 +1031,101 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
     gpuErrchk(cudaStreamCreate(&streams[0]));
     gpuErrchk(cudaStreamCreate(&streams[1]));
 
-    // Main execution loop: Process data in chunks
+    // Main execution loop: process data in chunks, pipelined across the two
+    // buffer slots / streams. Chunk i is prepared and launched into slot
+    // i % 2; the chunk that occupied that slot two iterations ago (i - 2) is
+    // guaranteed fully finalized already (writeChunk() below fully drains its
+    // stream before returning), so reusing the slot needs no extra sync here.
+    // Chunk i - 1's compaction/write is finalized only after chunk i has
+    // already been uploaded and launched, so chunk i's host prep (typically
+    // the most expensive per-chunk step) overlaps chunk i - 1's GPU work.
     TimingResult timing;
     timing.setup_ms = std::chrono::duration<double, std::milli>(
         std::chrono::high_resolution_clock::now() - t_setup_start).count();
-    int df2_start = 0;
-    for (int chunk_start = 0; chunk_start < (int)df1.var_number.size(); chunk_start += CHUNK_SIZE){
-        int chunk_end = std::min(chunk_start + CHUNK_SIZE, (int)df1.var_number.size());
-        int chunk_size = chunk_end - chunk_start;
 
-        while(df2_start < (int)df2.var_id.size() && 
+    auto t_loop_start = std::chrono::high_resolution_clock::now();
+
+    int    df2_start = 0;
+    bool   have_pending = false;
+    int    pending_slot = -1;
+    int    pending_chunk_size = 0;
+    double ms_prep_total = 0;
+
+    for (int chunk_start = 0; chunk_start < (int)df1.var_number.size(); chunk_start += CHUNK_SIZE){
+        int chunk_end  = std::min(chunk_start + CHUNK_SIZE, (int)df1.var_number.size());
+        int chunk_size = chunk_end - chunk_start;
+        int slot = (chunk_start / CHUNK_SIZE) % 2;
+
+        while(df2_start < (int)df2.var_id.size() &&
                 df2.var_id[df2_start] < df1.var_number[chunk_start]){
             df2_start++;
         }
 
-        float ms_alloc, ms_u2d, ms_kernel, ms_write;
-
-        // Allocation phase (now just ensures variable-length buffers are big
-        // enough; typically a no-op after the first couple of chunks)
+        // Ensure this slot's variable-length device buffers are big enough
+        // (typically a no-op after the first couple of chunks).
         nvtxRangePushA("allocate");
-        cudaEventRecord(start);
-        allocateDevice(df1, df2, chunk_start, chunk_end, df2_start);
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        cudaEventElapsedTime(&ms_alloc, start, stop);
+        allocateDevice(df1, df2, chunk_start, chunk_end, df2_start, slot);
         nvtxRangePop();
 
+        host_buffers[slot].chunk_size  = chunk_size;
+        host_buffers[slot].chunk_start = chunk_start;
+        host_buffers[slot].chunk_end   = chunk_end;
+        host_buffers[slot].df2_start   = df2_start;
 
-        host_buffers.chunk_size  = chunk_size;
-        host_buffers.chunk_start = chunk_start;
-        host_buffers.chunk_end   = chunk_end;
-        host_buffers.df2_start   = df2_start;
-
-        // Host preparation phase
+        // Host preparation phase: while this CPU work runs, the previous
+        // chunk's GPU work (launched at the end of the prior iteration, on
+        // the other stream) keeps executing in the background.
         nvtxRangePushA("prep_host");
         auto t0 = std::chrono::high_resolution_clock::now();
-        prepareHostBuffers(df1, df2, df3, df4, host_buffers);
+        prepareHostBuffers(df1, df2, df3, df4, host_buffers[slot]);
         auto t1 = std::chrono::high_resolution_clock::now();
-        double ms_prep = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        nvtxRangePop();
-           
-        // Upload phase (async, on streams[0])
-        nvtxRangePushA("upload_H2D");
-        cudaEventRecord(start, streams[0]);
-        uploadToDevice(df1, df2, host_buffers);
-        cudaEventRecord(stop, streams[0]);
-        cudaEventSynchronize(stop);
-        cudaEventElapsedTime(&ms_u2d, start, stop);
+        ms_prep_total += std::chrono::duration<double, std::milli>(t1 - t0).count();
         nvtxRangePop();
 
-        // Kernel execution phase (streams[0])
+        // Upload + launch this chunk on its own stream (both async, return
+        // to the host immediately).
+        nvtxRangePushA("upload_H2D");
+        uploadToDevice(df1, df2, host_buffers[slot], slot);
+        nvtxRangePop();
+
         nvtxRangePushA("reconstruct_kernel");
-        cudaEventRecord(start, streams[0]);
-        reconstructKernel<<<NUM_BLOCKS, BLOCK_SIZE, 0, streams[0]>>>(
+        reconstructKernel<<<NUM_BLOCKS, BLOCK_SIZE, 0, streams[slot]>>>(
             d_maps,
-            d_df1,
-            d_df2,
-            d_df3,
-            d_output,
-            d_line_lens,
+            d_df1[slot],
+            d_df2[slot],
+            d_df3[slot],
+            d_output[slot],
+            d_line_lens[slot],
             chunk_size
         );
-        cudaEventRecord(stop, streams[0]);
-        cudaEventSynchronize(stop);
-        cudaEventElapsedTime(&ms_kernel, start, stop);
-        nvtxRangePop();
-
         gpuErrchk(cudaPeekAtLastError());
-        // Still a full-device barrier for now (removed once the loop is
-        // restructured to actually overlap chunks with each other): with
-        // everything ordered on a single stream this is already redundant
-        // with the cudaEventSynchronize(stop) above, kept here to change
-        // nothing else about control flow in this step.
-        gpuErrchk(cudaDeviceSynchronize());
-
-        // Stream compaction and write phase (streams[0])
-        nvtxRangePushA("compact_write");
-        cudaEventRecord(start, streams[0]);
-        writeChunk(chunk_size);
-        cudaEventRecord(stop, streams[0]);
-        cudaEventSynchronize(stop);
-        cudaEventElapsedTime(&ms_write, start, stop);
         nvtxRangePop();
 
-        timing.alloc_ms  += ms_alloc;
-        timing.u2d_ms    += ms_u2d;
-        timing.prep_ms   += ms_prep;
-        timing.kernel_ms += ms_kernel;
-        timing.write_ms  += ms_write;
-        // free_ms is no longer measured per chunk: device buffers are now
-        // persistent and freed once after the loop (folded into drain_ms).
+        // Finalize the previous chunk now that this one's work is already
+        // queued: by this point the host has spent a full chunk's worth of
+        // prep+launch time since the previous chunk's kernel was issued, so
+        // its GPU work is often already done and this returns quickly.
+        if (have_pending) {
+            nvtxRangePushA("compact_write");
+            writeChunk(pending_chunk_size, pending_slot);
+            nvtxRangePop();
+        }
+
+        have_pending       = true;
+        pending_slot       = slot;
+        pending_chunk_size = chunk_size;
     }
 
+    timing.prep_ms = ms_prep_total;
+    timing.loop_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::high_resolution_clock::now() - t_loop_start).count();
+
     auto t_drain_start = std::chrono::high_resolution_clock::now();
+
+    // Finalize the one chunk still left pending by the loop above.
+    if (have_pending) {
+        writeChunk(pending_chunk_size, pending_slot);
+    }
 
     // Free the persistent per-chunk device buffers (allocated once in
     // initDeviceBuffers(), grown on demand in allocateDevice()/writeChunk()).
@@ -1108,26 +1137,27 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
     safe_stream_destroy(streams[0]);
     safe_stream_destroy(streams[1]);
 
-    // Final cleanup of global constants
-    safe_cuda_free(d_df1.int_names);
-    safe_cuda_free(d_df1.float_names);
-    safe_cuda_free(d_df1.flag_names);
-    safe_cuda_free(d_df2.alt_int_names);
-    safe_cuda_free(d_df2.alt_float_names);
+    // Final cleanup of global constants. d_df1[0]/d_df1[1] (and the matching
+    // d_df2/d_df3 fields) share the same underlying pointer for these
+    // dataset-constant buffers (allocated once, see the setup blocks above),
+    // so each is freed once via slot 0 and then nulled in slot 1 as well to
+    // avoid a double free.
+    safe_cuda_free(d_df1[0].int_names);    d_df1[1].int_names    = nullptr;
+    safe_cuda_free(d_df1[0].float_names);  d_df1[1].float_names  = nullptr;
+    safe_cuda_free(d_df1[0].flag_names);   d_df1[1].flag_names   = nullptr;
+    safe_cuda_free(d_df2[0].alt_int_names);   d_df2[1].alt_int_names   = nullptr;
+    safe_cuda_free(d_df2[0].alt_float_names); d_df2[1].alt_float_names = nullptr;
+    safe_cuda_free(d_df3[0].format_str);   d_df3[1].format_str   = nullptr;
     safe_cuda_free(d_maps.chrom_strings);
     safe_cuda_free(d_maps.chrom_offsets);
     safe_cuda_free(d_maps.filter_strings);
     safe_cuda_free(d_maps.filter_offsets);
-    safe_cuda_free(d_df3.format_str);
     safe_cuda_free(d_maps.tsa_strings);
     safe_cuda_free(d_maps.tsa_offsets);
     safe_cuda_free(d_maps.polyphen_strings);
     safe_cuda_free(d_maps.polyphen_offsets);
     safe_cuda_free(d_maps.csq_strings);
     safe_cuda_free(d_maps.csq_offsets);
-
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
 
     // Signal the writer thread, wait for it to drain the queue, then close file.
     {
@@ -1143,36 +1173,42 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
     return timing;
 }
 
-void VCFReconstructorGPU::writeChunk(int num_variants) {
+void VCFReconstructorGPU::writeChunk(int num_variants, int slot) {
+    cudaStream_t stream = streams[slot];
+
     // ---- 1. Exclusive prefix scan: line_lens -> output_offsets ----
+    // Issued on the same stream as reconstructKernel for this slot, so it is
+    // automatically ordered after it, no host-side wait needed here.
     size_t temp_storage_bytes = 0;
     cub::DeviceScan::ExclusiveSum(
         nullptr, temp_storage_bytes,
-        d_line_lens, d_output_offsets, num_variants, streams[0]);
-    ensureDeviceCapacity(d_temp_storage, cap_temp_storage, temp_storage_bytes);
+        d_line_lens[slot], d_output_offsets[slot], num_variants, stream);
+    ensureDeviceCapacity(d_temp_storage[slot], cap_temp_storage[slot], temp_storage_bytes);
     cub::DeviceScan::ExclusiveSum(
-        d_temp_storage, temp_storage_bytes,
-        d_line_lens, d_output_offsets, num_variants, streams[0]);
+        d_temp_storage[slot], temp_storage_bytes,
+        d_line_lens[slot], d_output_offsets[slot], num_variants, stream);
 
     // ---- 2. Total bytes = last offset + last length ----
     // Data-dependent sync point: the host needs these two values right away
-    // to size d_compacted and the compaction kernel's grid, so the async
-    // copies are immediately followed by a stream sync (cheap: 8 bytes).
+    // to size d_compacted and the compaction kernel's grid. This is also the
+    // point where we actually wait for reconstructKernel + the scan above to
+    // finish; by now the caller has already issued the next chunk's prep and
+    // launch, so most of that wait is typically already hidden.
     unsigned int last_offset, last_len;
-    gpuErrchk(cudaMemcpyAsync(&last_offset, d_output_offsets + (num_variants - 1),
-                         sizeof(unsigned int), cudaMemcpyDeviceToHost, streams[0]));
-    gpuErrchk(cudaMemcpyAsync(&last_len, d_line_lens + (num_variants - 1),
-                         sizeof(unsigned int), cudaMemcpyDeviceToHost, streams[0]));
-    gpuErrchk(cudaStreamSynchronize(streams[0]));
+    gpuErrchk(cudaMemcpyAsync(&last_offset, d_output_offsets[slot] + (num_variants - 1),
+                         sizeof(unsigned int), cudaMemcpyDeviceToHost, stream));
+    gpuErrchk(cudaMemcpyAsync(&last_len, d_line_lens[slot] + (num_variants - 1),
+                         sizeof(unsigned int), cudaMemcpyDeviceToHost, stream));
+    gpuErrchk(cudaStreamSynchronize(stream));
     size_t total_bytes = last_offset + last_len;
 
     // ---- 3. Ensure the compacted buffer on device is large enough ----
-    ensureDeviceCapacity(d_compacted, cap_compacted, total_bytes);
+    ensureDeviceCapacity(d_compacted[slot], cap_compacted[slot], total_bytes);
 
     // ---- 4. Compaction kernel ----
-    compactKernel<<<NUM_BLOCKS, BLOCK_SIZE, 0, streams[0]>>>(
-        d_output, d_line_lens, d_output_offsets,
-        d_compacted, num_variants, MAX_LINE_LEN);
+    compactKernel<<<NUM_BLOCKS, BLOCK_SIZE, 0, stream>>>(
+        d_output[slot], d_line_lens[slot], d_output_offsets[slot],
+        d_compacted[slot], num_variants, MAX_LINE_LEN);
     gpuErrchk(cudaPeekAtLastError());
 
     // ---- 5. Pick a host buffer slot. Wait if both are still being written ----
@@ -1202,9 +1238,9 @@ void VCFReconstructorGPU::writeChunk(int num_variants) {
     // ---- 7. D2H copy into the reserved slot ----
     // Async, but must be finished before the writer thread can read the
     // buffer, so sync the stream right before handing off the job below.
-    gpuErrchk(cudaMemcpyAsync(h_compacted_pool[buf_idx], d_compacted,
-                         total_bytes * sizeof(char), cudaMemcpyDeviceToHost, streams[0]));
-    gpuErrchk(cudaStreamSynchronize(streams[0]));
+    gpuErrchk(cudaMemcpyAsync(h_compacted_pool[buf_idx], d_compacted[slot],
+                         total_bytes * sizeof(char), cudaMemcpyDeviceToHost, stream));
+    gpuErrchk(cudaStreamSynchronize(stream));
 
     // ---- 8. Hand the job to the writer thread; do NOT write here ----
     {
@@ -1595,25 +1631,27 @@ void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
     }
 
     // --- Prepare DF1 INFO integers ---
-    // Flatten multi-dimensional array into a 1D contiguous block
-    buffers.in_int_buffer.assign(d_df1.num_int_fields * chunk_size, 0);
-    for (int f = 0; f < d_df1.num_int_fields; f++) {
+    // Flatten multi-dimensional array into a 1D contiguous block. Field
+    // counts are dataset constants, identical in both slots (see
+    // initDeviceBuffers()); slot 0 is read here purely as a convenient handle.
+    buffers.in_int_buffer.assign(d_df1[0].num_int_fields * chunk_size, 0);
+    for (int f = 0; f < d_df1[0].num_int_fields; f++) {
         for (int i = chunk_start; i < chunk_end; i++) {
             buffers.in_int_buffer[f * chunk_size + (i - chunk_start)] = df1.in_int[f].i_int[i];
         }
     }
 
     // --- Prepare DF1 INFO floats ---
-    buffers.in_float_buffer.assign(d_df1.num_float_fields * chunk_size, __half(0));
-    for (int f = 0; f < d_df1.num_float_fields; f++) {
+    buffers.in_float_buffer.assign(d_df1[0].num_float_fields * chunk_size, __half(0));
+    for (int f = 0; f < d_df1[0].num_float_fields; f++) {
         for (int i = chunk_start; i < chunk_end; i++) {
             buffers.in_float_buffer[f * chunk_size + (i - chunk_start)] = df1.in_float[f].i_float[i];
         }
     }
 
     // --- Prepare DF1 INFO flags ---
-    buffers.in_flag_buffer.assign(d_df1.num_flag_fields * chunk_size, 0);
-    for (int f = 0; f < d_df1.num_flag_fields; f++) {
+    buffers.in_flag_buffer.assign(d_df1[0].num_flag_fields * chunk_size, 0);
+    for (int f = 0; f < d_df1[0].num_flag_fields; f++) {
         for (int i = chunk_start; i < chunk_end; i++) {
             buffers.in_flag_buffer[f * chunk_size + (i - chunk_start)] = df1.in_flag[f].i_flag[i];
         }
@@ -1621,10 +1659,10 @@ void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
 
     // --- Prepare DF1 INFO Strings ---
     buffers.in_string_buffer.clear();
-    buffers.in_string_offsets.assign(d_df1.num_string_fields * chunk_size, 0);
+    buffers.in_string_offsets.assign(d_df1[0].num_string_fields * chunk_size, 0);
     unsigned int current_offset = 0;
 
-    for (int f = 0; f < d_df1.num_string_fields; f++) {
+    for (int f = 0; f < d_df1[0].num_string_fields; f++) {
         for (int i = chunk_start; i < chunk_end; i++) {
             int flat_idx = f * chunk_size + (i - chunk_start);
             buffers.in_string_offsets[flat_idx] = current_offset;
@@ -1669,15 +1707,17 @@ void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
     }
 
     // --- Prepare DF2 ALT INFO fields ---
-    buffers.alt_int_buffer.assign(d_df2.num_alt_int_fields * df2_count, 0);
-    for (int f = 0; f < d_df2.num_alt_int_fields; f++) {
+    // Field counts are dataset constants, identical in both slots; slot 0 is
+    // read here purely as a convenient handle.
+    buffers.alt_int_buffer.assign(d_df2[0].num_alt_int_fields * df2_count, 0);
+    for (int f = 0; f < d_df2[0].num_alt_int_fields; f++) {
         for (int i = df2_start; i < df2_start + df2_count; i++) {
             buffers.alt_int_buffer[f * df2_count + (i - df2_start)] = df2.alt_int[f].i_int[i];
         }
     }
 
-    buffers.alt_float_buffer.assign(d_df2.num_alt_float_fields * df2_count, __half(0));
-    for (int f = 0; f < d_df2.num_alt_float_fields; f++) {
+    buffers.alt_float_buffer.assign(d_df2[0].num_alt_float_fields * df2_count, __half(0));
+    for (int f = 0; f < d_df2[0].num_alt_float_fields; f++) {
         for (int i = df2_start; i < df2_start + df2_count; i++) {
             buffers.alt_float_buffer[f * df2_count + (i - df2_start)] = df2.alt_float[f].i_float[i];
         }
@@ -1685,10 +1725,10 @@ void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
 
     // --- Prepare DF2 INFO-ALT Strings ---
     buffers.alt_string_buffer.clear();
-    buffers.alt_string_offsets.assign(d_df2.num_alt_string_fields * df2_count, 0);
+    buffers.alt_string_offsets.assign(d_df2[0].num_alt_string_fields * df2_count, 0);
     current_offset = 0;
 
-    for (int f = 0; f < d_df2.num_alt_string_fields; f++) {
+    for (int f = 0; f < d_df2[0].num_alt_string_fields; f++) {
         for (int i = df2_start; i < df2_start + df2_count; i++) {
             int flat_idx = f * df2_count + (i - df2_start);
             buffers.alt_string_offsets[flat_idx] = current_offset;

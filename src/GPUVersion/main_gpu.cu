@@ -39,26 +39,23 @@ int main() {
 
         auto end_time = std::chrono::high_resolution_clock::now();
         total_wall_ms    += std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-        total_timing.setup_ms  += t.setup_ms;
-        total_timing.alloc_ms  += t.alloc_ms;
-        total_timing.u2d_ms    += t.u2d_ms;
-        total_timing.prep_ms   += t.prep_ms;
-        total_timing.kernel_ms += t.kernel_ms;
-        total_timing.write_ms  += t.write_ms;
-        total_timing.free_ms   += t.free_ms;
-        total_timing.drain_ms  += t.drain_ms;
+        total_timing.setup_ms += t.setup_ms;
+        total_timing.prep_ms  += t.prep_ms;
+        total_timing.loop_ms  += t.loop_ms;
+        total_timing.drain_ms += t.drain_ms;
     }
 
+    // Per-phase alloc/u2d/kernel/write timings are gone: chunk N+1's prep now
+    // genuinely overlaps chunk N's GPU work, so those phases no longer have
+    // isolated windows to measure without re-introducing blocking syncs. Use
+    // Nsight Systems (NVTX ranges already in run()) to inspect phase-level
+    // overlap; prep_ms/loop_ms below give the aggregate picture.
     std::cout << "\n[Time] (avg over " << N_RUNS << " runs)\n";
     std::cout << "  - Total Execution : " << (total_wall_ms / N_RUNS) << " ms\n";
-    std::cout << "  - setup           : " << (total_timing.setup_ms  / N_RUNS) << " ms\n";
-    std::cout << "  - alloc           : " << (total_timing.alloc_ms  / N_RUNS) << " ms\n";
-    std::cout << "  - u2d             : " << (total_timing.u2d_ms    / N_RUNS) << " ms\n";
-    std::cout << "  - prep            : " << (total_timing.prep_ms   / N_RUNS) << " ms\n";
-    std::cout << "  - kernel          : " << (total_timing.kernel_ms / N_RUNS) << " ms\n";
-    std::cout << "  - write           : " << (total_timing.write_ms  / N_RUNS) << " ms\n";
-    std::cout << "  - free            : " << (total_timing.free_ms   / N_RUNS) << " ms\n";
-    std::cout << "  - drain           : " << (total_timing.drain_ms  / N_RUNS) << " ms\n";
+    std::cout << "  - setup           : " << (total_timing.setup_ms / N_RUNS) << " ms\n";
+    std::cout << "  - prep (host)     : " << (total_timing.prep_ms  / N_RUNS) << " ms\n";
+    std::cout << "  - loop (pipeline) : " << (total_timing.loop_ms  / N_RUNS) << " ms\n";
+    std::cout << "  - drain           : " << (total_timing.drain_ms / N_RUNS) << " ms\n";
 
     return 0;
 }

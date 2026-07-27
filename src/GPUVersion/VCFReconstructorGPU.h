@@ -71,15 +71,18 @@ struct HostBuffers {
     int df2_start   = 0;  ///< Synchronized starting index in DF2
 };
 
+// Per-phase blocking timings (alloc/u2d/kernel/write/free) are gone: once
+// chunk N+1's prep genuinely overlaps chunk N's GPU work, measuring each
+// phase in isolation would require re-inserting the very blocking syncs the
+// pipeline is designed to avoid. setup/prep/drain remain meaningful because
+// they are either purely host-side (chrono, no GPU sync) or already
+// one-time/sequential by construction. For phase-level GPU inspection, use
+// the NVTX ranges still present in run() with Nsight Systems.
 struct TimingResult {
-    double setup_ms  = 0;
-    double alloc_ms  = 0;
-    double u2d_ms    = 0;
-    double prep_ms   = 0;
-    double kernel_ms = 0;
-    double write_ms  = 0;
-    double free_ms   = 0;
-    double drain_ms  = 0;
+    double setup_ms = 0; ///< One-time pre-loop initialization (chrono).
+    double prep_ms  = 0; ///< Sum of per-chunk host prep time (chrono, host-only).
+    double loop_ms  = 0; ///< Wall-clock time of the pipelined chunk loop (chrono).
+    double drain_ms = 0; ///< Final chunk finalization + writer thread join (chrono).
 };
 
 /**
@@ -143,14 +146,18 @@ private:
     std::map<char, std::string> inv_polyphen_map; ///< Maps PolyPhen char codes to original strings.
     std::map<char, std::string> inv_csq_map;      ///< Maps CSQ char codes to original strings.
 
-    // Device output buffer
-    char*         d_output;       ///< Sparse device buffer for VCF text. Size: [CHUNK_SIZE * MAX_LINE_LEN].
-    unsigned int* d_line_lens;    ///< Device array storing the exact string length of each generated row.
+    // Device buffers, in two slots (slot = chunk index % 2) so that chunk N+1
+    // can be prepared and uploaded into one slot while chunk N is still being
+    // read by the GPU from the other slot. d_maps is dataset-constant and
+    // read-only after setup, so it is not duplicated: both slots' kernels can
+    // safely read it concurrently.
+    char*         d_output[2]       = {nullptr, nullptr}; ///< Sparse device buffer for VCF text. Size: [CHUNK_SIZE * MAX_LINE_LEN].
+    unsigned int* d_line_lens[2]    = {nullptr, nullptr}; ///< Device array storing the exact string length of each generated row.
 
-    DeviceVarColumns d_df1;       ///< Shadow structure holding device pointers for DF1 (core variants).
-    DeviceAltColumns d_df2;       ///< Shadow structure holding device pointers for DF2 (alternative alleles).
-    DeviceSampleColumns d_df3;    ///< Shadow structure holding device pointers for DF3/DF4 (samples).
-    DeviceMaps d_maps;            ///< Shadow structure holding device pointers for encoding dictionaries.
+    DeviceVarColumns d_df1[2];    ///< Shadow structure holding device pointers for DF1 (core variants).
+    DeviceAltColumns d_df2[2];    ///< Shadow structure holding device pointers for DF2 (alternative alleles).
+    DeviceSampleColumns d_df3[2]; ///< Shadow structure holding device pointers for DF3/DF4 (samples).
+    DeviceMaps d_maps;            ///< Shadow structure holding device pointers for encoding dictionaries. Not slotted (read-only dataset constant).
 
     // State and Format tracking
     bool has_gt;                  ///< Flag indicating if Genotype (GT) data exists in the dataset.
@@ -168,36 +175,34 @@ private:
     std::map<std::string, std::string> parseFormatNumbers(const std::string& header_text);
     std::map<std::string, std::string> format_numbers; ///< Cached map of FORMAT ID cardinalities.
 
-    // Host staging and grouping
-    HostBuffers host_buffers;     ///< Struct managing staging buffers on the host before transferring to the device.
+    // Host staging and grouping (slotted the same way as the device buffers).
+    HostBuffers host_buffers[2];  ///< Struct managing staging buffers on the host before transferring to the device.
 
     std::vector<GroupInfo> df3_int_groups;   ///< Grouping logic for DF3 integer fields (handles multi-value keys).
     std::vector<GroupInfo> df3_float_groups; ///< Grouping logic for DF3 float fields.
     std::vector<GroupInfo> df4_int_groups;   ///< Grouping logic for DF4 integer fields.
     std::vector<GroupInfo> df4_float_groups; ///< Grouping logic for DF4 float fields.
 
-    // Compaction and Disk I/O variables
-    char* d_compacted = nullptr;     ///< Device buffer for the compacted, contiguous VCF text. Persistent, grown on demand.
-    unsigned int* d_output_offsets;  ///< Device array storing prefix-summed offsets for stream compaction.
+    // Compaction and Disk I/O variables (slotted; see d_output/d_df1 above).
+    char* d_compacted[2] = {nullptr, nullptr};    ///< Device buffer for the compacted, contiguous VCF text. Persistent, grown on demand.
+    unsigned int* d_output_offsets[2] = {nullptr, nullptr}; ///< Device array storing prefix-summed offsets for stream compaction.
 
-    //size_t h_compacted_capacity = 0; ///< Current capacity of the host-side compacted buffer.
-    //char* h_compacted = nullptr;     ///< Host buffer receiving the compacted chunk from the device before disk write.
-
-    // --- Persistent device buffer capacities ---
+    // --- Persistent device buffer capacities (one per slot) ---
     // allocateDevice() no longer runs cudaMalloc/cudaFree every chunk. Fixed-size
     // buffers (bounded by CHUNK_SIZE) are allocated once in initDeviceBuffers().
     // Variable-length buffers below persist across chunks and only grow (never
     // shrink) when a chunk needs more space than currently allocated.
-    size_t cap_id_data = 0, cap_ref_data = 0, cap_in_string_data = 0;
-    size_t cap_df2_var_id = 0, cap_alt_data = 0, cap_alt_offsets = 0;
-    size_t cap_alt_int = 0, cap_alt_float = 0, cap_alt_string_data = 0, cap_alt_string_offsets = 0;
-    size_t cap_compacted = 0;
-    size_t cap_temp_storage = 0;
-    unsigned char* d_temp_storage = nullptr; ///< Persistent scratch storage for cub::DeviceScan, grown on demand.
+    size_t cap_id_data[2] = {0, 0}, cap_ref_data[2] = {0, 0}, cap_in_string_data[2] = {0, 0};
+    size_t cap_df2_var_id[2] = {0, 0}, cap_alt_data[2] = {0, 0}, cap_alt_offsets[2] = {0, 0};
+    size_t cap_alt_int[2] = {0, 0}, cap_alt_float[2] = {0, 0}, cap_alt_string_data[2] = {0, 0}, cap_alt_string_offsets[2] = {0, 0};
+    size_t cap_compacted[2] = {0, 0};
+    size_t cap_temp_storage[2] = {0, 0};
+    unsigned char* d_temp_storage[2] = {nullptr, nullptr}; ///< Persistent scratch storage for cub::DeviceScan, grown on demand.
 
-    // Explicit CUDA streams (created in run(), destroyed at teardown). Not yet
-    // attached to any operation: kernels and memcpys still run on the default
-    // stream until the pipeline is switched over to using these.
+    // Explicit CUDA streams (created in run(), destroyed at teardown). Chunk i
+    // is prepared, uploaded and launched on streams[i % 2] and device/host
+    // buffer slot i % 2, letting chunk i+1's host prep run while chunk i-1's
+    // GPU work (launched on the other stream, one iteration ago) finishes up.
     cudaStream_t streams[2] = {nullptr, nullptr};
 
     // Writer thread infrastructure
@@ -258,12 +263,14 @@ private:
      * @param chunk_start Starting index in DF1.
      * @param chunk_end Ending index in DF1.
      * @param df2_start Starting index in DF2 corresponding to chunk_start.
+     * @param slot Which of the two buffer slots (0 or 1) to prepare.
      */
     void allocateDevice(const var_columns_df& df1,
                         const alt_columns_df& df2,
                         int chunk_start,
                         int chunk_end,
-                        int df2_start);
+                        int df2_start,
+                        int slot);
 
     /**
      * @brief Safely deallocates all CUDA device memory to prevent memory leaks.
@@ -292,17 +299,20 @@ private:
      * @param df1 Core variants DataFrame.
      * @param df2 Alternative alleles DataFrame.
      * @param buffers The fully populated HostBuffers struct.
+     * @param slot Which of the two buffer slots (0 or 1) to upload into; also selects streams[slot].
      */
     void uploadToDevice(const var_columns_df& df1,
                         const alt_columns_df& df2,
-                        const HostBuffers& buffers);
+                        const HostBuffers& buffers,
+                        int slot);
 
     /**
      * @brief Performs stream compaction using Prefix Sum (CUB) and writes the processed, contiguous chunk to disk.
-     * 
+     *
      * @param num_variants The number of variants processed in the current chunk.
+     * @param slot Which of the two buffer slots (0 or 1) holds this chunk's reconstructed data.
      */
-    void writeChunk(int num_variants);
+    void writeChunk(int num_variants, int slot);
 
     /**
      * @brief Populates the ordered_samp_names vector by mapping sample IDs to their string names.
