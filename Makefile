@@ -30,9 +30,6 @@ $(BIN_DIR):
 # ────────────────────────────────────────────────────────────────
 #  E X E C U T A B L E S   ( C P U   S O L O )
 # ────────────────────────────────────────────────────────────────
-VARSTRUCT: | $(BIN_DIR)
-	$(CXX) src/VCFparser_mt.cpp -o $(BIN_DIR)/VCFparser $(OPENMP) $(CPPFLAGS) $(LIBS)
-
 VARCOL: | $(BIN_DIR)
 	$(CXX) src/CPUVersion/VCFparser_mt_col.cpp -o $(BIN_DIR)/VCFparser $(OPENMP) $(CPPFLAGS) $(LIBS)
 
@@ -80,9 +77,9 @@ CPUBIND_DEBUG: | $(BIN_DIR)
 # ────────────────────────────────────────────────────────────────
 #  B U I L D   A L L   &   C L E A N
 # ────────────────────────────────────────────────────────────────
-all: VARSTRUCT VARCOL GPU PYBIND CPUBIND
+all: VARCOL GPU PYBIND CPUBIND
 
 clean:
 	rm -rf $(BIN_DIR)
 
-.PHONY: all clean VARSTRUCT VARCOL GPU DEBUG PYBIND CPUBIND CPUBIND_DEBUG
+.PHONY: all clean VARCOL GPU DEBUG PYBIND CPUBIND CPUBIND_DEBUG
