@@ -7,11 +7,11 @@ Its **hybrid CPU+GPU pipeline** delivers substantial performance speedups over t
 
 ### Build toolchain
 
-* **CMake ≥ 3.24** (installed automatically by `pip install .` if missing)
+* **CMake ≥ 3.24** (installed automatically by `pip install .` if missing; on Ubuntu 22.04 apt ships 3.22, so plain CMake builds need a newer one, e.g. `pip install cmake`)
 * **g++** with **OpenMP**, **C++17**
 * **zlib** and **Imath** development packages (e.g. `zlib1g-dev libimath-dev`)
-* **Python 3.8+** development headers (e.g. `python3-dev`); **pybind11** is fetched by pip, or install it for plain CMake builds (`python3-pybind11` / `pip install pybind11`)
-* **CUDA Toolkit** with **nvcc** — optional: without it only the CPU backend is built
+* **Python 3.8+** development headers (e.g. `python3-dev`); **pybind11** is fetched by pip, or for plain CMake builds it can come from the distro (`python3-pybind11` / `pybind11-dev`) or `pip install pybind11` into the same Python
+* **CUDA Toolkit** ≥ 11.8 (tested with 12.x and 13.x) with **nvcc** — optional: without it only the CPU backend is built
 
 ### Python (runtime)
 

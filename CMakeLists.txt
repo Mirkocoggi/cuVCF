@@ -15,7 +15,10 @@ find_package(ZLIB REQUIRED)
 find_package(Imath CONFIG REQUIRED)
 find_package(OpenMP REQUIRED COMPONENTS CXX)
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
-find_package(pybind11 CONFIG REQUIRED)
+execute_process(
+  COMMAND "${Python_EXECUTABLE}" -m pybind11 --cmakedir
+  OUTPUT_VARIABLE pybind11_hint OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+find_package(pybind11 CONFIG REQUIRED HINTS "${pybind11_hint}")
 
 # ── CPU backend ──────────────────────────────────────────────────
 set(CPU_DEPS ZLIB::ZLIB Imath::Imath OpenMP::OpenMP_CXX)
@@ -50,7 +53,7 @@ if(NOT CUVCF_CUDA STREQUAL "OFF")
 endif()
 
 if(CUVCF_WITH_CUDA)
-  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES AND NOT DEFINED ENV{CUDAARCHS})
     execute_process(
       COMMAND nvidia-smi --query-gpu=compute_cap --format=csv,noheader
       RESULT_VARIABLE smi_rc OUTPUT_VARIABLE smi_out ERROR_QUIET
@@ -61,14 +64,13 @@ if(CUVCF_WITH_CUDA)
       set(CMAKE_CUDA_ARCHITECTURES 75 80 86 89 90)
     endif()
   endif()
-  message(STATUS "cuVCF: CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
 
   enable_language(CUDA)
+  message(STATUS "cuVCF: CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
   set(CMAKE_CUDA_STANDARD 17)
   set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-  find_package(CUDAToolkit REQUIRED)
 
-  set(GPU_DEPS ZLIB::ZLIB Imath::Imath OpenMP::OpenMP_CXX CUDA::cudart)
+  set(GPU_DEPS ZLIB::ZLIB Imath::Imath OpenMP::OpenMP_CXX)
   set(GPU_FLAGS -Xcompiler=-fopenmp $<$<CONFIG:Debug>:-G -lineinfo>)
 
   # main.cu #includes Parser.cu, which #includes Kernels.cu: do not list them.
@@ -76,7 +78,7 @@ if(CUVCF_WITH_CUDA)
   target_compile_options(VCFparser_gpu PRIVATE ${GPU_FLAGS})
   target_link_libraries(VCFparser_gpu PRIVATE ${GPU_DEPS})
 
-  # Bindings.cpp includes CUDA headers; compile it with nvcc like the old Makefile.
+  # Bindings.cpp includes CUDA headers (cuda_fp16.h), so compile it with nvcc.
   set_source_files_properties(src/GPUVersion/Bindings.cpp PROPERTIES LANGUAGE CUDA)
   pybind11_add_module(GPUParser NO_EXTRAS src/GPUVersion/Bindings.cpp src/GPUVersion/Parser.cu)
   target_compile_options(GPUParser PRIVATE ${GPU_FLAGS} -Xcompiler=-w)
