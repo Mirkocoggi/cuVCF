@@ -62,7 +62,7 @@ class GTWrapper {
     }
     
     void bind_GTWrapper(py::module &m) {
-        py::class_<GTWrapper>(m, "GT")
+        py::class_<GTWrapper>(m, "GT", py::module_local())
             .def(py::init<char>())
             .def("__repr__", &GTWrapper::to_string);
     }
@@ -79,7 +79,7 @@ class GTWrapper {
     PYBIND11_MAKE_OPAQUE(std::vector<half_wrapper>);
     
     void bind_vector_half(py::module &m) {
-        py::bind_vector<std::vector<half_wrapper>>(m, "VectorHalf");
+        py::bind_vector<std::vector<half_wrapper>>(m, "VectorHalf", py::module_local());
     }
     
     std::vector<half_wrapper> convert_half_vector(const std::vector<__half>& src) {
@@ -290,9 +290,9 @@ py::dict get_alt_format_data(const alt_format_df &df) {
  */
 PYBIND11_MODULE(GPUParser, m) {
     m.doc() = "Python bindings for CUDA-accelerated VCF parser using pybind11";
-    py::bind_map<std::map<std::string, char>>(m, "FilterMap");
+    py::bind_map<std::map<std::string, char>>(m, "FilterMap", py::module_local());
 
-    py::class_<half_wrapper>(m, "half")
+    py::class_<half_wrapper>(m, "half", py::module_local())
         .def(py::init<>())
         .def(py::init<float>())
         .def("__float__", &half_wrapper::to_float)
@@ -305,56 +305,56 @@ PYBIND11_MODULE(GPUParser, m) {
     bind_GTWrapper(m);
     m.attr("GTMapGlobal") = py::cast(&GTWrapper::GTMap);
 
-    py::class_<samp_GT>(m, "samp_GT")
+    py::class_<samp_GT>(m, "samp_GT", py::module_local())
         .def(py::init<>())
         .def_readwrite("GT", &samp_GT::GT)
         .def_readwrite("numb", &samp_GT::numb); 
 
-    py::class_<info_flag>(m, "info_flag")
+    py::class_<info_flag>(m, "info_flag", py::module_local())
         .def(py::init<>())
         .def_readwrite("i_flag", &info_flag::i_flag)
         .def_readwrite("name", &info_flag::name);
 
-    py::class_<info_string>(m, "info_string")
+    py::class_<info_string>(m, "info_string", py::module_local())
         .def(py::init<>())
         .def_readwrite("i_string", &info_string::i_string)
         .def_readwrite("name", &info_string::name);
 
-    py::class_<info_float>(m, "info_float")
+    py::class_<info_float>(m, "info_float", py::module_local())
         .def(py::init<>())
         .def_readwrite("i_float", &info_float::i_float)
         .def_readwrite("name", &info_float::name);
 
-    py::class_<info_int>(m, "info_int")
+    py::class_<info_int>(m, "info_int", py::module_local())
         .def(py::init<>())
         .def_readwrite("i_int", &info_int::i_int)
         .def_readwrite("name", &info_int::name);
 
-    py::class_<samp_Flag>(m, "samp_Flag")
+    py::class_<samp_Flag>(m, "samp_Flag", py::module_local())
         .def(py::init<>())
         .def_readwrite("i_flag", &samp_Flag::i_flag)
         .def_readwrite("name", &samp_Flag::name)
         .def_readwrite("numb", &samp_Flag::numb);
 
-    py::class_<samp_String>(m, "samp_String")
+    py::class_<samp_String>(m, "samp_String", py::module_local())
         .def(py::init<>())
         .def_readwrite("i_string", &samp_String::i_string)
         .def_readwrite("name", &samp_String::name)
         .def_readwrite("numb", &samp_String::numb);
 
-    py::class_<samp_Float>(m, "samp_Float")
+    py::class_<samp_Float>(m, "samp_Float", py::module_local())
         .def(py::init<>())
         .def_readwrite("i_float", &samp_Float::i_float)
         .def_readwrite("name", &samp_Float::name)
         .def_readwrite("numb", &samp_Float::numb);
 
-    py::class_<samp_Int>(m, "samp_Int")
+    py::class_<samp_Int>(m, "samp_Int", py::module_local())
         .def(py::init<>())
         .def_readwrite("i_int", &samp_Int::i_int)
         .def_readwrite("name", &samp_Int::name)
         .def_readwrite("numb", &samp_Int::numb);
 
-    py::class_<header_element>(m, "header_element")
+    py::class_<header_element>(m, "header_element", py::module_local())
         .def(py::init<>())
         .def_readwrite("ID", &header_element::ID)
         .def_readwrite("Number", &header_element::Number)
@@ -371,7 +371,7 @@ PYBIND11_MODULE(GPUParser, m) {
         .def_readwrite("strings", &header_element::strings)
         .def_readwrite("flags", &header_element::flags);
 
-    py::class_<var_columns_df>(m, "var_columns_df")
+    py::class_<var_columns_df>(m, "var_columns_df", py::module_local())
         .def(py::init<>())
         .def_readwrite("var_number", &var_columns_df::var_number)
         .def_readwrite("chrom", &var_columns_df::chrom)
@@ -395,7 +395,7 @@ PYBIND11_MODULE(GPUParser, m) {
         .def_readwrite("info_map1", &var_columns_df::info_map1)
         .def("print", &var_columns_df::print, py::arg("num_lines"), "Print variant columns");
 
-    py::class_<alt_columns_df>(m, "alt_columns_df")
+    py::class_<alt_columns_df>(m, "alt_columns_df", py::module_local())
         .def(py::init<>())
         .def_readwrite("var_id", &alt_columns_df::var_id)
         .def_readwrite("alt_id", &alt_columns_df::alt_id)
@@ -407,7 +407,7 @@ PYBIND11_MODULE(GPUParser, m) {
         .def_readwrite("numAlt", &alt_columns_df::numAlt)
         .def("print", &alt_columns_df::print, py::arg("n"), "Print alternative columns");
 
-    py::class_<sample_columns_df>(m, "sample_columns_df")
+    py::class_<sample_columns_df>(m, "sample_columns_df", py::module_local())
         .def(py::init<>())
         .def_readwrite("var_id", &sample_columns_df::var_id)
         .def_readwrite("samp_id", &sample_columns_df::samp_id)
@@ -420,7 +420,7 @@ PYBIND11_MODULE(GPUParser, m) {
         .def_readwrite("sample_GT", &sample_columns_df::sample_GT)
         .def("print", &sample_columns_df::print, py::arg("n"), "Print sample columns");
 
-    py::class_<alt_format_df>(m, "alt_format_df")
+    py::class_<alt_format_df>(m, "alt_format_df", py::module_local())
         .def(py::init<>())
         .def_readwrite("var_id", &alt_format_df::var_id)
         .def_readwrite("samp_id", &alt_format_df::samp_id)
@@ -434,7 +434,7 @@ PYBIND11_MODULE(GPUParser, m) {
         .def_readwrite("sample_GT", &alt_format_df::sample_GT)
         .def("print", &alt_format_df::print, py::arg("n"), "Print alternative formatted columns");
 
-    py::class_<vcf_parsed>(m, "vcf_parsed")
+    py::class_<vcf_parsed>(m, "vcf_parsed", py::module_local())
         .def(py::init<>())
         .def("run", [](vcf_parsed &self, const std::string &vcf_filename, int num_threadss) {
             char* c_vcf_filename = new char[vcf_filename.size() + 1];

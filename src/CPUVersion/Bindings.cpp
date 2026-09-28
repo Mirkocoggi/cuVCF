@@ -259,19 +259,19 @@ PYBIND11_MODULE(CPUParser, m) {
     m.doc() = "CPU-only bindings – API compatibile con GPUParser";
 
     /*  basic types  */
-    py::class_<half_wrapper>(m,"half")
+    py::class_<half_wrapper>(m, "half", py::module_local())
         .def(py::init<>())
         .def(py::init<float>())
         .def("__float__",&half_wrapper::to_float)
         .def("__repr__",[](const half_wrapper& h){return std::to_string(h.to_float());});
-    py::bind_vector<std::vector<half_wrapper>>(m,"VectorHalf");
+    py::bind_vector<std::vector<half_wrapper>>(m, "VectorHalf", py::module_local());
 
     /*  GT wrapper  */
     init_GTMap();
-    py::class_<GTWrapper>(m,"GT")
+    py::class_<GTWrapper>(m, "GT", py::module_local())
         .def(py::init<char>())
         .def("__repr__",&GTWrapper::to_string);
-    py::bind_map<std::map<std::string,char>>(m,"FilterMap");
+    py::bind_map<std::map<std::string,char>>(m, "FilterMap", py::module_local());
     m.attr("GTMapGlobal") = py::cast(&GTWrapper::GTMap);
 
     /*  helper NumPy dict  */
@@ -281,40 +281,40 @@ PYBIND11_MODULE(CPUParser, m) {
     m.def("get_alt_format_data",    &get_alt_format_data);
 
     /*  --- bind all the structs (info_flag, samp_*, header_element …) ---  */
-    py::class_<info_flag>(m,"info_flag").def(py::init<>())
+    py::class_<info_flag>(m, "info_flag", py::module_local()).def(py::init<>())
         .def_readwrite("i_flag",&info_flag::i_flag).def_readwrite("name",&info_flag::name);
-    py::class_<info_string>(m,"info_string").def(py::init<>())
+    py::class_<info_string>(m, "info_string", py::module_local()).def(py::init<>())
         .def_readwrite("i_string",&info_string::i_string).def_readwrite("name",&info_string::name);
-    py::class_<info_float>(m,"info_float").def(py::init<>())
+    py::class_<info_float>(m, "info_float", py::module_local()).def(py::init<>())
         .def_readwrite("i_float",&info_float::i_float).def_readwrite("name",&info_float::name);
-    py::class_<info_int>(m,"info_int").def(py::init<>())
+    py::class_<info_int>(m, "info_int", py::module_local()).def(py::init<>())
         .def_readwrite("i_int",&info_int::i_int).def_readwrite("name",&info_int::name);
 
-    py::class_<samp_Flag>(m, "samp_Flag")
+    py::class_<samp_Flag>(m, "samp_Flag", py::module_local())
         .def(py::init<>())
         .def_readwrite("i_flag", &samp_Flag::i_flag)
         .def_readwrite("name", &samp_Flag::name)
         .def_readwrite("numb", &samp_Flag::numb);
 
-    py::class_<samp_String>(m, "samp_String")
+    py::class_<samp_String>(m, "samp_String", py::module_local())
         .def(py::init<>())
         .def_readwrite("i_string", &samp_String::i_string)
         .def_readwrite("name", &samp_String::name)
         .def_readwrite("numb", &samp_String::numb);
 
-    py::class_<samp_Float>(m, "samp_Float")
+    py::class_<samp_Float>(m, "samp_Float", py::module_local())
         .def(py::init<>())
         .def_readwrite("i_float", &samp_Float::i_float)
         .def_readwrite("name", &samp_Float::name)
         .def_readwrite("numb", &samp_Float::numb);
 
-    py::class_<samp_Int>(m, "samp_Int")
+    py::class_<samp_Int>(m, "samp_Int", py::module_local())
         .def(py::init<>())
         .def_readwrite("i_int", &samp_Int::i_int)
         .def_readwrite("name", &samp_Int::name)
         .def_readwrite("numb", &samp_Int::numb);
 
-    py::class_<header_element>(m, "header_element")
+    py::class_<header_element>(m, "header_element", py::module_local())
         .def(py::init<>())
         .def_readwrite("ID", &header_element::ID)
         .def_readwrite("Number", &header_element::Number)
@@ -331,7 +331,7 @@ PYBIND11_MODULE(CPUParser, m) {
         .def_readwrite("strings", &header_element::strings)
         .def_readwrite("flags", &header_element::flags);
 
-    py::class_<alt_columns_df>(m, "alt_columns_df")
+    py::class_<alt_columns_df>(m, "alt_columns_df", py::module_local())
         .def(py::init<>())
         .def_readwrite("var_id", &alt_columns_df::var_id)
         .def_readwrite("alt_id", &alt_columns_df::alt_id)
@@ -343,7 +343,7 @@ PYBIND11_MODULE(CPUParser, m) {
         .def_readwrite("numAlt", &alt_columns_df::numAlt)
         .def("print", &alt_columns_df::print);
 
-     py::class_<sample_columns_df>(m, "sample_columns_df")
+     py::class_<sample_columns_df>(m, "sample_columns_df", py::module_local())
         .def(py::init<>())
         .def_readwrite("var_id", &sample_columns_df::var_id)
         .def_readwrite("samp_id", &sample_columns_df::samp_id)
@@ -356,7 +356,7 @@ PYBIND11_MODULE(CPUParser, m) {
         .def_readwrite("sample_GT", &sample_columns_df::sample_GT)
         .def("print", &sample_columns_df::print);
 
-    py::class_<alt_format_df>(m, "alt_format_df")
+    py::class_<alt_format_df>(m, "alt_format_df", py::module_local())
         .def(py::init<>())
         .def_readwrite("var_id", &alt_format_df::var_id)
         .def_readwrite("samp_id", &alt_format_df::samp_id)
@@ -371,7 +371,7 @@ PYBIND11_MODULE(CPUParser, m) {
         .def("print", &alt_format_df::print);
 
     /*  var_columns with getter/setter for qual  */
-    py::class_<var_columns_df>(m,"var_columns_df")
+    py::class_<var_columns_df>(m, "var_columns_df", py::module_local())
         .def(py::init<>())
         .def_readwrite("var_number",&var_columns_df::var_number)
         .def_readwrite("chrom",&var_columns_df::chrom)
@@ -391,7 +391,7 @@ PYBIND11_MODULE(CPUParser, m) {
         .def("print",&var_columns_df::print);
 
     /*  parser main object  */
-    py::class_<vcf_parsed>(m,"vcf_parsed")
+    py::class_<vcf_parsed>(m, "vcf_parsed", py::module_local())
         .def(py::init<>())
         .def("run",&vcf_parsed::run,py::arg("vcf_filename"),py::arg("num_threads"))
         .def_readwrite("id",&vcf_parsed::id)
