@@ -278,6 +278,11 @@ public:
     *
     * @param num_threads Number of threads to use for parallel merging.
     */
+    /**
+    * @brief Builds chrom_map and filter_map before the parallel parse (threads only read them).
+    */
+    void prebuild_chrom_filter_maps();
+
     void populate_var_columns(int num_threads, int numb_cores);
 
     /**

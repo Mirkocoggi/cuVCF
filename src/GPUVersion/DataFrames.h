@@ -64,6 +64,13 @@ public:
     /// Map for additional info, mapping field names to integer codes.
     map<string, int> info_map1;
 
+    // Read-only lookup for the parsing threads: operator[] would insert missing keys into the
+    // shared map concurrently (data race). Returns -1 for keys not declared in the header.
+    int info_code(const string& key) const {
+        auto it = info_map1.find(key);
+        return it == info_map1.end() ? -1 : it->second;
+    }
+
     /**
      * @brief Prints the variant columns data frame.
      *

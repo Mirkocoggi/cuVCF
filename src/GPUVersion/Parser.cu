@@ -60,6 +60,15 @@ using namespace std;
 
 
 
+// Numeric conversions for VCF values: a missing value ('.') or a malformed token yields 0
+// instead of throwing and aborting the whole parse.
+static inline int safe_stoi(const string& s){
+    try{ return std::stoi(s); }catch(const std::exception&){ return 0; }
+}
+static inline float safe_stof(const string& s){
+    try{ return std::stof(s); }catch(const std::exception&){ return 0.0f; }
+}
+
 /**
     * @brief Runs the VCF parsing process.
     *
@@ -1170,7 +1179,41 @@ void vcf_parsed::populate_runner(int numb_cores){
     *
     * @param num_threads Number of threads to use for parallel merging.
     */
+/**
+    * @brief Fills var_columns.chrom_map / filter_map single-threaded, before the parallel parse.
+    *
+    * The parsing threads used to insert into these std::map concurrently (a data race that
+    * corrupted the trees). Codes are assigned in order of first appearance in the file.
+    */
+void vcf_parsed::prebuild_chrom_filter_maps(){
+    var_columns.chrom_map.clear();
+    var_columns.filter_map.clear();
+
+    auto is_sep = [&](long p){ return filestring[p] == '\t' || filestring[p] == ' ' || filestring[p] == '\n'; };
+    string key;
+    for(long i = 0; i < num_lines; i++){
+        long p = new_lines_index[i];
+        const long e = new_lines_index[i + 1];
+        if(filestring[p] == '\n') p++;
+
+        key.clear();
+        while(p < e && !is_sep(p)) key.push_back(filestring[p++]);
+        var_columns.chrom_map.emplace(key, static_cast<unsigned char>(var_columns.chrom_map.size()));
+        if(p < e && filestring[p] != '\n') p++;
+
+        for(int field = 2; field <= 6 && p < e; field++){ // skip POS, ID, REF, ALT, QUAL
+            while(p < e && !is_sep(p)) p++;
+            if(p < e && filestring[p] != '\n') p++;
+        }
+
+        key.clear();
+        while(p < e && !is_sep(p)) key.push_back(filestring[p++]);
+        var_columns.filter_map.emplace(key, static_cast<char>(var_columns.filter_map.size()));
+    }
+}
+
 void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
+    prebuild_chrom_filter_maps();
 
     std::thread worker_thread(&vcf_parsed::populate_runner, this, numb_cores);
 
@@ -1457,10 +1500,9 @@ void vcf_parsed::get_vcf_line_in_var_columns(char *line, long start, long end, l
         if(line[start+iter]=='\t'||line[start+iter]==' '){
             find1 = true;
             iter++;
-            if(var_columns.chrom_map.find(tmp) == var_columns.chrom_map.end()){
-                var_columns.chrom_map.insert(std::make_pair(tmp, (unsigned char)var_columns.chrom_map.size()));
-            }
-            var_columns.chrom[i] = var_columns.chrom_map[tmp];
+            // chrom_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
+            auto chrom_it = var_columns.chrom_map.find(tmp);
+            var_columns.chrom[i] = (chrom_it != var_columns.chrom_map.end()) ? chrom_it->second : static_cast<unsigned char>(0);
         }else{
             tmp += line[start+iter];
             iter++;
@@ -1535,10 +1577,9 @@ void vcf_parsed::get_vcf_line_in_var_columns(char *line, long start, long end, l
         if(line[start+iter]=='\t'||line[start+iter]==' '){
             find1 = true;
             iter++;
-            if(var_columns.filter_map.find(tmp) == var_columns.filter_map.end()){
-                var_columns.filter_map.insert(std::make_pair(tmp, (char)var_columns.filter_map.size()));
-            }
-            var_columns.filter[i] = var_columns.filter_map[tmp];
+            // filter_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
+            auto filter_it = var_columns.filter_map.find(tmp);
+            var_columns.filter[i] = (filter_it != var_columns.filter_map.end()) ? filter_it->second : static_cast<char>(0);
         }else{
             tmp += line[start+iter];
             iter++;
@@ -1564,7 +1605,7 @@ void vcf_parsed::get_vcf_line_in_var_columns(char *line, long start, long end, l
                 find_info_elem = false;
                 if(tmp_elems.size()==2){
                     while(!find_info_type){
-                        if(var_columns.info_map1[tmp_elems[0]]==STRING){
+                        if(var_columns.info_code(tmp_elems[0])==STRING){
                             //String
                             el=0;
                             while(!find_info_elem){
@@ -1575,21 +1616,21 @@ void vcf_parsed::get_vcf_line_in_var_columns(char *line, long start, long end, l
                                 el++;
                             }
                             find_info_type = true;
-                        }else if(var_columns.info_map1[tmp_elems[0]]==INT_ALT){
+                        }else if(var_columns.info_code(tmp_elems[0])==INT_ALT){
                             //Int Alt
                             el=0;
                             while(!find_info_elem){
                                 if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
                                     boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                     for(int y = 0; y<local_alt; y++){
-                                        (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = stoi(tmp_split[y]);
+                                        (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = safe_stoi(tmp_split[y]);
                                     }
                                     find_info_elem = true;
                                 }
                                 el++;
                             }
                             find_info_type = true;
-                        }else if(var_columns.info_map1[tmp_elems[0]]==FLOAT_ALT){
+                        }else if(var_columns.info_code(tmp_elems[0])==FLOAT_ALT){
                             //Float Alt
                             el=0;
                             while(!find_info_elem){
@@ -1598,7 +1639,7 @@ void vcf_parsed::get_vcf_line_in_var_columns(char *line, long start, long end, l
                                     
                                     for(int y = 0; y<local_alt; y++){
                                         try{
-                                            (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = (__half)stof(tmp_split[y]);
+                                            (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = (__half)safe_stof(tmp_split[y]);
                                         }catch (const std::exception& e){
                                             (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
                                         }
@@ -1608,7 +1649,7 @@ void vcf_parsed::get_vcf_line_in_var_columns(char *line, long start, long end, l
                                 el++;
                             }
                             find_info_type = true;
-                        }else if(var_columns.info_map1[tmp_elems[0]]==STRING_ALT){
+                        }else if(var_columns.info_code(tmp_elems[0])==STRING_ALT){
                             //String Alt
                             el=0;
                             while(!find_info_elem){
@@ -1674,10 +1715,9 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
         if(line[start+iter]=='\t'||line[start+iter]==' '){
             find1 = true;
             iter++;
-            if(var_columns.chrom_map.find(tmp) == var_columns.chrom_map.end()){
-                var_columns.chrom_map.insert(std::make_pair(tmp, (unsigned char)var_columns.chrom_map.size()));
-            }
-            var_columns.chrom[i] = var_columns.chrom_map[tmp];
+            // chrom_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
+            auto chrom_it = var_columns.chrom_map.find(tmp);
+            var_columns.chrom[i] = (chrom_it != var_columns.chrom_map.end()) ? chrom_it->second : static_cast<unsigned char>(0);
         }else{
             tmp += line[start+iter];
             iter++;
@@ -1752,10 +1792,9 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
         if(line[start+iter]=='\t'||line[start+iter]==' '){
             find1 = true;
             iter++;
-            if(var_columns.filter_map.find(tmp) == var_columns.filter_map.end()){
-                var_columns.filter_map.insert(std::make_pair(tmp, (char)var_columns.filter_map.size()));
-            }
-            var_columns.filter[i] = var_columns.filter_map[tmp];
+            // filter_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
+            auto filter_it = var_columns.filter_map.find(tmp);
+            var_columns.filter[i] = (filter_it != var_columns.filter_map.end()) ? filter_it->second : static_cast<char>(0);
         }else{
             tmp += line[start+iter];
             iter++;
@@ -1781,7 +1820,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                 find_info_elem = false;
                 if(tmp_elems.size()==2){
                     while(!find_info_type){
-                        if(var_columns.info_map1[tmp_elems[0]]==STRING){
+                        if(var_columns.info_code(tmp_elems[0])==STRING){
                             //String
                             el=0;
                             while(!find_info_elem){
@@ -1792,21 +1831,21 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                 el++;
                             }
                             find_info_type = true;
-                        }else if(var_columns.info_map1[tmp_elems[0]]==INT_ALT){
+                        }else if(var_columns.info_code(tmp_elems[0])==INT_ALT){
                             //Int Alt
                             el=0;
                             while(!find_info_elem){
                                 if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
                                     boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                     for(int y = 0; y<local_alt; y++){
-                                        (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = stoi(tmp_split[y]);
+                                        (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = safe_stoi(tmp_split[y]);
                                     }
                                     find_info_elem = true;
                                 }
                                 el++;
                             }
                             find_info_type = true;
-                        }else if(var_columns.info_map1[tmp_elems[0]]==FLOAT_ALT){
+                        }else if(var_columns.info_code(tmp_elems[0])==FLOAT_ALT){
                             //Float Alt
                             el=0;
                             while(!find_info_elem){
@@ -1815,7 +1854,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                     
                                     for(int y = 0; y<local_alt; y++){
                                         try{
-                                            (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = (__half)stof(tmp_split[y]);
+                                            (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = (__half)safe_stof(tmp_split[y]);
                                         }catch (const std::exception& e){
                                             (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
                                         }
@@ -1825,7 +1864,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                 el++;
                             }
                             find_info_type = true;
-                        }else if(var_columns.info_map1[tmp_elems[0]]==STRING_ALT){
+                        }else if(var_columns.info_code(tmp_elems[0])==STRING_ALT){
                             //String Alt
                             el=0;
                             while(!find_info_elem){
@@ -1898,7 +1937,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                 (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
                             }
                             find_type = true;
-                        }else if(var_columns.info_map1[tmp_format_split[j]] == STRING_FORMAT || var_columns.info_map1[tmp_format_split[j] + std::to_string(1)] == STRING_FORMAT){
+                        }else if(var_columns.info_code(tmp_format_split[j]) == STRING_FORMAT || var_columns.info_code(tmp_format_split[j] + std::to_string(1)) == STRING_FORMAT){
                             //String - deterministic
                             int el = 0;
                             while(!find_elem){
@@ -1921,15 +1960,15 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                 el++;
                             }
                             find_type = true;
-                        }else if(var_columns.info_map1[tmp_format_split[j]] == INT_FORMAT || var_columns.info_map1[tmp_format_split[j] + std::to_string(1)] == INT_FORMAT){
+                        }else if(var_columns.info_code(tmp_format_split[j]) == INT_FORMAT || var_columns.info_code(tmp_format_split[j] + std::to_string(1)) == INT_FORMAT){
                             //Integer - deterministic - on device
                             find_elem = true;
                             find_type = true;
-                        }else if(var_columns.info_map1[tmp_format_split[j]] == FLOAT_FORMAT || var_columns.info_map1[tmp_format_split[j] + std::to_string(1)] == FLOAT_FORMAT){
+                        }else if(var_columns.info_code(tmp_format_split[j]) == FLOAT_FORMAT || var_columns.info_code(tmp_format_split[j] + std::to_string(1)) == FLOAT_FORMAT){
                             //Float - deterministic - on device
                             find_elem = true;
                             find_type = true;
-                        }else if(var_columns.info_map1[tmp_format_split[j]] == STRING_FORMAT_ALT){
+                        }else if(var_columns.info_code(tmp_format_split[j]) == STRING_FORMAT_ALT){
                             //String alternatives
                             boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                             local_alt = tmp_sub.size();
@@ -1950,7 +1989,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                 el++;
                             }
                             find_type = true;
-                        }else if(var_columns.info_map1[tmp_format_split[j]] == INT_FORMAT_ALT){
+                        }else if(var_columns.info_code(tmp_format_split[j]) == INT_FORMAT_ALT){
                             //Integer alternatives
                             boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                             local_alt = tmp_sub.size();
@@ -1963,7 +2002,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                         (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_columns.var_number[i];
                                         (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
                                         (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
-                                        (*tmp_alt_format).samp_int[el].i_int[(*tmp_num_alt_format) + y] = std::stoi(tmp_sub[y]);
+                                        (*tmp_alt_format).samp_int[el].i_int[(*tmp_num_alt_format) + y] = safe_stoi(tmp_sub[y]);
                                     }
                                     find_elem = true;
                                     (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
@@ -1971,7 +2010,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                 el++;
                             }
                             find_type = true;
-                        }else if(var_columns.info_map1[tmp_format_split[j]] == FLOAT_FORMAT_ALT){
+                        }else if(var_columns.info_code(tmp_format_split[j]) == FLOAT_FORMAT_ALT){
                             //Float alternatives
                             boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                             local_alt = tmp_sub.size();
@@ -1985,7 +2024,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                         (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
                                         (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
                                         try{
-                                            (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = (__half)std::stof(tmp_sub[y]);
+                                            (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = (__half)safe_stof(tmp_sub[y]);
                                         }catch (const std::exception& e){
                                             (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = 0;
                                         }
