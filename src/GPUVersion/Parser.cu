@@ -93,6 +93,12 @@ static inline std::string header_attr(std::string_view body, std::string_view ke
     return std::string(body.substr(pos, end - pos));
 }
 
+// FORMAT columns are named <ID> (Number=1) or <ID>0, <ID>1, ... (Number>1): match the first column
+// of key exactly. A prefix match picked GQX for GQ when GQX was declared first.
+static inline bool format_name_matches(const std::string& name, const std::string& key){
+    return name == key || (name.size() == key.size() + 1 && name.back() == '0' && name.compare(0, key.size(), key) == 0);
+}
+
 // Numeric conversions for VCF values: a missing value ('.') or a malformed token yields 0
 // instead of throwing and aborting the whole parse.
 static inline int safe_stoi(const string& s){
@@ -1993,7 +1999,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                             //String - deterministic
                             int el = 0;
                             while(!find_elem){
-                                if(!(*sample).samp_string[el].name.compare(0, tmp_format_split[j].length(), tmp_format_split[j], 0, tmp_format_split[j].length())){
+                                if(format_name_matches((*sample).samp_string[el].name, tmp_format_split[j])){
                                     if((*sample).samp_string[el].numb==1){ //String with numb = 1
                                         //Update the corresponing cell
                                         (*sample).samp_string[el].i_string[i*(*sample).numSample + samp] = tmp_split[j];

@@ -18,6 +18,12 @@
 #include <boost/algorithm/string.hpp>
 #include <Imath/half.h>
 
+// FORMAT columns are named <ID> (Number=1) or <ID>0, <ID>1, ... (Number>1): match the first column
+// of key exactly. A prefix match picked GQX for GQ when GQX was declared first.
+static inline bool format_name_matches(const std::string& name, const std::string& key){
+    return name == key || (name.size() == key.size() + 1 && name.back() == '0' && name.compare(0, key.size(), key) == 0);
+}
+
 // Numeric conversions for VCF values: a missing value ('.') or a malformed token yields 0
 // instead of throwing and aborting the whole parse.
 static inline int safe_stoi(const std::string& s){
@@ -777,7 +783,7 @@ public:
                                 int el = 0;
                                 
                                 while(!find_elem){
-                                    if(!(*sample).samp_string[el].name.compare(0, tmp_format_split[j].length(), tmp_format_split[j], 0, tmp_format_split[j].length())){
+                                    if(format_name_matches((*sample).samp_string[el].name, tmp_format_split[j])){
                                         if((*sample).samp_string[el].numb==1){ //String with numb = 1
                                             //Update the corresponding cell
                                             (*sample).samp_string[el].i_string[i*(*sample).numSample + samp] = tmp_split[j];
@@ -802,7 +808,7 @@ public:
                                 (*sample).samp_id[i*(*sample).numSample + samp] = samp;
                                 int el = 0;
                                 while(!find_elem){
-                                    if(!(*sample).samp_int[el].name.compare(0, tmp_format_split[j].length(), tmp_format_split[j], 0, tmp_format_split[j].length())){
+                                    if(format_name_matches((*sample).samp_int[el].name, tmp_format_split[j])){
                                         if((*sample).samp_int[el].numb==1){
                                             //Integer with numb = 1
                                             (*sample).samp_int[el].i_int[i*(*sample).numSample + samp] = safe_stoi(tmp_split[j]);
@@ -825,7 +831,7 @@ public:
                                 (*sample).samp_id[i*(*sample).numSample + samp] = samp;
                                 int el = 0;
                                 while(!find_elem){
-                                    if(!(*sample).samp_float[el].name.compare(0, tmp_format_split[j].length(), tmp_format_split[j], 0, tmp_format_split[j].length())){
+                                    if(format_name_matches((*sample).samp_float[el].name, tmp_format_split[j])){
                                         if((*sample).samp_float[el].numb==1){
                                             //Float with numb = 1
                                             try{ //Check if format is 10E-40 to crop to 0
