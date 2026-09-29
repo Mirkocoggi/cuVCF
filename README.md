@@ -7,106 +7,152 @@ Its **hybrid CPU+GPU pipeline** delivers substantial performance speedups over t
 
 ### Build toolchain
 
-* **g++** with **OpenMP** (`-fopenmp`)
-* **CUDA Toolkit 12.x** (Makefile uses change to specify your architecture `-arch=sm_89`)
-* **nvcc**
-* **python3**, **python3-config**
-* **pybind11** headers (`python3 -m pybind11 --includes`)
-* **zlib** (`-lz`)
-* **Imath** headers (Makefile includes `-I/usr/include/Imath`)
-* **C++17**
+* **CMake ≥ 3.24** (installed automatically by `pip install .` if missing; on Ubuntu 22.04 apt ships 3.22, so plain CMake builds need a newer one, e.g. `pip install cmake`)
+* **g++** with **OpenMP**, **C++17**
+* **zlib** and **Imath** development packages (e.g. `zlib1g-dev libimath-dev`)
+* **Python 3.8+** development headers (e.g. `python3-dev`); **pybind11** is fetched by pip, or for plain CMake builds it can come from the distro (`python3-pybind11` / `pybind11-dev`) or `pip install pybind11` into the same Python
+* **CUDA Toolkit** ≥ 11.8 (tested with 12.x and 13.x) with **nvcc** — optional: without it only the CPU backend is built
 
 ### Python (runtime)
 
 * **numpy**
 * **pandas** (for CPU analytics)
-* **cuDF** (optional, for GPU analytics - same sintax of pandas)
-* Your module loads as `CPUParser` / `GPUParser` from `bin/`
+* **cuDF** (optional, for GPU analytics - same syntax as pandas)
 
 ### Tested environment
 
-* **Ubuntu 22.04.5 LTS**
-* **NVIDIA Ada (sm\_89)** class GPU (e.g., L40S).
-  For other GPUs, change `-arch=sm_89` in `GPUFLAGS`/`DEBUG_GPUFLAGS`.
+* **Ubuntu 22.04.5 LTS**, **NVIDIA Ada (sm\_89)** class GPU (e.g., L40S)
+* **Ubuntu 24.04.4 LTS**, **NVIDIA L4** (sm\_89), CUDA 13.1, CMake 3.28, GCC 13, Python 3.12
+
+Other GPUs work too: by default the build targets the GPU found on the build machine (see *Notes & Tips*).
 
 ---
 
 ## Quick Start
 
-### 1) Build
+### 1) Install the prerequisites
 
-Clone and compile using `make`:
-
-```bash
-git clone https://github.com/<username>/cuVCF.git
-cd cuVCF
-
-# Build everything (CPU/GPU executables + Python bindings)
-make all
-````
-
-Or build specific targets:
+On Ubuntu:
 
 ```bash
-# CPU-only executable (columnar version)
-make VARCOL
-
-# GPU executable
-make GPU
-
-# Python modules (GPU + CPU)
-make PYBIND   # -> bin/GPUParser.so
-make CPUBIND  # -> bin/CPUParser.so
-
-# Debug builds
-make VARCOL_DEBUG
-make DEBUG
-make CPUBIND_DEBUG
+sudo apt install build-essential cmake zlib1g-dev libimath-dev python3-dev python3-venv python3-pybind11
 ```
 
-Artifacts are produced in `bin/`:
-
-* `bin/VCFparser` — CLI executable (CPU or GPU depending on the target used last)
-* `bin/GPUParser.so` — pybind11 module (GPU backend)
-* `bin/CPUParser.so` — pybind11 module (CPU backend)
-* `bin/CPUParser_debug<pyext>` — debug pybind11 module with ASan/UBSan
-
-> **Note:** The GPU compilation uses `-arch=sm_89` (Ada). Adjust `GPUFLAGS` if your GPU has a different compute architecture
-
-### 2) Minimal CLI usage
-
-The CLI executable is mainly intended for **debugging**.  
-It parses a VCF file and converts it into the internal **columnar representation**, but it does **not** provide a complete analysis workflow.  
-If you want to use the CLI instead of the Python interface, you’ll need to implement your own `main` function to process the parser’s output.
+For the GPU backend, also install the [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads) and make sure `nvcc` is on your `PATH`:
 
 ```bash
-# After building with `make VARCOL` or `make GPU`:
-./bin/VCFparser <path/to/input.vcf>
-````
+export PATH=/usr/local/cuda/bin:$PATH   # if nvcc is not found
+nvcc --version
+```
 
-For full data access and analysis, the recommended entry point is the **Python bindings** (`CPUParser.so` / `GPUParser.so`).
+Without CUDA everything still builds, but only the CPU backend.
+
+### 2) Build
+
+#### Option A — Python modules with pip (recommended)
+
+```bash
+git clone https://github.com/Mirkocoggi/cuVCF.git
+cd cuVCF
+python3 -m venv .venv
+source .venv/bin/activate
+pip install .
+```
+
+This builds and installs `CPUParser` and, if CUDA is available, `GPUParser` into the virtual environment. The first build compiles the CUDA code and takes a few minutes.
+
+* The virtual environment is required on recent Ubuntu/Debian releases, which refuse `pip install` into the system Python (`externally-managed-environment`).
+* CPU-only build: `pip install . -C cmake.define.CUVCF_CUDA=OFF`
+* Build for a specific GPU architecture: `pip install . -C cmake.define.CMAKE_CUDA_ARCHITECTURES=80`
+
+Check the installation:
+
+```bash
+python -c "import CPUParser; print('CPU backend OK')"
+python -c "import GPUParser; print('GPU backend OK')"   # CUDA builds only
+```
+
+#### Option B — CLIs and Python modules with CMake
+
+```bash
+git clone https://github.com/Mirkocoggi/cuVCF.git
+cd cuVCF
+cmake -S . -B build
+cmake --build build -j
+```
+
+Artifacts in `build/`:
+
+* `VCFparser_cpu` — CLI executable, CPU backend
+* `VCFparser_gpu` — CLI executable, GPU backend (CUDA only)
+* `CPUParser.cpython-*.so` — pybind11 module (CPU backend)
+* `GPUParser.cpython-*.so` — pybind11 module (GPU backend, CUDA only)
+
+Build options (`-D<option>=<value>` when configuring):
+
+| Option | Default | Meaning |
+|---|---|---|
+| `CUVCF_CUDA` | `AUTO` | `AUTO`: build the GPU backend if nvcc is found; `ON`: require it; `OFF`: CPU only |
+| `CMAKE_CUDA_ARCHITECTURES` | `native` (or `75;80;86;89;90` if no GPU is visible) | GPU architectures to compile for, e.g. `89` |
+| `CMAKE_BUILD_TYPE` | `Release` | `Debug` adds `-g` (and `-G -lineinfo` for CUDA) and drops `-O3` (i.e. `-O0`) |
+| `CUVCF_SANITIZE` | `OFF` | build the CPU targets with AddressSanitizer + UBSan |
+
+Debug build example: `cmake -S . -B build-dbg -DCMAKE_BUILD_TYPE=Debug -DCUVCF_SANITIZE=ON && cmake --build build-dbg -j`
+
+With `CUVCF_SANITIZE=ON` the `CPUParser` module is built with ASan, so the ASan runtime must be preloaded to import it:
+
+```bash
+LD_PRELOAD=$(gcc -print-file-name=libasan.so) ASAN_OPTIONS=detect_leaks=0 PYTHONPATH=build-dbg python3 -c "import CPUParser"
+```
+
+### 3) Run from the command line
+
+The CLI executables are mainly intended for **debugging**.  
+They parse a VCF file and convert it into the internal **columnar representation**, but they do **not** provide a complete analysis workflow.  
+If you want to use the CLI instead of the Python interface, you’ll need to implement your own `main` function to process the parser’s output.
+
+After an Option B build:
+
+```bash
+./build/VCFparser_gpu -v data/tiny.vcf -t 4
+```
+
+* `-v <file>` — input VCF (`.vcf`, or `.vcf.gz`: a gzipped input is decompressed **in place**, replacing the `.gz` file)
+* `-t <n>` — number of CPU threads
+* `VCFparser_cpu` takes the same options.
+
+For full data access and analysis, the recommended entry point is the **Python bindings** (`CPUParser` / `GPUParser`).
 
 ---
 
-
-### 3) Minimal Python usage
+### 4) Use from Python
 
 The project provides two Python extension modules built with pybind11:
 - `GPUParser` → GPU backend (CUDA required)
 - `CPUParser` → CPU backend
 
-Add the `bin/` folder to `PYTHONPATH` (or to `sys.path`) and import one backend:
+After Option A, activate the virtual environment and run your script as usual:
+
+```bash
+source .venv/bin/activate
+python my_script.py
+```
+
+After Option B, point Python at the build directory instead:
+
+```bash
+PYTHONPATH=build python3 my_script.py
+```
+
+In your script, import one backend:
 
 ```python
-import sys
-sys.path.append("bin")
-
 # Prefer GPU if available
 try:
     import GPUParser as cuvcf
 except ImportError:
     import CPUParser as cuvcf
-````
+```
 
 ---
 
@@ -197,10 +243,11 @@ cuVCF/
 │   
 │── bcftoolsTest/   # Test scripts for bcftool
 │── cyvcf2Tests/    # Test scripts for cyvcf2
-│── vcflibTest/     # Test scripts for vcflib
+│── vcflibTests/    # Test scripts for vcflib
 │── TestGPU/        # Test scripts for GPU implementation of cuVCF
 │── TestCPU/        # Test scripts for CPU implementation of cuVCF
-│── Makefile
+│── CMakeLists.txt  # Build definition (CLIs + Python modules)
+│── pyproject.toml  # pip install . (scikit-build-core)
 │── README.md
 │── Tester.bash             # Test script to test the parsing time of cuVCF from the CLI
 │── TesterSanitizer.bash    # Test script to test the memory leaks of cuVCF from the CLI
@@ -211,15 +258,11 @@ cuVCF/
 
 ## Notes & Tips
 
-* Ensure `pybind11` and `python3-dev` (or equivalent) are installed so `python3-config` works.
-* If your GPU is not **sm\_89**, update:
-
-  * `GPUFLAGS` / `DEBUG_GPUFLAGS` in the Makefile (e.g., `-arch=sm_80` for A100).
+* To build for a GPU other than the one on the build machine, pass `-DCMAKE_CUDA_ARCHITECTURES=<cc>` (e.g. `80` for A100), or `pip install . -C cmake.define.CMAKE_CUDA_ARCHITECTURES=80`. With the default `native` setting the build (including a pip-built wheel) only runs on the build machine's GPU generation.
 * If importing from Python fails, check:
 
-  * `sys.path` includes `bin/`
-  * the extension name matches the module you import (`CPUParser` / `GPUParser`)
-  * compatible Python version/ABI (see `PYEXT` in the Makefile)
+  * the package was installed with the same interpreter you run (`python -m pip install .`), or `build/` is on `PYTHONPATH` for plain CMake builds
+  * `GPUParser` is missing: CUDA was not found at build time (the CMake log says `GPU backend skipped`)
 
 * If you plan to run the **benchmarking/comparison scripts**, please check their dedicated documentation for the required Python libraries and external tools.  
 * The datasets we used in our evaluation are publicly available at the following links:

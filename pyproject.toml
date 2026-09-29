@@ -1,0 +1,15 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=2.11"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "cuvcf"
+version = "0.1.0"
+description = "CPU/GPU-accelerated conversion of VCF files into columnar DataFrames"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = ["numpy"]
+
+[tool.scikit-build]
+cmake.version = ">=3.24"
+wheel.packages = []
