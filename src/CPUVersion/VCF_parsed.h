@@ -34,6 +34,15 @@
 #include <functional>
 #include <future>
 #include <string_view>
+#include <algorithm>
+#include <cctype>
+
+/**
+ * @brief True if a header Number= value is a fixed count ("0", "1", "2", ...).
+ */
+static inline bool is_fixed_number(const std::string& number) {
+    return !number.empty() && std::all_of(number.begin(), number.end(), [](unsigned char c){ return std::isdigit(c); });
+}
 
 /**
  * @brief Returns the text between '<' and the last '>' of a ##INFO/##FORMAT header line.
@@ -443,6 +452,9 @@ public:
         }
 
         for(int i = 0; i < numIter; i++){
+            // Number=R, G and . are not supported yet: skip the field instead of throwing in
+            // std::stoi (R, G) or prompting on stdin (.). The line parser then ignores it.
+            if(strcmp(&FORMAT.Number[i][0], "A") != 0 && !is_fixed_number(FORMAT.Number[i])) continue;
             if(strcmp(&FORMAT.Number[i][0], "A") != 0){
                 // Without Alternatives
                 if(strcmp(&FORMAT.Number[i][0], "1")==0){ 
