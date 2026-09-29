@@ -1479,6 +1479,29 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
     worker_thread.join();    
 }
 
+// Per-thread alternative buffers are pre-sized for ~2 ALTs per line; grow them when a chunk needs more
+// (same approach as the CPU backend in cuVCF-internal).
+static void ensure_alt_capacity(alt_columns_df* tmp_alt, int needed){
+    if(needed <= 0 || static_cast<int>(tmp_alt->alt.size()) >= needed) return;
+    tmp_alt->var_id.resize(needed, 0);
+    tmp_alt->alt.resize(needed, "\0");
+    tmp_alt->alt_id.resize(needed, (char)0);
+    for(auto& c : tmp_alt->alt_int) c.i_int.resize(needed, 0);
+    for(auto& c : tmp_alt->alt_float) c.i_float.resize(needed, 0.0f);
+    for(auto& c : tmp_alt->alt_string) c.i_string.resize(needed, "\0");
+}
+
+static void ensure_alt_format_capacity(alt_format_df* tmp_alt_format, int needed){
+    if(needed <= 0 || static_cast<int>(tmp_alt_format->var_id.size()) >= needed) return;
+    tmp_alt_format->var_id.resize(needed, 0);
+    tmp_alt_format->alt_id.resize(needed, (char)0);
+    tmp_alt_format->samp_id.resize(needed, static_cast<unsigned short>(0));
+    for(auto& c : tmp_alt_format->samp_int) c.i_int.resize(needed, 0);
+    for(auto& c : tmp_alt_format->samp_float) c.i_float.resize(needed, 0.0f);
+    for(auto& c : tmp_alt_format->samp_string) c.i_string.resize(needed, "\0");
+    if(!tmp_alt_format->sample_GT.GT.empty()) tmp_alt_format->sample_GT.GT.resize(needed, (char)0);
+}
+
 /**
     * @brief Parses a VCF line and populates variant columns data.
     *
@@ -1566,6 +1589,7 @@ void vcf_parsed::get_vcf_line_in_var_columns(char *line, long start, long end, l
             iter++;
             boost::split(tmp_split, tmp, boost::is_any_of(","));
             local_alt = tmp_split.size();
+            ensure_alt_capacity(tmp_alt, (*tmp_num_alt) + local_alt);
             for(int y = 0; y<local_alt; y++){
                 (*tmp_alt).alt[(*tmp_num_alt)] = tmp_split[y];
                 (*tmp_alt).alt_id[(*tmp_num_alt)] = (char)y;
@@ -1781,6 +1805,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
             iter++;
             boost::split(tmp_split, tmp, boost::is_any_of(","));
             local_alt = tmp_split.size();
+            ensure_alt_capacity(tmp_alt, (*tmp_num_alt) + local_alt);
             for(int y = 0; y<local_alt; y++){
                 (*tmp_alt).alt[(*tmp_num_alt) + y] = tmp_split[y];
                 (*tmp_alt).alt_id[(*tmp_num_alt) + y] = (char)y;
@@ -1940,6 +1965,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                             if(!((*sample).sample_GT.size() >= 1)){
                                 boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                 local_alt = tmp_sub.size();
+                                ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
                                 for(int y = 0; y<local_alt; y++){
                                     //Fill a tuple for each alternatives
                                     (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = static_cast<unsigned int>(i); // var_number is still being copied back from the device
@@ -1985,6 +2011,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                             //String alternatives
                             boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                             local_alt = tmp_sub.size();
+                            ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
                             int el = 0;
                             while(!find_elem){
                                 //Search the corresponding element
@@ -2006,6 +2033,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                             //Integer alternatives
                             boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                             local_alt = tmp_sub.size();
+                            ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
                             int el = 0;
                             while(!find_elem){
                                 //Search the corresponding element
@@ -2027,6 +2055,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                             //Float alternatives
                             boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                             local_alt = tmp_sub.size();
+                            ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
                             int el = 0;
                             while(!find_elem){ 
                                 //Search the corresponding element
