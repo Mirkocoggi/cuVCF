@@ -629,7 +629,7 @@ void vcf_parsed::create_sample_vectors(int num_threads){
     }
 
     int numIter = FORMAT.ID.size();
-    if(numIter == 0 ) return;
+    if(numIter == 0 && !FORMAT.hasGT) return;
 
     for(int i = 0; i < numIter; i++){
         if(strcmp(&FORMAT.Number[i][0], "A") != 0){
@@ -820,7 +820,7 @@ void vcf_parsed::create_sample_vectors(int num_threads){
     samp_columns.samp_int.resize(FORMAT.ints);
     samp_columns.samp_float.resize(FORMAT.floats);
     samp_columns.samp_string.resize(FORMAT.strings);
-    if(hasDetSamples){
+    if(samplesON){
         samp_columns.var_id.resize((num_lines)*samp_columns.numSample, 0);
         samp_columns.samp_id.resize((num_lines)*samp_columns.numSample, static_cast<unsigned short>(0));
     }    
