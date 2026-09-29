@@ -27,6 +27,9 @@
 #include <map>
 #include <vector>
 
+/// Fixed slot size (bytes, including the terminator) of each field name in the device name tables.
+#define MAX_NAME_SIZE 32
+
 using namespace std;
 
 /**
@@ -69,6 +72,11 @@ using namespace std;
     int numSample;                ///< Number of samples.
     unsigned int numLines;        ///< Total number of VCF lines (variants).
     int numGT;                    ///< Number of genotype entries.
+    int numInfoFloat;             ///< Number of entries in float_name.
+    int numInfoFlag;              ///< Number of entries in flag_name.
+    int numInfoInt;               ///< Number of entries in int_name.
+    int numSampFloat;             ///< Number of entries in samp_float_name.
+    int numSampInt;               ///< Number of entries in samp_int_name.
 };
 
 /**

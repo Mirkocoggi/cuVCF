@@ -216,9 +216,9 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
         if (type == INT) {
             // Process INT type
             int el = 0;
-            while (cuda_strncmp(&(params->int_name[el*16]), key, MAX_TOKEN_LEN) != 0 && el < NUM_KEYS_MAP1) ++el;
-            if (el < NUM_KEYS_MAP1) {
-                if(cuda_strncmp(&(params->int_name[el*16]), "TSA", MAX_TOKEN_LEN)==0){
+            while (el < params->numInfoInt && cuda_strncmp(&(params->int_name[el*MAX_NAME_SIZE]), key, MAX_NAME_SIZE) != 0) ++el;
+            if (el < params->numInfoInt) {
+                if(cuda_strncmp(&(params->int_name[el*MAX_NAME_SIZE]), "TSA", MAX_NAME_SIZE)==0){
                     if(!cuda_strncmp(value, "SNV", MAX_TOKEN_LEN)){
                         params->in_int[el*params->numLines+thID] = 0;
                     }else if(!cuda_strncmp(value, "INS", MAX_TOKEN_LEN) || !cuda_strncmp(value, "insertion", MAX_TOKEN_LEN)){
@@ -237,16 +237,16 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
         } else if (type == FLOAT) {
             // Process FLOAT type
             int el = 0;
-            while (cuda_strncmp(&(params->float_name[el*16]), key, MAX_TOKEN_LEN) != 0 && el < NUM_KEYS_MAP1) ++el;
-            if (el < NUM_KEYS_MAP1) {
+            while (el < params->numInfoFloat && cuda_strncmp(&(params->float_name[el*MAX_NAME_SIZE]), key, MAX_NAME_SIZE) != 0) ++el;
+            if (el < params->numInfoFloat) {
                 params->in_float[el*params->numLines+thID] = safeStof(value);
             }
         } else if (type == FLAG) {
             // Process FLAG type
             int el = 0;
-            while (cuda_strncmp(&(params->flag_name[el*16]), key, 16) != 0 && el < NUM_KEYS_MAP1) ++el;
+            while (el < params->numInfoFlag && cuda_strncmp(&(params->flag_name[el*MAX_NAME_SIZE]), key, MAX_NAME_SIZE) != 0) ++el;
             //cuda_strncmp
-            if (el < NUM_KEYS_MAP1) {
+            if (el < params->numInfoFlag) {
                 params->in_flag[el*params->numLines+thID] = 1;
             }
         }
@@ -308,8 +308,8 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
                             params->samp_var_id[thID * params->numSample + samp] = thID;
                             params->samp_id[thID * params->numSample + samp] = samp;
                             int el = 0;                     
-                            while (!find_elem) {
-                                if (cuda_strncmp_custom(&tmp_values[MAX_TOKEN_LEN*j], &(params->samp_int_name[el*16]), MAX_TOKEN_LEN) == 0) {    
+                            while (el < params->numSampInt && !find_elem) {
+                                if (cuda_strncmp_custom(&tmp_values[MAX_TOKEN_LEN*j], &(params->samp_int_name[el*MAX_NAME_SIZE]), MAX_TOKEN_LEN) == 0) {    
                                     //printf("el = %d\n", el);                                
                                     if (params->samp_int_numb[el] == 1) {
                                         params->samp_int[(el*params->numLines)+(thID*params->numSample)+samp] = cuda_atoi(&tmp_split[MAX_TOKEN_LEN*j]);
@@ -329,8 +329,8 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
                             params->samp_var_id[thID * params->numSample + samp] = thID;
                             params->samp_id[thID * params->numSample + samp] = samp;
                             int el = 0;
-                            while (!find_elem) {
-                                if (cuda_strncmp_custom(&tmp_values[MAX_TOKEN_LEN*j], &(params->samp_float_name[el*16]), MAX_TOKEN_LEN) == 0) {
+                            while (el < params->numSampFloat && !find_elem) {
+                                if (cuda_strncmp_custom(&tmp_values[MAX_TOKEN_LEN*j], &(params->samp_float_name[el*MAX_NAME_SIZE]), MAX_TOKEN_LEN) == 0) {
                                     if (params->samp_float_numb[el] == 1) {
                                         params->samp_float[(el*params->numLines)+(thID*params->numSample)+samp] = safeStof(&tmp_split[MAX_TOKEN_LEN*j]);
                                     } else {

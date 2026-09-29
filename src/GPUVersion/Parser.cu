@@ -245,6 +245,15 @@ void vcf_parsed::initialize_map1(const std::map<std::string, int> &my_map){
 }
 
 /**
+    * @brief Copies a field name into a fixed-size MAX_NAME_SIZE device slot (truncated, zero-padded).
+    */
+static void copy_fixed_name(char* dst, const string& name){
+    char buf[MAX_NAME_SIZE] = {0};
+    strncpy(buf, name.c_str(), MAX_NAME_SIZE - 1);
+    cudaMemcpy(dst, buf, MAX_NAME_SIZE, cudaMemcpyHostToDevice);
+}
+
+/**
     * @brief Allocates device memory for VCF parsing data.
     *
     * Allocates memory on the GPU for variant numbers, positions, quality scores,
@@ -257,28 +266,26 @@ void vcf_parsed::device_allocation(){
 
     int tmp = var_columns.in_float.size();
 
-    const int max_name_size = 16;
-
     cudaMalloc(&(d_VC_in_float->i_float), tmp * (num_lines) * sizeof(__half));
-    cudaMalloc(&(d_VC_in_float->name), tmp * sizeof(char) * max_name_size); 
+    cudaMalloc(&(d_VC_in_float->name), tmp * sizeof(char) * MAX_NAME_SIZE); 
 
     for (int i = 0; i < tmp; i++) {
-        cudaMemcpy(d_VC_in_float->name+i*max_name_size, var_columns.in_float[i].name.c_str(), var_columns.in_float[i].name.size() + 1, cudaMemcpyHostToDevice);
+        copy_fixed_name(d_VC_in_float->name + i*MAX_NAME_SIZE, var_columns.in_float[i].name);
     }
 
     tmp = var_columns.in_flag.size();
     cudaMalloc(&(d_VC_in_flag->i_flag), tmp * (num_lines) * sizeof(bool));
-    cudaMalloc(&(d_VC_in_flag->name), tmp * sizeof(char) * max_name_size);
+    cudaMalloc(&(d_VC_in_flag->name), tmp * sizeof(char) * MAX_NAME_SIZE);
 
     for (int i = 0; i < tmp; i++) {
-        cudaMemcpy(d_VC_in_flag->name+i*max_name_size, var_columns.in_flag[i].name.c_str(), var_columns.in_flag[i].name.size() + 1, cudaMemcpyHostToDevice);
+        copy_fixed_name(d_VC_in_flag->name + i*MAX_NAME_SIZE, var_columns.in_flag[i].name);
     }
 
     tmp = var_columns.in_int.size();
     cudaMalloc(&(d_VC_in_int->i_int), tmp * (num_lines) * sizeof(int));
-    cudaMalloc(&(d_VC_in_int->name), tmp * sizeof(char) * max_name_size);
+    cudaMalloc(&(d_VC_in_int->name), tmp * sizeof(char) * MAX_NAME_SIZE);
     for (int i = 0; i < tmp; i++) {
-        cudaMemcpy(d_VC_in_int->name+i*max_name_size, var_columns.in_int[i].name.c_str(), var_columns.in_int[i].name.size() + 1, cudaMemcpyHostToDevice);
+        copy_fixed_name(d_VC_in_int->name + i*MAX_NAME_SIZE, var_columns.in_int[i].name);
     }
 
     initialize_map1(var_columns.info_map1);
@@ -297,33 +304,33 @@ void vcf_parsed::device_allocation(){
         // Allocate and initialize samp_float
         tmp = samp_columns.samp_float.size();
         cudaMalloc(&(d_SC_samp_float->i_float), tmp * (num_lines * samp_columns.numSample) * sizeof(__half));
-        cudaMalloc(&(d_SC_samp_float->name), tmp * sizeof(char) * max_name_size);
+        cudaMalloc(&(d_SC_samp_float->name), tmp * sizeof(char) * MAX_NAME_SIZE);
         cudaMalloc(&(d_SC_samp_float->numb), tmp * sizeof(int));
 
         for (int i = 0; i < tmp; i++) {
-            cudaMemcpy(d_SC_samp_float->name+i*max_name_size, samp_columns.samp_float[i].name.c_str(), samp_columns.samp_float[i].name.size() + 1, cudaMemcpyHostToDevice);
+            copy_fixed_name(d_SC_samp_float->name + i*MAX_NAME_SIZE, samp_columns.samp_float[i].name);
             cudaMemcpy(d_SC_samp_float->numb+i, &(samp_columns.samp_float[i].numb), sizeof(int), cudaMemcpyHostToDevice);
         }
 
         // Allocate and initialize samp_flag
         tmp = samp_columns.samp_flag.size();
         cudaMalloc(&(d_SC_samp_flag->i_flag), tmp * (num_lines * samp_columns.numSample) * sizeof(bool));
-        cudaMalloc(&(d_SC_samp_flag->name), tmp * sizeof(char) * max_name_size);
+        cudaMalloc(&(d_SC_samp_flag->name), tmp * sizeof(char) * MAX_NAME_SIZE);
         cudaMalloc(&(d_SC_samp_flag->numb), tmp * sizeof(int));
 
         for (int i = 0; i < tmp; i++) {
-            cudaMemcpy(d_SC_samp_flag->name+i*max_name_size, samp_columns.samp_flag[i].name.c_str(), samp_columns.samp_flag[i].name.size() + 1, cudaMemcpyHostToDevice);
+            copy_fixed_name(d_SC_samp_flag->name + i*MAX_NAME_SIZE, samp_columns.samp_flag[i].name);
             cudaMemcpy(d_SC_samp_flag->numb+i, &(samp_columns.samp_flag[i].numb), sizeof(int), cudaMemcpyHostToDevice);
         }
 
         // Allocate and initialize samp_int
         tmp = samp_columns.samp_int.size();
         cudaMalloc(&(d_SC_samp_int->i_int), tmp * (num_lines * samp_columns.numSample) * sizeof(int));
-        cudaMalloc(&(d_SC_samp_int->name), tmp * sizeof(char) * max_name_size);
+        cudaMalloc(&(d_SC_samp_int->name), tmp * sizeof(char) * MAX_NAME_SIZE);
         cudaMalloc(&(d_SC_samp_int->numb), tmp * sizeof(int));
 
         for (int i = 0; i < tmp; i++) {
-            cudaMemcpy(d_SC_samp_int->name+i*max_name_size, samp_columns.samp_int[i].name.c_str(), samp_columns.samp_int[i].name.size() + 1, cudaMemcpyHostToDevice);
+            copy_fixed_name(d_SC_samp_int->name + i*MAX_NAME_SIZE, samp_columns.samp_int[i].name);
             cudaMemcpy(d_SC_samp_int->numb+i, &(samp_columns.samp_int[i].numb), sizeof(int), cudaMemcpyHostToDevice);
         }
 
@@ -1057,6 +1064,9 @@ void vcf_parsed::populate_runner(int numb_cores){
     h_params.float_name = d_VC_in_float->name;
     h_params.flag_name = d_VC_in_flag->name;
     h_params.int_name = d_VC_in_int->name;
+    h_params.numInfoFloat = var_columns.in_float.size();
+    h_params.numInfoFlag = var_columns.in_flag.size();
+    h_params.numInfoInt = var_columns.in_int.size();
     h_params.new_lines_index = d_new_lines_index;
     h_params.numLines = num_lines;
 
@@ -1070,6 +1080,8 @@ void vcf_parsed::populate_runner(int numb_cores){
         h_params.samp_float_name = d_SC_samp_float->name;
         h_params.samp_flag_name = d_SC_samp_flag->name;
         h_params.samp_int_name = d_SC_samp_int->name;
+        h_params.numSampFloat = samp_columns.samp_float.size();
+        h_params.numSampInt = samp_columns.samp_int.size();
         h_params.samp_float_numb = d_SC_samp_float->numb;
         h_params.samp_flag_numb = d_SC_samp_flag->numb;
         h_params.samp_int_numb = d_SC_samp_int->numb;
