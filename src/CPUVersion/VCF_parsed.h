@@ -478,8 +478,8 @@ public:
                     samp_columns.samp_flag.push_back(samp_flag_tmp);
                     samp_columns.samp_flag.back().i_flag.resize((num_lines-1)*samp_columns.numSample, 0);
                     samp_columns.samp_flag.back().numb = std::stoi(FORMAT.Number[i]);
-                    info_map[FORMAT.ID[i]] = 11;
-                    var_columns.info_map1[FORMAT.ID[i]] = 11;
+                    info_map[FORMAT.ID[i]] = FLAG_FORMAT;
+                    var_columns.info_map1[FORMAT.ID[i]] = FLAG_FORMAT;
                     FORMAT.flags++;
                 }else{ 
                     //Number > 1

@@ -691,8 +691,8 @@ void vcf_parsed::create_sample_vectors(int num_threads){
                 samp_columns.samp_flag.push_back(samp_flag_tmp);
                 samp_columns.samp_flag.back().i_flag.resize((num_lines)*samp_columns.numSample, 0);
                 samp_columns.samp_flag.back().numb = std::stoi(FORMAT.Number[i]);
-                info_map[FORMAT.ID[i]] = 11;
-                var_columns.info_map1[FORMAT.ID[i]] = 11;
+                info_map[FORMAT.ID[i]] = FLAG_FORMAT;
+                var_columns.info_map1[FORMAT.ID[i]] = FLAG_FORMAT;
                 FORMAT.flags++;
             }else if(strcmp(&FORMAT.Number[i][0], ".") == 0){
                 int userNumber = -1;
@@ -740,8 +740,8 @@ void vcf_parsed::create_sample_vectors(int num_threads){
                     samp_columns.samp_flag.push_back(samp_flag_tmp);
                     samp_columns.samp_flag.back().i_flag.resize((num_lines)*samp_columns.numSample, 0);
                     samp_columns.samp_flag.back().numb = userNumber;
-                    info_map[FORMAT.ID[i]] = 11;
-                    var_columns.info_map1[FORMAT.ID[i]] = 11;
+                    info_map[FORMAT.ID[i]] = FLAG_FORMAT;
+                    var_columns.info_map1[FORMAT.ID[i]] = FLAG_FORMAT;
                     FORMAT.flags++;
                 }else { // userNumber>1
                     if(!strcmp(&FORMAT.Type[i][0], "String")){
@@ -2076,6 +2076,9 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                 }
                                 el++;
                             }
+                            find_type = true;
+                        }else{
+                            // Unsupported or undeclared FORMAT field: skip it (the loop never ended otherwise)
                             find_type = true;
                         }
                     }

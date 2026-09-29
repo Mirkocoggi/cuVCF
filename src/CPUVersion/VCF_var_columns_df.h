@@ -47,6 +47,7 @@ const int FLOAT_FORMAT = 10;
 const int STRING_FORMAT_ALT = 11;
 const int INT_FORMAT_ALT = 12;
 const int FLOAT_FORMAT_ALT = 13;
+const int FLAG_FORMAT = 17; // was 11, which collided with STRING_FORMAT_ALT
 
 /**
  * @class var_columns_df
@@ -918,6 +919,9 @@ public:
                                     }
                                     el++;
                                 }
+                                find_type = true;
+                            }else{
+                                // Unsupported or undeclared FORMAT field: skip it (the loop never ended otherwise)
                                 find_type = true;
                             }
                         }

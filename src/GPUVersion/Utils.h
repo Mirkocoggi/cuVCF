@@ -57,6 +57,7 @@ const int STRING_FORMAT_ALT = 11;
 const int INT_FORMAT_ALT = 12;
 /// Constant representing an alternative formatted float type.
 const int FLOAT_FORMAT_ALT = 13;
+const int FLAG_FORMAT = 17; // was 11, which collided with STRING_FORMAT_ALT
 
 // Mappa per PolyPhen
 const std::unordered_map<std::string, char> polyphenCharMap = {
