@@ -18,6 +18,15 @@
 #include <boost/algorithm/string.hpp>
 #include <Imath/half.h>
 
+// Numeric conversions for VCF values: a missing value ('.') or a malformed token yields 0
+// instead of throwing and aborting the whole parse.
+static inline int safe_stoi(const std::string& s){
+    try{ return std::stoi(s); }catch(const std::exception&){ return 0; }
+}
+static inline float safe_stof(const std::string& s){
+    try{ return std::stof(s); }catch(const std::exception&){ return 0.0f; }
+}
+
 /**
  * @brief Constants defining the types of VCF fields
  * 
@@ -218,7 +227,7 @@ public:
                     qual[i] = 0.0f;
                 }else{
                     try{
-                        qual[i] = (half)stof(tmp);
+                        qual[i] = (half)safe_stof(tmp);
                     }catch (const std::exception& e){
                         qual[i] = 0;
                     }
@@ -268,7 +277,7 @@ public:
                                 int el=0;
                                 while(!find_info_elem){
                                     if(in_int[el].name == tmp_elems[0]){
-                                        in_int[el].i_int[i] = stoi(tmp_elems[1]);
+                                        in_int[el].i_int[i] = safe_stoi(tmp_elems[1]);
                                         find_info_elem = true;
                                     }
                                     el++; 
@@ -280,7 +289,7 @@ public:
                                 while(!find_info_elem){
                                     if(in_float[el].name == tmp_elems[0]){
                                         try{
-                                            in_float[el].i_float[i] = (half)stof(tmp_elems[1]);
+                                            in_float[el].i_float[i] = (half)safe_stof(tmp_elems[1]);
                                         }catch (const std::exception& e){
                                             in_float[el].i_float[i] = 0;
                                         }
@@ -307,7 +316,7 @@ public:
                                     if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                         for(int y = 0; y<local_alt; y++){
-                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = stoi(tmp_split[y]);
+                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = safe_stoi(tmp_split[y]);
                                         }
                                         find_info_elem = true;
                                     }
@@ -323,7 +332,7 @@ public:
                                         
                                         for(int y = 0; y<local_alt; y++){
                                             try{
-                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = (half)stof(tmp_split[y]);
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = (half)safe_stof(tmp_split[y]);
                                             }catch (const std::exception& e){
                                                 (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
                                             }
@@ -500,7 +509,7 @@ public:
                     qual[i] = (half)0.0f;
                 }else{
                     try{
-                        qual[i] = (half)stof(tmp);
+                        qual[i] = (half)safe_stof(tmp);
                     }catch (const std::exception& e){
                         qual[i] = 0;
                     }
@@ -550,7 +559,7 @@ public:
                                 int el=0;
                                 while(!find_info_elem){
                                     if(in_int[el].name == tmp_elems[0]){
-                                        in_int[el].i_int[i] = stoi(tmp_elems[1]);
+                                        in_int[el].i_int[i] = safe_stoi(tmp_elems[1]);
                                         find_info_elem = true;
                                     }
                                     el++; 
@@ -562,7 +571,7 @@ public:
                                 while(!find_info_elem){
                                     if(in_float[el].name == tmp_elems[0]){
                                         try{
-                                            in_float[el].i_float[i] = (half)stof(tmp_elems[1]);
+                                            in_float[el].i_float[i] = (half)safe_stof(tmp_elems[1]);
                                         }catch (const std::exception& e){
                                             in_float[el].i_float[i] = 0;
                                         }
@@ -589,7 +598,7 @@ public:
                                     if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                         for(int y = 0; y<local_alt; y++){
-                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = stoi(tmp_split[y]);
+                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = safe_stoi(tmp_split[y]);
                                         }
                                         find_info_elem = true;
                                     }
@@ -604,7 +613,7 @@ public:
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                         for(int y = 0; y<local_alt; y++){
                                             try{
-                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = (half)stof(tmp_split[y]);
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = (half)safe_stof(tmp_split[y]);
                                             }catch (const std::exception& e){
                                                 (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
                                             }
@@ -745,13 +754,13 @@ public:
                                     if(!(*sample).samp_int[el].name.compare(0, tmp_format_split[j].length(), tmp_format_split[j], 0, tmp_format_split[j].length())){
                                         if((*sample).samp_int[el].numb==1){
                                             //Integer with numb = 1
-                                            (*sample).samp_int[el].i_int[i*(*sample).numSample + samp] = std::stoi(tmp_split[j]);
+                                            (*sample).samp_int[el].i_int[i*(*sample).numSample + samp] = safe_stoi(tmp_split[j]);
                                         }else{
                                             //Integer with numb > 1
                                             vector<string> tmp_sub;
                                             boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                             for(int i = 0; i<(*sample).samp_int[el].numb; i++){
-                                                (*sample).samp_int[el+i].i_int[i*(*sample).numSample + samp] = std::stoi(tmp_sub[i]);
+                                                (*sample).samp_int[el+i].i_int[i*(*sample).numSample + samp] = safe_stoi(tmp_sub[i]);
                                             }
                                         }
                                         find_elem = true;
@@ -769,7 +778,7 @@ public:
                                         if((*sample).samp_float[el].numb==1){
                                             //Float with numb = 1
                                             try{ //Check if format is 10E-40 to crop to 0
-                                                (*sample).samp_float[el].i_float[i*(*sample).numSample + samp] = (half)std::stof(tmp_split[j]);
+                                                (*sample).samp_float[el].i_float[i*(*sample).numSample + samp] = (half)safe_stof(tmp_split[j]);
                                             }catch (const std::exception& e){
                                                 (*sample).samp_float[el].i_float[i*(*sample).numSample + samp] = 0;
                                             }
@@ -779,7 +788,7 @@ public:
                                             boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                             for(int i = 0; i<(*sample).samp_float[el].numb; i++){
                                                 try{ //Check if format is 10E-40 to crop to 0
-                                                    (*sample).samp_float[el+i].i_float[i*(*sample).numSample + samp] = (half)std::stof(tmp_sub[i]);
+                                                    (*sample).samp_float[el+i].i_float[i*(*sample).numSample + samp] = (half)safe_stof(tmp_sub[i]);
                                                 }catch (const std::exception& e){
                                                     (*sample).samp_float[el+i].i_float[i*(*sample).numSample + samp] = 0;
                                                 }
@@ -824,7 +833,7 @@ public:
                                             (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_number[i];
                                             (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
                                             (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
-                                            (*tmp_alt_format).samp_int[el].i_int[(*tmp_num_alt_format) + y] = std::stoi(tmp_sub[y]);
+                                            (*tmp_alt_format).samp_int[el].i_int[(*tmp_num_alt_format) + y] = safe_stoi(tmp_sub[y]);
                                         }
                                         find_elem = true;
                                         (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
@@ -846,7 +855,7 @@ public:
                                             (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
                                             (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
                                             try{
-                                                (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = (half)std::stof(tmp_sub[y]);
+                                                (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = (half)safe_stof(tmp_sub[y]);
                                             }catch (const std::exception& e){
                                                 (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = 0;
                                             }
