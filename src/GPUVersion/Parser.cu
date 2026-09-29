@@ -412,14 +412,19 @@ void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
         }
     }
 
+    // Trailing newlines were counted above but are dropped here: keep the count in sync
+    long trimmed_newlines = 0;
     while(filestring[variants_size-1]=='\n'){
         variants_size--;
+        trimmed_newlines++;
     }
 
     filestring[variants_size] = '\n';
     variants_size++;
     before = chrono::system_clock::now();
-    num_lines = tmp_num_lines[0];
+    // tmp_num_lines[0] starts at 1 for the terminator written above (the last byte is never read),
+    // so num_lines is the number of '\n' in filestring, i.e. the number of variant records.
+    num_lines = tmp_num_lines[0] - trimmed_newlines;
     for(int i=1; i<num_threads; i++){
         num_lines= num_lines + tmp_num_lines[i];
     }
@@ -875,14 +880,14 @@ void vcf_parsed::create_info_vectors(int num_threads){
             if(strcmp(&INFO.Type[i][0], "Integer")==0){
                 INFO.ints++;
                 info_int_tmp.name = INFO.ID[i];
-                info_int_tmp.i_int.resize(num_lines-1, 0);
+                info_int_tmp.i_int.resize(num_lines, 0);
                 var_columns.in_int.push_back(info_int_tmp);
                 info_map[INFO.ID[i]] = 1;
                 var_columns.info_map1[INFO.ID[i]] = 1;
             } else if(strcmp(&INFO.Type[i][0], "Float")==0){
                 INFO.floats++;
                 info_float_tmp.name = INFO.ID[i];
-                info_float_tmp.i_float.resize(num_lines-1, 0);
+                info_float_tmp.i_float.resize(num_lines, 0);
                 var_columns.in_float.push_back(info_float_tmp);
                 info_map[INFO.ID[i]] = 2;
                 var_columns.info_map1[INFO.ID[i]] = 2;
@@ -890,14 +895,14 @@ void vcf_parsed::create_info_vectors(int num_threads){
                 if(strcmp(INFO.ID[i].c_str(), "TSA")==0){
                     INFO.ints++;
                     info_int_tmp.name = INFO.ID[i];
-                    info_int_tmp.i_int.resize(num_lines-1, 0);
+                    info_int_tmp.i_int.resize(num_lines, 0);
                     var_columns.in_int.push_back(info_int_tmp);
                     info_map[INFO.ID[i]] = 1;
                     var_columns.info_map1[INFO.ID[i]] = 1;
                 }else{ 
                     INFO.strings++;
                     info_string_tmp.name = INFO.ID[i];
-                    info_string_tmp.i_string.resize(num_lines-1, "\0");
+                    info_string_tmp.i_string.resize(num_lines, "\0");
                     var_columns.in_string.push_back(info_string_tmp);
                     info_map[INFO.ID[i]] = 3;
                     var_columns.info_map1[INFO.ID[i]] = 3;
@@ -905,7 +910,7 @@ void vcf_parsed::create_info_vectors(int num_threads){
             } else if(strcmp(&INFO.Type[i][0], "Flag")==0){
                 INFO.flags++;
                 info_flag_tmp.name = INFO.ID[i];
-                info_flag_tmp.i_flag.resize(num_lines-1, 0);
+                info_flag_tmp.i_flag.resize(num_lines, 0);
                 var_columns.in_flag.push_back(info_flag_tmp);
                 info_map[INFO.ID[i]] = 0;
                 var_columns.info_map1[INFO.ID[i]] = 0;
@@ -998,13 +1003,13 @@ void vcf_parsed::print_info(){
     * Resizes the vectors in the var_columns_df structure based on the number of variants.
     */
 void vcf_parsed::reserve_var_columns(){
-    var_columns.var_number.resize(num_lines-1);
-    var_columns.chrom.resize(num_lines-1);
-    var_columns.id.resize(num_lines-1);
-    var_columns.pos.resize(num_lines-1);
-    var_columns.ref.resize(num_lines-1); 
-    var_columns.qual.resize(num_lines-1);
-    var_columns.filter.resize(num_lines-1);
+    var_columns.var_number.resize(num_lines);
+    var_columns.chrom.resize(num_lines);
+    var_columns.id.resize(num_lines);
+    var_columns.pos.resize(num_lines);
+    var_columns.ref.resize(num_lines); 
+    var_columns.qual.resize(num_lines);
+    var_columns.filter.resize(num_lines);
 }
 
 /**
@@ -1157,7 +1162,7 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
 
     std::thread worker_thread(&vcf_parsed::populate_runner, this, numb_cores);
 
-    long batch_size = (num_lines-2+num_threads)/num_threads;
+    long batch_size = (num_lines-1+num_threads)/num_threads;
     
     std::vector<alt_columns_df> tmp_alt(num_threads);
     std::vector<int> tmp_num_alt(num_threads);
@@ -1194,7 +1199,7 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
             }
 
             // For each line in the batch
-            for(long i=start; i<end && i<num_lines-1; i++){ 
+            for(long i=start; i<end && i<num_lines; i++){ 
                 get_vcf_line_in_var_columns_format(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]), &samp_columns, &FORMAT, &(tmp_num_alt_format[th_ID]), &(tmp_alt_format[th_ID]));
             }
             tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
@@ -1233,7 +1238,7 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
             tmp_alt_format[th_ID].numSample = tmp_num_alt_format[th_ID]; 
         }else{
             // There aren't samples in the dataset
-            for(long i=start; i<end && i<num_lines-1; i++){ 
+            for(long i=start; i<end && i<num_lines; i++){ 
                 get_vcf_line_in_var_columns(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]));
             }                      
             tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
