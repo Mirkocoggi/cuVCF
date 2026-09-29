@@ -26,3 +26,4 @@ bcfbcftools-1.22.tar.bz2
 bcfbcftools-1.22/
 docs/
 build*/
+.venv/

@@ -21,28 +21,62 @@ Its **hybrid CPU+GPU pipeline** delivers substantial performance speedups over t
 
 ### Tested environment
 
-* **Ubuntu 22.04.5 LTS**
-* **NVIDIA Ada (sm\_89)** class GPU (e.g., L40S). Other GPUs work too: by default the build targets the GPU found on the build machine (see *Notes & Tips*).
+* **Ubuntu 22.04.5 LTS**, **NVIDIA Ada (sm\_89)** class GPU (e.g., L40S)
+* **Ubuntu 24.04.4 LTS**, **NVIDIA L4** (sm\_89), CUDA 13.1, CMake 3.28, GCC 13, Python 3.12
+
+Other GPUs work too: by default the build targets the GPU found on the build machine (see *Notes & Tips*).
 
 ---
 
 ## Quick Start
 
-### 1) Build
+### 1) Install the prerequisites
 
-**Python modules (recommended):**
+On Ubuntu:
 
 ```bash
-git clone https://github.com/<username>/cuVCF.git
+sudo apt install build-essential cmake zlib1g-dev libimath-dev python3-dev python3-venv python3-pybind11
+```
+
+For the GPU backend, also install the [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads) and make sure `nvcc` is on your `PATH`:
+
+```bash
+export PATH=/usr/local/cuda/bin:$PATH   # if nvcc is not found
+nvcc --version
+```
+
+Without CUDA everything still builds, but only the CPU backend.
+
+### 2) Build
+
+#### Option A — Python modules with pip (recommended)
+
+```bash
+git clone https://github.com/Mirkocoggi/cuVCF.git
 cd cuVCF
+python3 -m venv .venv
+source .venv/bin/activate
 pip install .
 ```
 
-This builds and installs `CPUParser` and, if CUDA is available, `GPUParser`. To force a CPU-only build: `pip install . -C cmake.define.CUVCF_CUDA=OFF`.
+This builds and installs `CPUParser` and, if CUDA is available, `GPUParser` into the virtual environment. The first build compiles the CUDA code and takes a few minutes.
 
-**Everything, with CMake directly** (CLIs + Python modules in `build/`):
+* The virtual environment is required on recent Ubuntu/Debian releases, which refuse `pip install` into the system Python (`externally-managed-environment`).
+* CPU-only build: `pip install . -C cmake.define.CUVCF_CUDA=OFF`
+* Build for a specific GPU architecture: `pip install . -C cmake.define.CMAKE_CUDA_ARCHITECTURES=80`
+
+Check the installation:
 
 ```bash
+python -c "import CPUParser; print('CPU backend OK')"
+python -c "import GPUParser; print('GPU backend OK')"   # CUDA builds only
+```
+
+#### Option B — CLIs and Python modules with CMake
+
+```bash
+git clone https://github.com/Mirkocoggi/cuVCF.git
+cd cuVCF
 cmake -S . -B build
 cmake --build build -j
 ```
@@ -65,29 +99,46 @@ Build options (`-D<option>=<value>` when configuring):
 
 Debug build example: `cmake -S . -B build-dbg -DCMAKE_BUILD_TYPE=Debug -DCUVCF_SANITIZE=ON && cmake --build build-dbg -j`
 
-### 2) Minimal CLI usage
+### 3) Run from the command line
 
-The CLI executable is mainly intended for **debugging**.  
-It parses a VCF file and converts it into the internal **columnar representation**, but it does **not** provide a complete analysis workflow.  
+The CLI executables are mainly intended for **debugging**.  
+They parse a VCF file and convert it into the internal **columnar representation**, but they do **not** provide a complete analysis workflow.  
 If you want to use the CLI instead of the Python interface, you’ll need to implement your own `main` function to process the parser’s output.
 
-```bash
-# After `cmake --build build`:
-./build/VCFparser_gpu -v <path/to/input.vcf> -t <num_threads>
-````
+After an Option B build:
 
-For full data access and analysis, the recommended entry point is the **Python bindings** (`CPUParser.so` / `GPUParser.so`).
+```bash
+./build/VCFparser_gpu -v data/tiny.vcf -t 4
+```
+
+* `-v <file>` — input VCF (`.vcf`, or `.vcf.gz`: a gzipped input is decompressed **in place**, replacing the `.gz` file)
+* `-t <n>` — number of CPU threads
+* `VCFparser_cpu` takes the same options.
+
+For full data access and analysis, the recommended entry point is the **Python bindings** (`CPUParser` / `GPUParser`).
 
 ---
 
-
-### 3) Minimal Python usage
+### 4) Use from Python
 
 The project provides two Python extension modules built with pybind11:
 - `GPUParser` → GPU backend (CUDA required)
 - `CPUParser` → CPU backend
 
-After `pip install .`, import one backend (with a plain CMake build, add `build/` to `PYTHONPATH` instead):
+After Option A, activate the virtual environment and run your script as usual:
+
+```bash
+source .venv/bin/activate
+python my_script.py
+```
+
+After Option B, point Python at the build directory instead:
+
+```bash
+PYTHONPATH=build python3 my_script.py
+```
+
+In your script, import one backend:
 
 ```python
 # Prefer GPU if available
@@ -95,7 +146,7 @@ try:
     import GPUParser as cuvcf
 except ImportError:
     import CPUParser as cuvcf
-````
+```
 
 ---
 
