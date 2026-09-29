@@ -33,6 +33,29 @@
 #include <thread>
 #include <functional>
 #include <future>
+#include <string_view>
+
+/**
+ * @brief Returns the text between '<' and the last '>' of a ##INFO/##FORMAT header line.
+ */
+static inline std::string_view header_attr_body(std::string_view line) {
+    const auto l = line.find('<');
+    const auto r = line.rfind('>');
+    if (l == std::string_view::npos || r == std::string_view::npos || r <= l) return {};
+    return line.substr(l + 1, r - l - 1);
+}
+
+/**
+ * @brief Returns the value of attribute keyEq (e.g. "ID=") up to the next comma, whatever its position.
+ */
+static inline std::string header_attr(std::string_view body, std::string_view keyEq) {
+    const auto pos0 = body.find(keyEq);
+    if (pos0 == std::string_view::npos) return {};
+    const auto pos = pos0 + keyEq.size();
+    auto end = body.find(',', pos);
+    if (end == std::string_view::npos) end = body.size();
+    return std::string(body.substr(pos, end - pos));
+}
 using Imath::half;
 
 /**
@@ -249,9 +272,6 @@ public:
     
     void get_and_parse_header(ifstream *file){
         string line;
-        vector<string> line_el;     //all the characteristics together
-        vector<string> line_el1;    //each characteristic
-        vector<string> line_el2;    //keys and values
         // removing the header and storing it in vcf.header
         
         while (getline(*file, line) && line[0]=='#' && line[1]=='#'){
@@ -261,35 +281,29 @@ public:
             bool Format = (line[2]=='F' && line[3]=='O');
             
             if(Info || Format){
-                boost::split(line_el, line, boost::is_any_of("><"));
-                boost::split(line_el1, line_el[1], boost::is_any_of(","));
-                for(int i=0; i<3; i++){
-                    boost::split(line_el2, line_el1[i], boost::is_any_of("="));
-                    if(Info){
-                        if(i==0) INFO.ID.push_back(line_el2[1]);
-                        if(i==1) INFO.Number.push_back(line_el2[1]);
-                        if(i==1 && line_el2[1] == "A") INFO.alt_values++;
-                        if(i==2) INFO.Type.push_back(line_el2[1]);
+                // Attributes are looked up by name: the VCF spec does not fix their order.
+                const std::string_view body = header_attr_body(line);
+                const string id = header_attr(body, "ID=");
+                const string number = header_attr(body, "Number=");
+                const string type = header_attr(body, "Type=");
+                if(Info){
+                    INFO.ID.push_back(id);
+                    INFO.Number.push_back(number);
+                    if(number == "A") INFO.alt_values++;
+                    INFO.Type.push_back(type);
+                }else if(id == "GT"){
+                    FORMAT.hasGT = true;
+                    FORMAT.numGT = number.empty() ? '1' : number[0];
+                    hasDetSamples = true;
+                }else{
+                    FORMAT.ID.push_back(id);
+                    FORMAT.Number.push_back(number);
+                    if(number == "A"){
+                        FORMAT.alt_values++;
+                    }else{
+                        hasDetSamples = true;
                     }
-                    if(Format){
-                        if(i==0){
-                            if(line_el2[1] == "GT"){
-                                FORMAT.hasGT = true;
-                                boost::split(line_el2, line_el1[1], boost::is_any_of("="));
-                                FORMAT.numGT = line_el2[1][0];
-                                i+=3;
-                            }else{
-                                FORMAT.ID.push_back(line_el2[1]);
-                            }
-                        } 
-                        if(i==1) FORMAT.Number.push_back(line_el2[1]);
-                        if(i==1 && line_el2[1] == "A"){
-                            FORMAT.alt_values++;
-                        }else{
-                            hasDetSamples = true;
-                        }
-                        if(i==2) FORMAT.Type.push_back(line_el2[1]);
-                    }
+                    FORMAT.Type.push_back(type);
                 }
             }
         }
