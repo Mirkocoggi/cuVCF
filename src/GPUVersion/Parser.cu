@@ -332,7 +332,7 @@ void vcf_parsed::device_allocation(){
         
         // Allocate and initialize d_SC_samp_id
         cudaMalloc(&d_SC_samp_id, (num_lines) * samp_columns.numSample * sizeof(unsigned short));
-        cudaMemset(d_SC_samp_id, 0, (num_lines) * sizeof(unsigned short));
+        cudaMemset(d_SC_samp_id, 0, (num_lines) * samp_columns.numSample * sizeof(unsigned short));
 
         // Allocate and initialize samp_float
         tmp = samp_columns.samp_float.size();
