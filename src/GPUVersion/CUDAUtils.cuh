@@ -29,7 +29,7 @@ using namespace std;
 #define MAX_KEY_LENGTH_GT 5
 
 /// Maximum number of tokens when splitting strings.
-#define MAX_TOKENS 4
+#define MAX_TOKENS 16
 
 /// Maximum length for each token after splitting.
 #define MAX_TOKEN_LEN 32
@@ -267,9 +267,9 @@ __device__ int split(const char *str, char delimiter, char* split_array) {
     for (int i = 0; str[i] != '\0'; ++i) {
         if (str[i] == delimiter) {
             split_array[token_count * MAX_TOKEN_LEN + token_idx] = '\0'; // Null-terminate the token
+            if (token_count == MAX_TOKENS - 1) return MAX_TOKENS; // Last slot used: stop before writing past the buffer
             ++token_count;
             token_idx = 0;
-            if (token_count >= MAX_TOKENS) break; // Avoid overflow
         } else {
             if (token_idx < MAX_TOKEN_LEN - 1) {
                 split_array[token_count * MAX_TOKEN_LEN + (token_idx++)] = str[i];

@@ -200,11 +200,12 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
     for (int i = 0; i < num_info_tokens; ++i) {
         char *key_value = &tmp_split[MAX_TOKEN_LEN*i];
         int j = 0;
-        while (key_value[j] != '=' && key_value[j] != '\0') {
+        while (j < (MAX_TOKEN_LEN - 1) && key_value[j] != '=' && key_value[j] != '\0') {
             key[j] = key_value[j];
             ++j;
         }
         key[j] = '\0';
+        while (key_value[j] != '=' && key_value[j] != '\0') ++j;
         if (key_value[j] == '=') {
             cuda_strncpy(value, key_value + j + 1, MAX_TOKEN_LEN);
         } else {
