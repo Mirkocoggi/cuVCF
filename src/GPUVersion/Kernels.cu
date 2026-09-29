@@ -297,7 +297,7 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
                                 int num_gt_tokens = split(&tmp_split[MAX_TOKEN_LEN*j], ',', sub_split);
 
                                 for (int k = 0; k < params->numGT; k++) {
-                                    params->sample_GT[(k*params->numLines)+(thID*params->numSample)+samp] = getValueFromKeyGT(&sub_split[MAX_TOKEN_LEN*k]);
+                                    params->sample_GT[(k * params->numLines * params->numSample) + (thID * params->numSample) + samp] = getValueFromKeyGT(&sub_split[MAX_TOKEN_LEN*k]);
                                 }
                             } else if (params->numGT == 1) {
                                 params->sample_GT[thID * params->numSample + samp] = getValueFromKeyGT(&tmp_split[MAX_TOKEN_LEN*j]);
@@ -313,7 +313,7 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
                                 if (cuda_strncmp_custom(&tmp_values[MAX_TOKEN_LEN*j], &(params->samp_int_name[el*MAX_NAME_SIZE]), MAX_TOKEN_LEN) == 0) {    
                                     //printf("el = %d\n", el);                                
                                     if (params->samp_int_numb[el] == 1) {
-                                        params->samp_int[(el*params->numLines)+(thID*params->numSample)+samp] = cuda_atoi(&tmp_split[MAX_TOKEN_LEN*j]);
+                                        params->samp_int[(el * params->numLines * params->numSample) + (thID * params->numSample) + samp] = cuda_atoi(&tmp_split[MAX_TOKEN_LEN*j]);
                                     } else {
                                         int num_int_tokens = split(&tmp_split[MAX_TOKEN_LEN*j], ',', sub_split);
                                         for (int i = 0; i < params->samp_int_numb[el]; i++) {
@@ -333,11 +333,11 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
                             while (el < params->numSampFloat && !find_elem) {
                                 if (cuda_strncmp_custom(&tmp_values[MAX_TOKEN_LEN*j], &(params->samp_float_name[el*MAX_NAME_SIZE]), MAX_TOKEN_LEN) == 0) {
                                     if (params->samp_float_numb[el] == 1) {
-                                        params->samp_float[(el*params->numLines)+(thID*params->numSample)+samp] = safeStof(&tmp_split[MAX_TOKEN_LEN*j]);
+                                        params->samp_float[(el * params->numLines * params->numSample) + (thID * params->numSample) + samp] = safeStof(&tmp_split[MAX_TOKEN_LEN*j]);
                                     } else {
                                         int num_float_tokens = split(&tmp_split[MAX_TOKEN_LEN*j], ',', sub_split);
                                         for (int i = 0; i < params->samp_float_numb[el]; i++) {
-                                            params->samp_float[((el+i)*params->numLines) + ((thID*params->numSample)+samp)] = safeStof(&sub_split[MAX_TOKEN_LEN*i]);
+                                            params->samp_float[((el + i) * params->numLines * params->numSample) + (thID * params->numSample + samp)] = safeStof(&sub_split[MAX_TOKEN_LEN*i]);
                                         }
                                     }
                                     find_elem = true;
