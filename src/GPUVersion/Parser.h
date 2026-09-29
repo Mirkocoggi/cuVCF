@@ -74,9 +74,9 @@ public:
     /// Number of variant lines (excluding the header).
     long num_lines = 0;
     /// Host-side array storing the starting index of each variant line.
-    unsigned int *new_lines_index;
+    unsigned long long *new_lines_index; // 64-bit: byte offsets exceed 4 GiB on large files
     /// Device-side array storing the starting index of each variant line.
-    unsigned int *d_new_lines_index;
+    unsigned long long *d_new_lines_index;
     /// Flag indicating whether sample data is present.
     bool samplesON = false;
     /// Flag indicating whether detailed sample data is available.

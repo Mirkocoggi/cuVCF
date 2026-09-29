@@ -51,9 +51,9 @@ using namespace std;
  *  2. If newline found, atomically adds index to output
  *  3. Last thread writes sentinel value
  */
-__global__ void cu_find_new_lines_index(const char* input, unsigned int len, unsigned int* output, 
-                unsigned int len_output, unsigned int* global_count){
-    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;  // Indice globale del thread
+__global__ void cu_find_new_lines_index(const char* input, unsigned long long len, unsigned long long* output, 
+                unsigned long long len_output, unsigned int* global_count){
+    unsigned long long idx = (unsigned long long)blockIdx.x * blockDim.x + threadIdx.x;  // Indice globale del thread
 
     if (idx < len && __ldg(&input[idx]) == '\n') { //coaleasced read only
         unsigned int pos = atomicAdd(global_count, 1); //primo spazio libero dove salvare

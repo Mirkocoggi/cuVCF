@@ -478,16 +478,17 @@ void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
         num_lines= num_lines + tmp_num_lines[i];
     }
 
-    new_lines_index = (unsigned int*)malloc(sizeof(unsigned int)*(num_lines+1));
+    new_lines_index = (unsigned long long*)malloc(sizeof(unsigned long long)*(num_lines+1));
     new_lines_index[0] = 0;
     cudaMalloc(&d_filestring, (variants_size + 8)* sizeof(char));
-    cudaMalloc(&d_new_lines_index, (num_lines + 1) * sizeof(unsigned int));
+    cudaMalloc(&d_new_lines_index, (num_lines + 1) * sizeof(unsigned long long));
     cudaMemcpy(d_filestring, filestring, sizeof(char)*variants_size, cudaMemcpyHostToDevice);
     cudaMalloc(&d_count, sizeof(unsigned int));
     cudaMemset(d_count, 0, sizeof(unsigned int));
     
     dim3 threads = 1024;
-    dim3 blocks((variants_size + threads.x - 1) / threads.x);
+    // One thread past the end (idx == len) writes the leading 0 index, so cover len + 1 elements
+    dim3 blocks((variants_size + threads.x) / threads.x);
     cu_find_new_lines_index<<<blocks, threads>>>(
         d_filestring,
         variants_size,
@@ -505,7 +506,7 @@ void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
     cudaDeviceSynchronize();
 
     //ordering with Thrust library
-    thrust::device_ptr<unsigned int> d_new_lines_index_ptr(d_new_lines_index);
+    thrust::device_ptr<unsigned long long> d_new_lines_index_ptr(d_new_lines_index);
     if (!d_new_lines_index_ptr) {
         std::cerr << "Invalid device pointer for d_new_lines_index." << std::endl;
         return;
@@ -519,7 +520,7 @@ void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
 
     cudaDeviceSynchronize();
     
-    cudaMemcpy(new_lines_index, d_new_lines_index, sizeof(unsigned int)*(num_lines+1), cudaMemcpyDeviceToHost);
+    cudaMemcpy(new_lines_index, d_new_lines_index, sizeof(unsigned long long)*(num_lines+1), cudaMemcpyDeviceToHost);
 }
     
 /**

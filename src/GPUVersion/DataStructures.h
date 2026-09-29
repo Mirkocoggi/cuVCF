@@ -56,7 +56,7 @@ using namespace std;
     char* float_name;             ///< Pointer to the float field names.
     char* flag_name;              ///< Pointer to the flag field names.
     char* int_name;               ///< Pointer to the integer field names.
-    unsigned int *new_lines_index;///< Pointer to the array of new-line indices.
+    unsigned long long *new_lines_index;///< Pointer to the array of new-line indices.
     unsigned int *samp_var_id;    ///< Pointer to the array of sample variant IDs.
     unsigned short *samp_id;      ///< Pointer to the array of sample IDs.
     __half *samp_float;           ///< Pointer to the array of sample float values.
