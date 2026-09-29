@@ -317,7 +317,7 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
                                     } else {
                                         int num_int_tokens = split(&tmp_split[MAX_TOKEN_LEN*j], ',', sub_split);
                                         for (int i = 0; i < params->samp_int_numb[el]; i++) {
-                                            params->samp_int[((el + i) * params->numLines * params->numSample) + (thID * params->numSample + samp)]= cuda_atoi(&sub_split[MAX_TOKEN_LEN*i]);
+                                            params->samp_int[((el + i) * params->numLines * params->numSample) + (thID * params->numSample + samp)]= (i < num_int_tokens) ? cuda_atoi(&sub_split[MAX_TOKEN_LEN*i]) : 0; // a '.' value has a single token
                                         }
                                     }
                                     find_elem = true;
@@ -337,7 +337,7 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
                                     } else {
                                         int num_float_tokens = split(&tmp_split[MAX_TOKEN_LEN*j], ',', sub_split);
                                         for (int i = 0; i < params->samp_float_numb[el]; i++) {
-                                            params->samp_float[((el + i) * params->numLines * params->numSample) + (thID * params->numSample + samp)] = safeStof(&sub_split[MAX_TOKEN_LEN*i]);
+                                            params->samp_float[((el + i) * params->numLines * params->numSample) + (thID * params->numSample + samp)] = (i < num_float_tokens) ? safeStof(&sub_split[MAX_TOKEN_LEN*i]) : __float2half(0.0f); // a '.' value has a single token
                                         }
                                     }
                                     find_elem = true;

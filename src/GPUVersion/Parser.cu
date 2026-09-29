@@ -2010,7 +2010,8 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                         vector<string> tmp_sub;
                                         boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                         for(int k = 0; k<(*sample).samp_string[el].numb; k++){
-                                            (*sample).samp_string[el+k].i_string[i*(*sample).numSample + samp] = tmp_sub[k];
+                                            // A '.' value has a single token
+                                            (*sample).samp_string[el+k].i_string[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? tmp_sub[k] : "";
                                         }
                                     }
                                     find_elem = true;

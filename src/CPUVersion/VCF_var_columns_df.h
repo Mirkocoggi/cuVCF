@@ -794,7 +794,8 @@ public:
                                             vector<string> tmp_sub;
                                             boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                             for(int k = 0; k<(*sample).samp_string[el].numb; k++){
-                                                (*sample).samp_string[el+k].i_string[i*(*sample).numSample + samp] = tmp_sub[k];
+                                                // A '.' value has a single token
+                                                (*sample).samp_string[el+k].i_string[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? tmp_sub[k] : "";
                                             }
                                         }
                                         find_elem = true;
@@ -816,8 +817,9 @@ public:
                                             //Integer with numb > 1
                                             vector<string> tmp_sub;
                                             boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
-                                            for(int i = 0; i<(*sample).samp_int[el].numb; i++){
-                                                (*sample).samp_int[el+i].i_int[i*(*sample).numSample + samp] = safe_stoi(tmp_sub[i]);
+                                            // k, not i: i is the record index. A '.' value has a single token.
+                                            for(int k = 0; k<(*sample).samp_int[el].numb; k++){
+                                                (*sample).samp_int[el+k].i_int[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? safe_stoi(tmp_sub[k]) : 0;
                                             }
                                         }
                                         find_elem = true;
@@ -843,12 +845,9 @@ public:
                                             //Float with numb > 1
                                             vector<string> tmp_sub;
                                             boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
-                                            for(int i = 0; i<(*sample).samp_float[el].numb; i++){
-                                                try{ //Check if format is 10E-40 to crop to 0
-                                                    (*sample).samp_float[el+i].i_float[i*(*sample).numSample + samp] = (half)safe_stof(tmp_sub[i]);
-                                                }catch (const std::exception& e){
-                                                    (*sample).samp_float[el+i].i_float[i*(*sample).numSample + samp] = 0;
-                                                }
+                                            // k, not i: i is the record index. A '.' value has a single token.
+                                            for(int k = 0; k<(*sample).samp_float[el].numb; k++){
+                                                (*sample).samp_float[el+k].i_float[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? (half)safe_stof(tmp_sub[k]) : (half)0.0f;
                                             }
                                         }
                                         find_elem = true;
