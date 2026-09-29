@@ -1604,9 +1604,9 @@ void vcf_parsed::get_vcf_line_in_var_columns(char *line, long start, long end, l
             local_alt = tmp_split.size();
             ensure_alt_capacity(tmp_alt, (*tmp_num_alt) + local_alt);
             for(int y = 0; y<local_alt; y++){
-                (*tmp_alt).alt[(*tmp_num_alt)] = tmp_split[y];
-                (*tmp_alt).alt_id[(*tmp_num_alt)] = (char)y;
-                (*tmp_alt).var_id[(*tmp_num_alt)] = i;
+                (*tmp_alt).alt[(*tmp_num_alt) + y] = tmp_split[y];
+                (*tmp_alt).alt_id[(*tmp_num_alt) + y] = (char)y;
+                (*tmp_alt).var_id[(*tmp_num_alt) + y] = i;
             }
         }else{
             tmp += line[start+iter];
