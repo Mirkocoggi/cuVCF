@@ -154,7 +154,7 @@ public:
     long filesize;
     long variants_size;
     long num_lines=0;
-    unsigned int *new_lines_index;
+    unsigned long long *new_lines_index; // 64-bit: byte offsets exceed 4 GiB on large files
     bool samplesON = false;
     bool hasDetSamples = false;
     var_columns_df var_columns;
@@ -394,7 +394,7 @@ public:
         for(int i=1; i<num_threads; i++){
             num_lines= num_lines + tmp_num_lines[i];
         }
-        new_lines_index = (unsigned int*)malloc(sizeof(unsigned int)*(num_lines+1));
+        new_lines_index = (unsigned long long*)malloc(sizeof(unsigned long long)*(num_lines+1));
         new_lines_index[0] = 0;
         #pragma omp parallel
         {
