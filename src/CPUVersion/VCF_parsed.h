@@ -412,7 +412,7 @@ public:
 
         int numIter = FORMAT.ID.size();
 
-        if(numIter == 0 ) return; //if no sample available
+        if(numIter == 0 && !FORMAT.hasGT) return; //if no sample available
 
         if(FORMAT.hasGT && FORMAT.numGT == 'A'){
             alt_sample.initMapGT();
@@ -533,7 +533,7 @@ public:
         samp_columns.samp_float.resize(FORMAT.floats);
         samp_columns.samp_string.resize(FORMAT.strings);
 
-        if(hasDetSamples){
+        if(samplesON){
             samp_columns.var_id.resize((num_lines-1)*samp_columns.numSample, 0);
             samp_columns.samp_id.resize((num_lines-1)*samp_columns.numSample, static_cast<unsigned short>(0));
         }
@@ -682,6 +682,9 @@ public:
     
     void reserve_var_columns(){
         var_columns.var_number.resize(num_lines-1);
+        for(long i = 0; i < num_lines - 1; i++){
+            var_columns.var_number[i] = static_cast<unsigned int>(i);
+        }
         var_columns.chrom.resize(num_lines-1);
         var_columns.id.resize(num_lines-1);
         var_columns.pos.resize(num_lines-1);
