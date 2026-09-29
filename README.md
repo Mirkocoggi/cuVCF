@@ -94,10 +94,16 @@ Build options (`-D<option>=<value>` when configuring):
 |---|---|---|
 | `CUVCF_CUDA` | `AUTO` | `AUTO`: build the GPU backend if nvcc is found; `ON`: require it; `OFF`: CPU only |
 | `CMAKE_CUDA_ARCHITECTURES` | `native` (or `75;80;86;89;90` if no GPU is visible) | GPU architectures to compile for, e.g. `89` |
-| `CMAKE_BUILD_TYPE` | `Release` | `Debug` adds `-g` (and `-G -lineinfo` for CUDA) |
+| `CMAKE_BUILD_TYPE` | `Release` | `Debug` adds `-g` (and `-G -lineinfo` for CUDA) and drops `-O3` (i.e. `-O0`) |
 | `CUVCF_SANITIZE` | `OFF` | build the CPU targets with AddressSanitizer + UBSan |
 
 Debug build example: `cmake -S . -B build-dbg -DCMAKE_BUILD_TYPE=Debug -DCUVCF_SANITIZE=ON && cmake --build build-dbg -j`
+
+With `CUVCF_SANITIZE=ON` the `CPUParser` module is built with ASan, so the ASan runtime must be preloaded to import it:
+
+```bash
+LD_PRELOAD=$(gcc -print-file-name=libasan.so) ASAN_OPTIONS=detect_leaks=0 PYTHONPATH=build-dbg python3 -c "import CPUParser"
+```
 
 ### 3) Run from the command line
 
@@ -237,7 +243,7 @@ cuVCF/
 │   
 │── bcftoolsTest/   # Test scripts for bcftool
 │── cyvcf2Tests/    # Test scripts for cyvcf2
-│── vcflibTest/     # Test scripts for vcflib
+│── vcflibTests/    # Test scripts for vcflib
 │── TestGPU/        # Test scripts for GPU implementation of cuVCF
 │── TestCPU/        # Test scripts for CPU implementation of cuVCF
 │── CMakeLists.txt  # Build definition (CLIs + Python modules)
@@ -252,7 +258,7 @@ cuVCF/
 
 ## Notes & Tips
 
-* To build for a GPU other than the one on the build machine, pass `-DCMAKE_CUDA_ARCHITECTURES=<cc>` (e.g. `80` for A100), or `pip install . -C cmake.define.CMAKE_CUDA_ARCHITECTURES=80`.
+* To build for a GPU other than the one on the build machine, pass `-DCMAKE_CUDA_ARCHITECTURES=<cc>` (e.g. `80` for A100), or `pip install . -C cmake.define.CMAKE_CUDA_ARCHITECTURES=80`. With the default `native` setting the build (including a pip-built wheel) only runs on the build machine's GPU generation.
 * If importing from Python fails, check:
 
   * the package was installed with the same interpreter you run (`python -m pip install .`), or `build/` is on `PYTHONPATH` for plain CMake builds

@@ -20,14 +20,15 @@ execute_process(
   OUTPUT_VARIABLE pybind11_hint OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
 find_package(pybind11 CONFIG REQUIRED HINTS "${pybind11_hint}")
 
+set(COMMON_DEPS ZLIB::ZLIB Imath::Imath OpenMP::OpenMP_CXX)
+
 # ── CPU backend ──────────────────────────────────────────────────
-set(CPU_DEPS ZLIB::ZLIB Imath::Imath OpenMP::OpenMP_CXX)
 
 add_executable(VCFparser_cpu src/CPUVersion/VCFparser_mt_col.cpp)
-target_link_libraries(VCFparser_cpu PRIVATE ${CPU_DEPS})
+target_link_libraries(VCFparser_cpu PRIVATE ${COMMON_DEPS})
 
 pybind11_add_module(CPUParser src/CPUVersion/Bindings.cpp src/CPUVersion/VCFparser_mt_col.cpp)
-target_link_libraries(CPUParser PRIVATE ${CPU_DEPS})
+target_link_libraries(CPUParser PRIVATE ${COMMON_DEPS})
 
 if(CUVCF_SANITIZE)
   foreach(t VCFparser_cpu CPUParser)
@@ -70,19 +71,18 @@ if(CUVCF_WITH_CUDA)
   set(CMAKE_CUDA_STANDARD 17)
   set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-  set(GPU_DEPS ZLIB::ZLIB Imath::Imath OpenMP::OpenMP_CXX)
   set(GPU_FLAGS -Xcompiler=-fopenmp $<$<CONFIG:Debug>:-G -lineinfo>)
 
   # main.cu #includes Parser.cu, which #includes Kernels.cu: do not list them.
   add_executable(VCFparser_gpu src/GPUVersion/main.cu)
   target_compile_options(VCFparser_gpu PRIVATE ${GPU_FLAGS})
-  target_link_libraries(VCFparser_gpu PRIVATE ${GPU_DEPS})
+  target_link_libraries(VCFparser_gpu PRIVATE ${COMMON_DEPS})
 
   # Bindings.cpp includes CUDA headers (cuda_fp16.h), so compile it with nvcc.
   set_source_files_properties(src/GPUVersion/Bindings.cpp PROPERTIES LANGUAGE CUDA)
   pybind11_add_module(GPUParser NO_EXTRAS src/GPUVersion/Bindings.cpp src/GPUVersion/Parser.cu)
   target_compile_options(GPUParser PRIVATE ${GPU_FLAGS} -Xcompiler=-w)
-  target_link_libraries(GPUParser PRIVATE ${GPU_DEPS})
+  target_link_libraries(GPUParser PRIVATE ${COMMON_DEPS})
 
   install(TARGETS GPUParser LIBRARY DESTINATION .)
 endif()
