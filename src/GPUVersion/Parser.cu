@@ -852,8 +852,6 @@ void vcf_parsed::create_sample_vectors(int num_threads){
     alt_sample.samp_int.resize(FORMAT.ints_alt);
     alt_sample.samp_float.resize(FORMAT.floats_alt);
     alt_sample.samp_string.resize(FORMAT.strings_alt);
-    alt_sample.var_id.resize((num_lines)* alt_sample.numSample, 0);
-    alt_sample.samp_id.resize((num_lines)*alt_sample.numSample, static_cast<unsigned short>(0));
 
 }
     
@@ -1944,7 +1942,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                 local_alt = tmp_sub.size();
                                 for(int y = 0; y<local_alt; y++){
                                     //Fill a tuple for each alternatives
-                                    (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_columns.var_number[i];
+                                    (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = static_cast<unsigned int>(i); // var_number is still being copied back from the device
                                     (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
                                     (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
                                     (*tmp_alt_format).sample_GT.GT[(*tmp_num_alt_format) + y] = (*tmp_alt_format).GTMap[tmp_sub[y]];
@@ -1993,7 +1991,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                 if(!(*tmp_alt_format).samp_string[el].name.compare(tmp_format_split[j])){
                                     for(int y = 0; y<local_alt; y++){
                                         //Fill a tuple for each alternatives
-                                        (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_columns.var_number[i];
+                                        (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = static_cast<unsigned int>(i); // var_number is still being copied back from the device
                                         (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
                                         (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
                                         (*tmp_alt_format).samp_string[el].i_string[(*tmp_num_alt_format) + y] = tmp_sub[y];
@@ -2014,7 +2012,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                 if(!(*tmp_alt_format).samp_int[el].name.compare(tmp_format_split[j])){
                                     //Fill a tuple for each alternatives
                                     for(int y = 0; y<local_alt; y++){
-                                        (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_columns.var_number[i];
+                                        (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = static_cast<unsigned int>(i); // var_number is still being copied back from the device
                                         (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
                                         (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
                                         (*tmp_alt_format).samp_int[el].i_int[(*tmp_num_alt_format) + y] = safe_stoi(tmp_sub[y]);
@@ -2035,7 +2033,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                 if(!(*tmp_alt_format).samp_float[el].name.compare(tmp_format_split[j])){
                                     //Fill a tuple for each alternatives
                                     for(int y = 0; y<local_alt; y++){
-                                        (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_columns.var_number[i];
+                                        (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = static_cast<unsigned int>(i); // var_number is still being copied back from the device
                                         (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
                                         (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
                                         try{
