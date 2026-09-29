@@ -373,7 +373,7 @@ public:
                                     if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                         for(int y = 0; y<local_alt; y++){
-                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = safe_stoi(tmp_split[y]);
+                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? safe_stoi(tmp_split[y]) : 0; // "." has a single token
                                         }
                                         find_info_elem = true;
                                     }
@@ -389,7 +389,7 @@ public:
                                         
                                         for(int y = 0; y<local_alt; y++){
                                             try{
-                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = (half)safe_stof(tmp_split[y]);
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? (half)safe_stof(tmp_split[y]) : (half)0.0f; // "." has a single token
                                             }catch (const std::exception& e){
                                                 (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
                                             }
@@ -406,7 +406,7 @@ public:
                                     if((*tmp_alt).alt_string[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                         for(int y = 0; y<local_alt; y++){
-                                            (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = tmp_split[y];
+                                            (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? tmp_split[y] : ""; // "." has a single token
                                         }
                                         find_info_elem = true;
                                     }
@@ -654,7 +654,7 @@ public:
                                     if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                         for(int y = 0; y<local_alt; y++){
-                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = safe_stoi(tmp_split[y]);
+                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? safe_stoi(tmp_split[y]) : 0; // "." has a single token
                                         }
                                         find_info_elem = true;
                                     }
@@ -669,7 +669,7 @@ public:
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                         for(int y = 0; y<local_alt; y++){
                                             try{
-                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = (half)safe_stof(tmp_split[y]);
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? (half)safe_stof(tmp_split[y]) : (half)0.0f; // "." has a single token
                                             }catch (const std::exception& e){
                                                 (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
                                             }
@@ -686,7 +686,7 @@ public:
                                     if((*tmp_alt).alt_string[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                         for(int y = 0; y<local_alt; y++){
-                                            (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = tmp_split[y];
+                                            (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? tmp_split[y] : ""; // "." has a single token
                                         }
                                         find_info_elem = true;
                                     }
