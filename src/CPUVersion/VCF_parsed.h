@@ -705,7 +705,41 @@ public:
         var_columns.filter.resize(num_lines-1);
     }
     
+    /**
+     * @brief Fills var_columns.chrom_map / filter_map single-threaded, before the parallel parse.
+     *
+     * The parsing threads used to insert into these std::map concurrently (a data race that
+     * corrupted the trees). Codes are assigned in order of first appearance in the file.
+     */
+    void prebuild_chrom_filter_maps(){
+        var_columns.chrom_map.clear();
+        var_columns.filter_map.clear();
+
+        auto is_sep = [&](long p){ return filestring[p] == '\t' || filestring[p] == ' ' || filestring[p] == '\n'; };
+        std::string key;
+        for(long i = 0; i < num_lines - 1; i++){
+            long p = new_lines_index[i];
+            const long e = new_lines_index[i + 1];
+            if(filestring[p] == '\n') p++;
+
+            key.clear();
+            while(p < e && !is_sep(p)) key.push_back(filestring[p++]);
+            var_columns.chrom_map.emplace(key, static_cast<char>(var_columns.chrom_map.size()));
+            if(p < e && filestring[p] != '\n') p++;
+
+            for(int field = 2; field <= 6 && p < e; field++){ // skip POS, ID, REF, ALT, QUAL
+                while(p < e && !is_sep(p)) p++;
+                if(p < e && filestring[p] != '\n') p++;
+            }
+
+            key.clear();
+            while(p < e && !is_sep(p)) key.push_back(filestring[p++]);
+            var_columns.filter_map.emplace(key, static_cast<char>(var_columns.filter_map.size()));
+        }
+    }
+
     void populate_var_columns(int num_threads){
+        prebuild_chrom_filter_maps();
         std::size_t totAlt      = 0;
         std::size_t totSampAlt  = 0;
 

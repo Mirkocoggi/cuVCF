@@ -106,6 +106,13 @@ public:
     /** @brief Maps INFO field names to their indices */
     map<string,int> info_map1;
 
+    // Read-only lookup for the parsing threads: operator[] would insert missing keys into the
+    // shared map concurrently (data race). Returns -1 for keys not declared in the header.
+    int info_code(const string& key) const {
+        auto it = info_map1.find(key);
+        return it == info_map1.end() ? -1 : it->second;
+    }
+
     // Per-thread alternative buffers are pre-sized for ~2 ALTs per line; grow them when a chunk needs more.
     void ensure_alt_capacity(alt_columns_df* tmp_alt, int needed)
     {
@@ -183,10 +190,9 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
-                if(chrom_map.find(tmp) == chrom_map.end()){
-                    chrom_map.insert(std::make_pair(tmp, (unsigned char)chrom_map.size()));
-                }
-                chrom[i] = chrom_map[tmp];
+                // chrom_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
+                auto chrom_it = chrom_map.find(tmp);
+                chrom[i] = (chrom_it != chrom_map.end()) ? chrom_it->second : static_cast<char>(0);
             }else{
                 tmp += line[start+iter];
                 iter++;
@@ -290,10 +296,9 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
-                if(filter_map.find(tmp) == filter_map.end()){
-                    filter_map.insert(std::make_pair(tmp, (char)filter_map.size()));
-                }
-                filter[i] = filter_map[tmp];
+                // filter_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
+                auto filter_it = filter_map.find(tmp);
+                filter[i] = (filter_it != filter_map.end()) ? filter_it->second : static_cast<char>(0);
             }else{
                 tmp += line[start+iter];
                 iter++;
@@ -316,7 +321,7 @@ public:
                     bool find_info_elem = false;
                     if(tmp_elems.size()==2){
                         while(!find_info_type){
-                            if(info_map1[tmp_elems[0]]==INT){
+                            if(info_code(tmp_elems[0])==INT){
                                 //Int
                                 bool isAlt = false;
                                 int el=0;
@@ -328,7 +333,7 @@ public:
                                     el++; 
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==FLOAT){
+                            }else if(info_code(tmp_elems[0])==FLOAT){
                                 //Float
                                 int el=0;
                                 while(!find_info_elem){
@@ -343,7 +348,7 @@ public:
                                     el++;
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==STRING){
+                            }else if(info_code(tmp_elems[0])==STRING){
                                 //String
                                 int el=0;
                                 while(!find_info_elem){
@@ -354,7 +359,7 @@ public:
                                     el++;
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==INT_ALT){
+                            }else if(info_code(tmp_elems[0])==INT_ALT){
                                 //Int Alt
                                 int el=0;
                                 while(!find_info_elem){
@@ -368,7 +373,7 @@ public:
                                     el++;
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==FLOAT_ALT){
+                            }else if(info_code(tmp_elems[0])==FLOAT_ALT){
                                 //Float Alt
                                 int el=0;
                                 while(!find_info_elem){
@@ -387,7 +392,7 @@ public:
                                     el++;
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==STRING_ALT){
+                            }else if(info_code(tmp_elems[0])==STRING_ALT){
                                 //String Alt
                                 int el=0;
                                 while(!find_info_elem){
@@ -406,7 +411,7 @@ public:
                             }
                         }
                     }else{
-                        if((info_map1[tmp_elems[0]]==FLAG) && strcmp(&tmp_elems[0][0],"")){
+                        if((info_code(tmp_elems[0])==FLAG) && strcmp(&tmp_elems[0][0],"")){
                             //Flag
                             int el=0;
                             const int nFlags = static_cast<int>(in_flag.size());
@@ -471,10 +476,9 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
-                if(chrom_map.find(tmp) == chrom_map.end()){
-                    chrom_map.insert(std::make_pair(tmp, (char)chrom_map.size()));
-                }
-                chrom[i] = chrom_map[tmp];
+                // chrom_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
+                auto chrom_it = chrom_map.find(tmp);
+                chrom[i] = (chrom_it != chrom_map.end()) ? chrom_it->second : static_cast<char>(0);
             }else{
                 tmp += line[start+iter];
                 iter++;
@@ -573,10 +577,9 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
-                if(filter_map.find(tmp) == filter_map.end()){
-                    filter_map.insert(std::make_pair(tmp, (char)filter_map.size()));
-                }
-                filter[i] = filter_map[tmp];
+                // filter_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
+                auto filter_it = filter_map.find(tmp);
+                filter[i] = (filter_it != filter_map.end()) ? filter_it->second : static_cast<char>(0);
             }else{
                 tmp += line[start+iter];
                 iter++;
@@ -599,7 +602,7 @@ public:
                     bool find_info_elem = false;
                     if(tmp_elems.size()==2){
                         while(!find_info_type){
-                            if(info_map1[tmp_elems[0]]==INT){
+                            if(info_code(tmp_elems[0])==INT){
                                 //Int
                                 bool isAlt = false;
                                 int el=0;
@@ -611,7 +614,7 @@ public:
                                     el++; 
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==FLOAT){
+                            }else if(info_code(tmp_elems[0])==FLOAT){
                                 //Float                  
                                 int el=0;
                                 while(!find_info_elem){
@@ -626,7 +629,7 @@ public:
                                     el++;
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==STRING){
+                            }else if(info_code(tmp_elems[0])==STRING){
                                 //String                                
                                 int el=0;
                                 while(!find_info_elem){
@@ -637,7 +640,7 @@ public:
                                     el++;
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==INT_ALT){
+                            }else if(info_code(tmp_elems[0])==INT_ALT){
                                 //Int Alternatives
                                 int el=0;
                                 while(!find_info_elem){
@@ -651,7 +654,7 @@ public:
                                     el++;
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==FLOAT_ALT){
+                            }else if(info_code(tmp_elems[0])==FLOAT_ALT){
                                 //Float Alt
                                 int el=0;
                                 while(!find_info_elem){
@@ -669,7 +672,7 @@ public:
                                     el++;
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==STRING_ALT){
+                            }else if(info_code(tmp_elems[0])==STRING_ALT){
                                 //String Alt
                                 int el=0;
                                 while(!find_info_elem){
@@ -688,7 +691,7 @@ public:
                             }
                         }
                     }else{
-                        if((info_map1[tmp_elems[0]]==FLAG) && strcmp(&tmp_elems[0][0],"")){
+                        if((info_code(tmp_elems[0])==FLAG) && strcmp(&tmp_elems[0][0],"")){
                             //Flag
                             int el=0;
                             while(!find_info_elem){
@@ -766,7 +769,7 @@ public:
                                     (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
                                 }
                                 find_type = true;
-                            }else if(info_map1[tmp_format_split[j]] == STRING_FORMAT || info_map1[tmp_format_split[j] + std::to_string(1)] == STRING_FORMAT){
+                            }else if(info_code(tmp_format_split[j]) == STRING_FORMAT || info_code(tmp_format_split[j] + std::to_string(1)) == STRING_FORMAT){
                                 //String - deterministic
                                 (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
                                 (*sample).samp_id[i*(*sample).numSample + samp] =  static_cast<unsigned short>(samp);
@@ -792,7 +795,7 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_map1[tmp_format_split[j]] == INT_FORMAT || info_map1[tmp_format_split[j] + std::to_string(1)] == INT_FORMAT){
+                            }else if(info_code(tmp_format_split[j]) == INT_FORMAT || info_code(tmp_format_split[j] + std::to_string(1)) == INT_FORMAT){
                                 //Integer - deterministic
                                 (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
                                 (*sample).samp_id[i*(*sample).numSample + samp] = samp;
@@ -815,7 +818,7 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_map1[tmp_format_split[j]] == FLOAT_FORMAT || info_map1[tmp_format_split[j] + std::to_string(1)] == FLOAT_FORMAT){
+                            }else if(info_code(tmp_format_split[j]) == FLOAT_FORMAT || info_code(tmp_format_split[j] + std::to_string(1)) == FLOAT_FORMAT){
                                 //Float - deterministic
                                 (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
                                 (*sample).samp_id[i*(*sample).numSample + samp] = samp;
@@ -846,7 +849,7 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_map1[tmp_format_split[j]] == STRING_FORMAT_ALT){
+                            }else if(info_code(tmp_format_split[j]) == STRING_FORMAT_ALT){
                                 //String alternatives
                                 boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                 local_alt = tmp_sub.size();
@@ -868,7 +871,7 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_map1[tmp_format_split[j]] == INT_FORMAT_ALT){
+                            }else if(info_code(tmp_format_split[j]) == INT_FORMAT_ALT){
                                 //Integer alternatives
                                 boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                 local_alt = tmp_sub.size();
@@ -890,7 +893,7 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_map1[tmp_format_split[j]] == FLOAT_FORMAT_ALT){
+                            }else if(info_code(tmp_format_split[j]) == FLOAT_FORMAT_ALT){
                                 //Float alternatives
                                 boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                 local_alt = tmp_sub.size();
