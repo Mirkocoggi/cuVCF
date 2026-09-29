@@ -542,8 +542,6 @@ public:
         alt_sample.samp_int.resize(FORMAT.ints_alt);
         alt_sample.samp_float.resize(FORMAT.floats_alt);
         alt_sample.samp_string.resize(FORMAT.strings_alt);
-        alt_sample.var_id.resize((num_lines-1)* alt_sample.numSample, 0);
-        alt_sample.samp_id.resize((num_lines-1)*alt_sample.numSample, static_cast<unsigned short>(0));
 
     }
     
