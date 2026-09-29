@@ -758,10 +758,10 @@ public:
                                     tmp_sub;
                                     boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                     for(int k=0; k < (*sample).sample_GT[0].numb; k++){ 
-                                        (*sample).sample_GT[k].GT[i*(*sample).numSample + samp] = (*sample).GTMap[tmp_sub[k]];
+                                        (*sample).sample_GT[k].GT[i*(*sample).numSample + samp] = (*sample).gt_code(tmp_sub[k]);
                                     }
                                 }else if((*sample).sample_GT.size() == 1){
-                                    (*sample).sample_GT[0].GT[i*(*sample).numSample + samp] = (*sample).GTMap[tmp_split[j]];
+                                    (*sample).sample_GT[0].GT[i*(*sample).numSample + samp] = (*sample).gt_code(tmp_split[j]);
                                 }else{
                                     boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                     local_alt = tmp_sub.size();
@@ -771,7 +771,7 @@ public:
                                         (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_number[i];
                                         (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
                                         (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
-                                        (*tmp_alt_format).sample_GT.GT[(*tmp_num_alt_format) + y] = (*tmp_alt_format).GTMap[tmp_sub[y]];
+                                        (*tmp_alt_format).sample_GT.GT[(*tmp_num_alt_format) + y] = (*tmp_alt_format).gt_code(tmp_sub[y]);
                                     }
                                     (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
                                 }

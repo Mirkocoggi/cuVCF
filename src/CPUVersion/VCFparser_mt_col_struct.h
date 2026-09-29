@@ -217,10 +217,20 @@ class sample_columns_df //aka df3
     vector<samp_Int> samp_int;
     std::map<std::string, unsigned short> sampNames;
     map<string, char> GTMap;
+
+    // Read-only lookup for the parsing threads (operator[] inserted unknown keys into the shared
+    // map concurrently and returned 0 == "0|0"). Unknown genotypes ('.', haploid, ...) -> 255, as on the GPU.
+    char gt_code(const string& gt) const {
+        auto it = GTMap.find(gt);
+        return it == GTMap.end() ? static_cast<char>(255) : it->second;
+    }
     vector<samp_GT> sample_GT;
     int numSample; //numero di sample per riga
 
     void initMapGT(){
+        // Missing genotypes, same codes as the GPU backend and the Python bindings
+        GTMap[".|."] = static_cast<char>(254);
+        GTMap["./."] = static_cast<char>(255);
         int value = 0;
         // First half of the map from 0|0 to 10|10
         for (int i = 0; i < 11; ++i) {
@@ -303,6 +313,13 @@ class alt_format_df //aka df4 in progress
     std::map<std::string, unsigned short> sampNames;
     samp_GT sample_GT;
     map<string, char> GTMap;
+
+    // Read-only lookup for the parsing threads (operator[] inserted unknown keys into the shared
+    // map concurrently and returned 0 == "0|0"). Unknown genotypes ('.', haploid, ...) -> 255, as on the GPU.
+    char gt_code(const string& gt) const {
+        auto it = GTMap.find(gt);
+        return it == GTMap.end() ? static_cast<char>(255) : it->second;
+    }
     int numSample; 
 
     void init(alt_format_df ref, header_element FORMAT, long batch_size){
@@ -349,6 +366,9 @@ class alt_format_df //aka df4 in progress
     }   
 
     void initMapGT(){
+        // Missing genotypes, same codes as the GPU backend and the Python bindings
+        GTMap[".|."] = static_cast<char>(254);
+        GTMap["./."] = static_cast<char>(255);
         int value = 0;
         // First half of the map from 0|0 to 10|10
         for (int i = 0; i < 11; ++i) {
