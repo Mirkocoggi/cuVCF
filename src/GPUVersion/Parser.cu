@@ -27,8 +27,10 @@
 
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>  
-#include <thrust/device_ptr.h> 
-#include <thrust/sort.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <atomic>
+#include <cerrno>
 
 #include <boost/algorithm/string.hpp>
 #include <chrono>
@@ -411,7 +413,6 @@ void vcf_parsed::device_free() {
     CUDA_CHECK_ERROR(cudaFree(d_VC_in_int->name));
     CUDA_CHECK_ERROR(cudaFree(d_filestring));
     CUDA_CHECK_ERROR(cudaFree(d_new_lines_index));
-    CUDA_CHECK_ERROR(cudaFree(d_count));
 
     if (hasDetSamples) {
         CUDA_CHECK_ERROR(cudaFree(d_SC_var_id));
@@ -441,91 +442,68 @@ void vcf_parsed::device_free() {
     * @param num_threads Number of threads to use for parallel processing.
     */
 void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
-    // Allocate memory for the `new_lines_index` array. The size is exaggerated (assuming every character is a new line).
-    // The first element is set to 0, indicating the start of the first line.
-    num_lines++; // Increment the line counter to account for the first line.
-    long tmp_num_lines[num_threads]; // Temporary array to store the number of lines found by each thread.
+    // Parallel pread of the variant body straight into filestring; each chunk counts its newlines,
+    // then writes their positions at its prefix offset. Chunks are in file order and scanned forward,
+    // so new_lines_index comes out sorted: no device kernel, sort or per-chunk buffers are needed.
     variants_size--;
-    auto before = chrono::system_clock::now();
-    long batch_infile = (variants_size - 1 + num_threads)/num_threads; // Number of characters each thread will process  
-            
-    #pragma omp parallel
-    {
-        int thr_ID = omp_get_thread_num();
-        ifstream infile(w_filename); // Open the same file with an ifstream in each thread
-        infile.seekg((header_size + thr_ID*batch_infile), ios::cur); // Move each thread's file pointer to its starting position
-        long start, end;
-        start = thr_ID*batch_infile; // Starting position of the current thread’s batch
-        end = start + batch_infile; // Ending position of the batch for the current thread
-        
-        tmp_num_lines[thr_ID] = 0;
-        if(thr_ID==0){
-            tmp_num_lines[0] = 1;
-        } 
-        for(long i=start; i<end && i<variants_size; i++){
-            filestring[i] = infile.get();
-            if(filestring[i]=='\n'){
-                tmp_num_lines[thr_ID] = tmp_num_lines[thr_ID] + 1;
-            }
+    const long batch_infile = (variants_size - 1 + num_threads)/num_threads; // Number of characters each chunk holds
+    std::vector<size_t> chunk_count(num_threads + 1, 0);
+
+    const int fd = open(w_filename.c_str(), O_RDONLY);
+    if(fd < 0) throw std::runtime_error("cannot open file " + w_filename);
+    posix_fadvise(fd, header_size, variants_size, POSIX_FADV_SEQUENTIAL); // read-ahead hint, best effort
+    std::atomic<int> read_errno{0};
+
+    auto chunk_start = [&](int c){ return std::min(c*batch_infile, variants_size); };
+    // Calls f(position) for every '\n' of chunk c
+    auto for_each_newline = [&](int c, auto&& f){
+        const char* p = filestring + chunk_start(c);
+        const char* const e = filestring + chunk_start(c + 1);
+        while((p = static_cast<const char*>(memchr(p, '\n', e - p)))){ f(static_cast<unsigned long long>(p - filestring)); ++p; }
+    };
+
+    #pragma omp parallel for schedule(static)
+    for(int c = 0; c < num_threads; c++){
+        const long start = chunk_start(c);
+        const size_t want = chunk_start(c + 1) - start;
+        size_t got = 0;
+        while(got < want){
+            const ssize_t n = pread(fd, filestring + start + got, want - got, (off_t)header_size + start + got);
+            if(n > 0){ got += n; continue; }
+            if(n < 0 && errno == EINTR) continue;
+            int none = 0;
+            read_errno.compare_exchange_strong(none, n == 0 ? EIO : errno); // n == 0: the file got shorter
+            break;
         }
+        if(got == want) for_each_newline(c, [&](unsigned long long){ chunk_count[c + 1]++; });
     }
+    close(fd);
+    if(read_errno) throw std::runtime_error("cannot read " + w_filename + ": " + strerror(read_errno));
 
-    // Trailing newlines were counted above but are dropped here: keep the count in sync
+    // Trailing newlines are dropped and a single '\n' terminator closes the last record
     long trimmed_newlines = 0;
-    while(filestring[variants_size-1]=='\n'){
-        variants_size--;
-        trimmed_newlines++;
-    }
+    while(variants_size > 0 && filestring[variants_size-1]=='\n'){ variants_size--; trimmed_newlines++; }
+    const unsigned long long terminator = variants_size;
 
+    // new_lines_index = [0, position of every '\n' before the terminator..., terminator]:
+    // record i spans new_lines_index[i]..new_lines_index[i+1], and num_lines is the number of records.
+    for(int c = 0; c < num_threads; c++) chunk_count[c + 1] += chunk_count[c]; // prefix offsets
+    num_lines = chunk_count[num_threads] - trimmed_newlines + 1;
+    new_lines_index = (unsigned long long*)malloc(sizeof(unsigned long long)*(chunk_count[num_threads] + 2));
+    new_lines_index[0] = 0;
+    #pragma omp parallel for schedule(static)
+    for(int c = 0; c < num_threads; c++){
+        unsigned long long* out = new_lines_index + 1 + chunk_count[c];
+        for_each_newline(c, [&](unsigned long long pos){ *out++ = pos; });
+    }
+    new_lines_index[num_lines] = terminator; // the trimmed trailing newlines were the last entries
     filestring[variants_size] = '\n';
     variants_size++;
-    before = chrono::system_clock::now();
-    // tmp_num_lines[0] starts at 1 for the terminator written above (the last byte is never read),
-    // so num_lines is the number of '\n' in filestring, i.e. the number of variant records.
-    num_lines = tmp_num_lines[0] - trimmed_newlines;
-    for(int i=1; i<num_threads; i++){
-        num_lines= num_lines + tmp_num_lines[i];
-    }
 
-    new_lines_index = (unsigned long long*)malloc(sizeof(unsigned long long)*(num_lines+1));
-    new_lines_index[0] = 0;
     CUDA_CHECK_ERROR(cudaMalloc(&d_filestring, (variants_size + 8)* sizeof(char)));
     CUDA_CHECK_ERROR(cudaMalloc(&d_new_lines_index, (num_lines + 1) * sizeof(unsigned long long)));
     CUDA_CHECK_ERROR(cudaMemcpy(d_filestring, filestring, sizeof(char)*variants_size, cudaMemcpyHostToDevice));
-    CUDA_CHECK_ERROR(cudaMalloc(&d_count, sizeof(unsigned int)));
-    CUDA_CHECK_ERROR(cudaMemset(d_count, 0, sizeof(unsigned int)));
-    
-    dim3 threads = 1024;
-    // One thread past the end (idx == len) writes the leading 0 index, so cover len + 1 elements
-    dim3 blocks((variants_size + threads.x) / threads.x);
-    cu_find_new_lines_index<<<blocks, threads>>>(
-        d_filestring,
-        variants_size,
-        d_new_lines_index,
-        num_lines+1,
-        d_count
-    );
-
-    CUDA_CHECK_ERROR(cudaGetLastError()); // kernel launch
-
-    CUDA_CHECK_ERROR(cudaDeviceSynchronize());
-
-    //ordering with Thrust library
-    thrust::device_ptr<unsigned long long> d_new_lines_index_ptr(d_new_lines_index);
-    if (!d_new_lines_index_ptr) {
-        std::cerr << "Invalid device pointer for d_new_lines_index." << std::endl;
-        return;
-    }
-    try {
-        thrust::sort(d_new_lines_index_ptr, d_new_lines_index_ptr + (num_lines + 1));
-    } catch (thrust::system_error &e) {
-        std::cerr << "Thrust error: " << e.what() << std::endl;
-    }
-
-
-    CUDA_CHECK_ERROR(cudaDeviceSynchronize());
-    
-    CUDA_CHECK_ERROR(cudaMemcpy(new_lines_index, d_new_lines_index, sizeof(unsigned long long)*(num_lines+1), cudaMemcpyDeviceToHost));
+    CUDA_CHECK_ERROR(cudaMemcpy(d_new_lines_index, new_lines_index, sizeof(unsigned long long)*(num_lines+1), cudaMemcpyHostToDevice));
 }
     
 /**

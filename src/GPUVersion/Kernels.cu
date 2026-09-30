@@ -24,8 +24,6 @@
 
 #include <cuda_runtime.h>     
 #include <cuda_fp16.h>  
-#include <thrust/device_ptr.h> 
-#include <thrust/sort.h>
 
 #include <chrono>
 #include <fstream>
@@ -36,34 +34,6 @@
 #include <omp.h> 
 
 using namespace std;
-
-/**
- * @brief CUDA kernel to find newline indices in an input buffer
- *
- * @param input [in] Input character buffer in device memory
- * @param len [in] Length of input buffer
- * @param output [out] Array to store newline indices
- * @param len_output [in] Size of output array
- * @param global_count [out] Atomic counter for output array
- *
- * @details Each thread:
- *  1. Processes one character using coalesced reads
- *  2. If newline found, atomically adds index to output
- *  3. Last thread writes sentinel value
- */
-__global__ void cu_find_new_lines_index(const char* input, unsigned long long len, unsigned long long* output, 
-                unsigned long long len_output, unsigned int* global_count){
-    unsigned long long idx = (unsigned long long)blockIdx.x * blockDim.x + threadIdx.x;  // Indice globale del thread
-
-    if (idx < len && __ldg(&input[idx]) == '\n') { //coaleasced read only
-        unsigned int pos = atomicAdd(global_count, 1); //primo spazio libero dove salvare
-        output[pos] = idx;  // Salva la posizione trovata nell'array finale == idx
-    }else if(idx == len){
-        //invece che mettere a 0 il primo valore dell'array che darebbe problemi per synch 
-        //o per offset lo metto alla fine tanto poi va ordinato
-        output[len_output-1] = 0; 
-    }
-}
 
 /**
  * @brief Resets a temporary string buffer.

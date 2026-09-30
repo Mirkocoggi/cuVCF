@@ -63,8 +63,6 @@ public:
     char *filestring;
     /// Device-side storage for variant data.
     char *d_filestring;
-    /// Device-side counter used for various kernel operations.
-    unsigned int *d_count;
     /// Size of the VCF header (in bytes).
     int header_size = 0;
     /// Total file size (in bytes).
