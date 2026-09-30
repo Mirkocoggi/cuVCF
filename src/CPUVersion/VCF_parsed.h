@@ -626,6 +626,14 @@ public:
                     var_columns.in_float.push_back(info_float_tmp);
                     info_map[INFO.ID[i]] = 2;
                     var_columns.info_map1[INFO.ID[i]] = 2;
+                } else if(strcmp(&INFO.Type[i][0], "String")==0 && INFO.ID[i] == "TSA"){
+                    // TSA values are encoded as Integer codes (see tsa_code), as on the GPU backend
+                    INFO.ints++;
+                    info_int_tmp.name = INFO.ID[i];
+                    info_int_tmp.i_int.resize(num_lines-1, 0);
+                    var_columns.in_int.push_back(info_int_tmp);
+                    info_map[INFO.ID[i]] = 1;
+                    var_columns.info_map1[INFO.ID[i]] = 1;
                 } else if(strcmp(&INFO.Type[i][0], "String")==0){
                     INFO.strings++;
                     info_string_tmp.name = INFO.ID[i];

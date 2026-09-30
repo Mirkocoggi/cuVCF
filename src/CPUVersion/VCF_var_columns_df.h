@@ -33,6 +33,15 @@ static inline float safe_stof(const std::string& s){
     try{ return std::stof(s); }catch(const std::exception&){ return 0.0f; }
 }
 
+// The Ensembl TSA (variant class) String INFO is stored as an Integer code, like the GPU backend.
+static inline int tsa_code(const std::string& v){
+    if(v == "SNV") return 0;
+    if(v == "INS" || v == "insertion") return 1;
+    if(v == "DEL" || v == "deletion") return 2;
+    if(v == "INV" || v == "inversion") return 3;
+    return 4;
+}
+
 /**
  * @brief Constants defining the types of VCF fields
  * 
@@ -282,7 +291,7 @@ public:
                 find1 = true;
                 iter++;
                 if(strcmp(&tmp[0], ".")==0){
-                    qual[i] = 0.0f;
+                    qual[i] = -1.0f; // missing QUAL, as on the GPU backend
                 }else{
                     try{
                         qual[i] = (half)safe_stof(tmp);
@@ -334,7 +343,7 @@ public:
                                 int el=0;
                                 while(!find_info_elem){
                                     if(in_int[el].name == tmp_elems[0]){
-                                        in_int[el].i_int[i] = safe_stoi(tmp_elems[1]);
+                                        in_int[el].i_int[i] = (tmp_elems[0] == "TSA") ? tsa_code(tmp_elems[1]) : safe_stoi(tmp_elems[1]);
                                         find_info_elem = true;
                                     }
                                     el++; 
@@ -563,7 +572,7 @@ public:
                 find1 = true;
                 iter++;
                 if(strcmp(&tmp[0], ".")==0){
-                    qual[i] = (half)0.0f;
+                    qual[i] = (half)-1.0f; // missing QUAL, as on the GPU backend
                 }else{
                     try{
                         qual[i] = (half)safe_stof(tmp);
@@ -615,7 +624,7 @@ public:
                                 int el=0;
                                 while(!find_info_elem){
                                     if(in_int[el].name == tmp_elems[0]){
-                                        in_int[el].i_int[i] = safe_stoi(tmp_elems[1]);
+                                        in_int[el].i_int[i] = (tmp_elems[0] == "TSA") ? tsa_code(tmp_elems[1]) : safe_stoi(tmp_elems[1]);
                                         find_info_elem = true;
                                     }
                                     el++; 
