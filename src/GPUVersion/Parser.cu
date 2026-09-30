@@ -586,7 +586,8 @@ void vcf_parsed::get_and_parse_header(ifstream *file){
                 INFO.Type.push_back(type);
             }else if(id == "GT"){
                 FORMAT.hasGT = true;
-                FORMAT.numGT = number.empty() ? '1' : number[0];
+                // GT is Number=1 by spec: anything but A or a fixed count (e.g. '.') counts as 1
+                FORMAT.numGT = (number == "A" || is_fixed_number(number)) ? number[0] : '1';
                 hasDetSamples = true;
             }else{
                 FORMAT.ID.push_back(id);
