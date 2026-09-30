@@ -386,7 +386,9 @@ void vcf_parsed::device_allocation(){
         tmp = samp_columns.sample_GT.size();
         cudaMalloc(&(d_SC_sample_GT->GT), tmp * (num_lines * samp_columns.numSample) * sizeof(char));
         cudaMalloc(&(d_SC_sample_GT->numb), sizeof(int));
-        cudaMemcpy(d_SC_sample_GT->numb, &(samp_columns.sample_GT[0].numb), sizeof(int), cudaMemcpyHostToDevice);
+        // sample_GT is empty when GT is not declared (or is Number=A, parsed on the host)
+        if(!samp_columns.sample_GT.empty())
+            cudaMemcpy(d_SC_sample_GT->numb, &(samp_columns.sample_GT[0].numb), sizeof(int), cudaMemcpyHostToDevice);
 
     }
 
@@ -424,8 +426,8 @@ void vcf_parsed::device_free() {
         cudaFree(d_SC_samp_int->numb);
         cudaFree(d_SC_sample_GT->GT);
         cudaFree(d_SC_sample_GT->numb);
-        cudaFree(d_params);
     }
+    cudaFree(d_params);
 }
 
 /**
@@ -782,7 +784,7 @@ void vcf_parsed::create_sample_vectors(int num_threads){
     samp_columns.samp_int.resize(FORMAT.ints);
     samp_columns.samp_float.resize(FORMAT.floats);
     samp_columns.samp_string.resize(FORMAT.strings);
-    if(samplesON){
+    if(hasDetSamples){ // only Number=A FORMAT fields: everything goes to DF4, DF3 stays empty
         samp_columns.var_id.resize((num_lines)*samp_columns.numSample, 0);
         samp_columns.samp_id.resize((num_lines)*samp_columns.numSample, static_cast<unsigned short>(0));
     }    
@@ -1030,7 +1032,8 @@ void vcf_parsed::populate_runner(int numb_cores){
     h_params.new_lines_index = d_new_lines_index;
     h_params.numLines = num_lines;
 
-    if(samplesON){            
+    // The sample buffers are allocated only when hasDetSamples (GT or a non Number=A FORMAT field)
+    if(hasDetSamples){            
         
         h_params.samp_var_id = d_SC_var_id;
         h_params.samp_id = d_SC_samp_id;
@@ -1047,7 +1050,7 @@ void vcf_parsed::populate_runner(int numb_cores){
         h_params.samp_int_numb = d_SC_samp_int->numb;
         h_params.sample_GT = d_SC_sample_GT->GT;
         h_params.numSample = samp_columns.numSample;
-        h_params.numGT = (int)(FORMAT.numGT - '0');
+        h_params.numGT = (int)samp_columns.sample_GT.size(); // 0 without a Number=1 GT column
 
         // Allocate d_params and copy h_params to GPU
         allocParamPointers(&d_params, &h_params);
@@ -1089,7 +1092,7 @@ void vcf_parsed::populate_runner(int numb_cores){
         cudaMemcpyAsync(var_columns.in_int[i].i_int.data(), d_VC_in_int->i_int + i * (num_lines), (num_lines) * sizeof(int), cudaMemcpyDeviceToHost, stream2);
     }
 
-    if(samplesON){
+    if(hasDetSamples){
         cudaMemcpyAsync(samp_columns.var_id.data(), d_SC_var_id, (num_lines) * samp_columns.numSample * sizeof(unsigned int), cudaMemcpyDeviceToHost, stream2);
         cudaMemcpyAsync(samp_columns.samp_id.data(), d_SC_samp_id, (num_lines) * samp_columns.numSample * sizeof(unsigned short), cudaMemcpyDeviceToHost, stream2);
 
@@ -1900,7 +1903,8 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                     find_elem = false;
                     while(!find_type){
                         if(!strcmp(tmp_format_split[j].c_str(), "GT")){
-                            if(!((*sample).sample_GT.size() >= 1)){
+                            // GT with Number=A goes to DF4; an undeclared GT has no column and is skipped
+                            if((*sample).sample_GT.empty() && (*FORMAT).hasGT){
                                 boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                 local_alt = tmp_sub.size();
                                 ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);

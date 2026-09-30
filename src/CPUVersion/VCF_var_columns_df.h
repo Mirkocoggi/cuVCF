@@ -750,7 +750,7 @@ public:
                         bool find_type = false;
                         bool find_elem = false;
                         while(!find_type){
-                            if(!strcmp(tmp_format_split[j].c_str(), "GT")){
+                            if(!strcmp(tmp_format_split[j].c_str(), "GT") && (*FORMAT).hasGT){ // an undeclared GT has no column
                                 (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
                                 
                                 (*sample).samp_id[i*(*sample).numSample + samp] =  static_cast<unsigned short>(samp);

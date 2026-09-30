@@ -277,7 +277,7 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
                 find1 = true;
                 iter++;
 
-                if(cuda_strncmp(tmp, "./.", MAX_TMP_LEN)==0 || cuda_strncmp(tmp, ".|.", MAX_TMP_LEN)==0){
+                if(params->numGT > 0 && (cuda_strncmp(tmp, "./.", MAX_TMP_LEN)==0 || cuda_strncmp(tmp, ".|.", MAX_TMP_LEN)==0)){
                     params->samp_var_id[thID * params->numSample + samp] = thID;
                     params->samp_id[thID * params->numSample + samp] = static_cast<unsigned short>(samp);
                     params->sample_GT[thID * params->numSample + samp] = getValueFromKeyGT(tmp);
