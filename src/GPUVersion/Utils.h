@@ -24,6 +24,7 @@
 #define UTILS_H
 
 #include <zlib.h>
+#include <stdexcept>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -121,14 +122,16 @@ void unzip_gz_file(char* vcf_filename) {
         while ((n = gzread(in, buf.data(), buf.size())) > 0) {
             if (fwrite(buf.data(), 1, n, out) != static_cast<size_t>(n)) { ok = false; break; }
         }
-        if (n < 0) ok = false;
+        // A truncated stream ends with gzread() == 0 like a clean EOF: only gzerror() reports it
+        int zerr = Z_OK;
+        gzerror(in, &zerr);
+        if (n < 0 || zerr != Z_OK) ok = false;
     }
     if (out && fclose(out) != 0) ok = false;
-    if (in) gzclose(in);
+    if (in && gzclose(in) != Z_OK) ok = false;
     if (!ok) {
-        if (out) remove(out_name.c_str()); // no partial output
-        std::cout << "ERROR: cannot unzip file" << std::endl;
-        return;
+        if (out) remove(out_name.c_str()); // no partial output, and the .gz is kept
+        throw std::runtime_error(std::string("cannot decompress ") + vcf_filename);
     }
     remove(vcf_filename);
     vcf_filename[len - 3] = '\0'; // continue with the decompressed file
