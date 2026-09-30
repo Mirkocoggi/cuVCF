@@ -147,7 +147,7 @@ void vcf_parsed::run(char* vcf_filename, int num_threadss){
     }
 
     int deviceID = 0; 
-    cudaSetDevice(deviceID);
+    CUDA_CHECK_ERROR(cudaSetDevice(deviceID));
 
     cudaDeviceProp prop;
     cudaError_t err = cudaGetDeviceProperties(&prop, 0); // Query the first (and only) device
@@ -257,8 +257,8 @@ void vcf_parsed::copyMapToConstantMemory(const std::map<std::string, char>& map)
 
         ++index;
     }
-    cudaMemcpyToSymbol(d_keys_gt, h_keys, sizeof(h_keys));
-    cudaMemcpyToSymbol(d_values_gt, h_values, sizeof(h_values));
+    CUDA_CHECK_ERROR(cudaMemcpyToSymbol(d_keys_gt, h_keys, sizeof(h_keys)));
+    CUDA_CHECK_ERROR(cudaMemcpyToSymbol(d_values_gt, h_values, sizeof(h_values)));
 }
 
 /**
@@ -298,7 +298,7 @@ void vcf_parsed::initialize_map1(const std::map<std::string, int> &my_map){
 static void copy_fixed_name(char* dst, const string& name){
     char buf[MAX_NAME_SIZE] = {0};
     strncpy(buf, name.c_str(), MAX_NAME_SIZE - 1);
-    cudaMemcpy(dst, buf, MAX_NAME_SIZE, cudaMemcpyHostToDevice);
+    CUDA_CHECK_ERROR(cudaMemcpy(dst, buf, MAX_NAME_SIZE, cudaMemcpyHostToDevice));
 }
 
 /**
@@ -308,30 +308,30 @@ static void copy_fixed_name(char* dst, const string& name){
     * and INFO fields. If sample data is present, it also allocates memory for sample fields.
     */
 void vcf_parsed::device_allocation(){
-    cudaMalloc(&d_VC_var_number, (num_lines) * sizeof(unsigned int));
-    cudaMalloc(&d_VC_pos, (num_lines) * sizeof(unsigned int));
-    cudaMalloc(&d_VC_qual, (num_lines) * sizeof(__half));
+    CUDA_CHECK_ERROR(cudaMalloc(&d_VC_var_number, (num_lines) * sizeof(unsigned int)));
+    CUDA_CHECK_ERROR(cudaMalloc(&d_VC_pos, (num_lines) * sizeof(unsigned int)));
+    CUDA_CHECK_ERROR(cudaMalloc(&d_VC_qual, (num_lines) * sizeof(__half)));
 
     int tmp = var_columns.in_float.size();
 
-    cudaMalloc(&(d_VC_in_float->i_float), tmp * (num_lines) * sizeof(__half));
-    cudaMalloc(&(d_VC_in_float->name), tmp * sizeof(char) * MAX_NAME_SIZE); 
+    CUDA_CHECK_ERROR(cudaMalloc(&(d_VC_in_float->i_float), tmp * (num_lines) * sizeof(__half)));
+    CUDA_CHECK_ERROR(cudaMalloc(&(d_VC_in_float->name), tmp * sizeof(char) * MAX_NAME_SIZE)); 
 
     for (int i = 0; i < tmp; i++) {
         copy_fixed_name(d_VC_in_float->name + i*MAX_NAME_SIZE, var_columns.in_float[i].name);
     }
 
     tmp = var_columns.in_flag.size();
-    cudaMalloc(&(d_VC_in_flag->i_flag), tmp * (num_lines) * sizeof(uint8_t));
-    cudaMalloc(&(d_VC_in_flag->name), tmp * sizeof(char) * MAX_NAME_SIZE);
+    CUDA_CHECK_ERROR(cudaMalloc(&(d_VC_in_flag->i_flag), tmp * (num_lines) * sizeof(uint8_t)));
+    CUDA_CHECK_ERROR(cudaMalloc(&(d_VC_in_flag->name), tmp * sizeof(char) * MAX_NAME_SIZE));
 
     for (int i = 0; i < tmp; i++) {
         copy_fixed_name(d_VC_in_flag->name + i*MAX_NAME_SIZE, var_columns.in_flag[i].name);
     }
 
     tmp = var_columns.in_int.size();
-    cudaMalloc(&(d_VC_in_int->i_int), tmp * (num_lines) * sizeof(int));
-    cudaMalloc(&(d_VC_in_int->name), tmp * sizeof(char) * MAX_NAME_SIZE);
+    CUDA_CHECK_ERROR(cudaMalloc(&(d_VC_in_int->i_int), tmp * (num_lines) * sizeof(int)));
+    CUDA_CHECK_ERROR(cudaMalloc(&(d_VC_in_int->name), tmp * sizeof(char) * MAX_NAME_SIZE));
     for (int i = 0; i < tmp; i++) {
         copy_fixed_name(d_VC_in_int->name + i*MAX_NAME_SIZE, var_columns.in_int[i].name);
     }
@@ -342,53 +342,53 @@ void vcf_parsed::device_allocation(){
         // Copy map to constant memory
         copyMapToConstantMemory(samp_columns.GTMap);
         // Allocate and initialize d_SC_var_id
-        cudaMalloc(&d_SC_var_id, (num_lines) * samp_columns.numSample * sizeof(unsigned int));
-        cudaMemset(d_SC_var_id, 0, (num_lines) * samp_columns.numSample * sizeof(unsigned int));
+        CUDA_CHECK_ERROR(cudaMalloc(&d_SC_var_id, (num_lines) * samp_columns.numSample * sizeof(unsigned int)));
+        CUDA_CHECK_ERROR(cudaMemset(d_SC_var_id, 0, (num_lines) * samp_columns.numSample * sizeof(unsigned int)));
         
         // Allocate and initialize d_SC_samp_id
-        cudaMalloc(&d_SC_samp_id, (num_lines) * samp_columns.numSample * sizeof(unsigned short));
-        cudaMemset(d_SC_samp_id, 0, (num_lines) * samp_columns.numSample * sizeof(unsigned short));
+        CUDA_CHECK_ERROR(cudaMalloc(&d_SC_samp_id, (num_lines) * samp_columns.numSample * sizeof(unsigned short)));
+        CUDA_CHECK_ERROR(cudaMemset(d_SC_samp_id, 0, (num_lines) * samp_columns.numSample * sizeof(unsigned short)));
 
         // Allocate and initialize samp_float
         tmp = samp_columns.samp_float.size();
-        cudaMalloc(&(d_SC_samp_float->i_float), tmp * (num_lines * samp_columns.numSample) * sizeof(__half));
-        cudaMalloc(&(d_SC_samp_float->name), tmp * sizeof(char) * MAX_NAME_SIZE);
-        cudaMalloc(&(d_SC_samp_float->numb), tmp * sizeof(int));
+        CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_float->i_float), tmp * (num_lines * samp_columns.numSample) * sizeof(__half)));
+        CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_float->name), tmp * sizeof(char) * MAX_NAME_SIZE));
+        CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_float->numb), tmp * sizeof(int)));
 
         for (int i = 0; i < tmp; i++) {
             copy_fixed_name(d_SC_samp_float->name + i*MAX_NAME_SIZE, samp_columns.samp_float[i].name);
-            cudaMemcpy(d_SC_samp_float->numb+i, &(samp_columns.samp_float[i].numb), sizeof(int), cudaMemcpyHostToDevice);
+            CUDA_CHECK_ERROR(cudaMemcpy(d_SC_samp_float->numb+i, &(samp_columns.samp_float[i].numb), sizeof(int), cudaMemcpyHostToDevice));
         }
 
         // Allocate and initialize samp_flag
         tmp = samp_columns.samp_flag.size();
-        cudaMalloc(&(d_SC_samp_flag->i_flag), tmp * (num_lines * samp_columns.numSample) * sizeof(uint8_t));
-        cudaMalloc(&(d_SC_samp_flag->name), tmp * sizeof(char) * MAX_NAME_SIZE);
-        cudaMalloc(&(d_SC_samp_flag->numb), tmp * sizeof(int));
+        CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_flag->i_flag), tmp * (num_lines * samp_columns.numSample) * sizeof(uint8_t)));
+        CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_flag->name), tmp * sizeof(char) * MAX_NAME_SIZE));
+        CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_flag->numb), tmp * sizeof(int)));
 
         for (int i = 0; i < tmp; i++) {
             copy_fixed_name(d_SC_samp_flag->name + i*MAX_NAME_SIZE, samp_columns.samp_flag[i].name);
-            cudaMemcpy(d_SC_samp_flag->numb+i, &(samp_columns.samp_flag[i].numb), sizeof(int), cudaMemcpyHostToDevice);
+            CUDA_CHECK_ERROR(cudaMemcpy(d_SC_samp_flag->numb+i, &(samp_columns.samp_flag[i].numb), sizeof(int), cudaMemcpyHostToDevice));
         }
 
         // Allocate and initialize samp_int
         tmp = samp_columns.samp_int.size();
-        cudaMalloc(&(d_SC_samp_int->i_int), tmp * (num_lines * samp_columns.numSample) * sizeof(int));
-        cudaMalloc(&(d_SC_samp_int->name), tmp * sizeof(char) * MAX_NAME_SIZE);
-        cudaMalloc(&(d_SC_samp_int->numb), tmp * sizeof(int));
+        CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_int->i_int), tmp * (num_lines * samp_columns.numSample) * sizeof(int)));
+        CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_int->name), tmp * sizeof(char) * MAX_NAME_SIZE));
+        CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_int->numb), tmp * sizeof(int)));
 
         for (int i = 0; i < tmp; i++) {
             copy_fixed_name(d_SC_samp_int->name + i*MAX_NAME_SIZE, samp_columns.samp_int[i].name);
-            cudaMemcpy(d_SC_samp_int->numb+i, &(samp_columns.samp_int[i].numb), sizeof(int), cudaMemcpyHostToDevice);
+            CUDA_CHECK_ERROR(cudaMemcpy(d_SC_samp_int->numb+i, &(samp_columns.samp_int[i].numb), sizeof(int), cudaMemcpyHostToDevice));
         }
 
         // Allocate and initialize samp_GT
         tmp = samp_columns.sample_GT.size();
-        cudaMalloc(&(d_SC_sample_GT->GT), tmp * (num_lines * samp_columns.numSample) * sizeof(char));
-        cudaMalloc(&(d_SC_sample_GT->numb), sizeof(int));
+        CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_sample_GT->GT), tmp * (num_lines * samp_columns.numSample) * sizeof(char)));
+        CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_sample_GT->numb), sizeof(int)));
         // sample_GT is empty when GT is not declared (or is Number=A, parsed on the host)
         if(!samp_columns.sample_GT.empty())
-            cudaMemcpy(d_SC_sample_GT->numb, &(samp_columns.sample_GT[0].numb), sizeof(int), cudaMemcpyHostToDevice);
+            CUDA_CHECK_ERROR(cudaMemcpy(d_SC_sample_GT->numb, &(samp_columns.sample_GT[0].numb), sizeof(int), cudaMemcpyHostToDevice));
 
     }
 
@@ -400,34 +400,34 @@ void vcf_parsed::device_allocation(){
     * Releases device memory allocated during the parsing process.
     */
 void vcf_parsed::device_free() {
-    cudaFree(d_VC_var_number);
-    cudaFree(d_VC_pos);
-    cudaFree(d_VC_qual);
-    cudaFree(d_VC_in_float->i_float);
-    cudaFree(d_VC_in_float->name);
-    cudaFree(d_VC_in_flag->i_flag);
-    cudaFree(d_VC_in_flag->name);
-    cudaFree(d_VC_in_int->i_int);
-    cudaFree(d_VC_in_int->name);
-    cudaFree(d_filestring);
-    cudaFree(d_new_lines_index);
-    cudaFree(d_count);
+    CUDA_CHECK_ERROR(cudaFree(d_VC_var_number));
+    CUDA_CHECK_ERROR(cudaFree(d_VC_pos));
+    CUDA_CHECK_ERROR(cudaFree(d_VC_qual));
+    CUDA_CHECK_ERROR(cudaFree(d_VC_in_float->i_float));
+    CUDA_CHECK_ERROR(cudaFree(d_VC_in_float->name));
+    CUDA_CHECK_ERROR(cudaFree(d_VC_in_flag->i_flag));
+    CUDA_CHECK_ERROR(cudaFree(d_VC_in_flag->name));
+    CUDA_CHECK_ERROR(cudaFree(d_VC_in_int->i_int));
+    CUDA_CHECK_ERROR(cudaFree(d_VC_in_int->name));
+    CUDA_CHECK_ERROR(cudaFree(d_filestring));
+    CUDA_CHECK_ERROR(cudaFree(d_new_lines_index));
+    CUDA_CHECK_ERROR(cudaFree(d_count));
 
     if (hasDetSamples) {
-        cudaFree(d_SC_var_id);
-        cudaFree(d_SC_samp_id);
-        cudaFree(d_SC_samp_float->i_float);
-        cudaFree(d_SC_samp_float->name);
-        cudaFree(d_SC_samp_float->numb);
-        cudaFree(d_SC_samp_flag->i_flag);
-        cudaFree(d_SC_samp_flag->name);
-        cudaFree(d_SC_samp_flag->numb);
-        cudaFree(d_SC_samp_int->i_int);
-        cudaFree(d_SC_samp_int->numb);
-        cudaFree(d_SC_sample_GT->GT);
-        cudaFree(d_SC_sample_GT->numb);
+        CUDA_CHECK_ERROR(cudaFree(d_SC_var_id));
+        CUDA_CHECK_ERROR(cudaFree(d_SC_samp_id));
+        CUDA_CHECK_ERROR(cudaFree(d_SC_samp_float->i_float));
+        CUDA_CHECK_ERROR(cudaFree(d_SC_samp_float->name));
+        CUDA_CHECK_ERROR(cudaFree(d_SC_samp_float->numb));
+        CUDA_CHECK_ERROR(cudaFree(d_SC_samp_flag->i_flag));
+        CUDA_CHECK_ERROR(cudaFree(d_SC_samp_flag->name));
+        CUDA_CHECK_ERROR(cudaFree(d_SC_samp_flag->numb));
+        CUDA_CHECK_ERROR(cudaFree(d_SC_samp_int->i_int));
+        CUDA_CHECK_ERROR(cudaFree(d_SC_samp_int->numb));
+        CUDA_CHECK_ERROR(cudaFree(d_SC_sample_GT->GT));
+        CUDA_CHECK_ERROR(cudaFree(d_SC_sample_GT->numb));
     }
-    cudaFree(d_params);
+    CUDA_CHECK_ERROR(cudaFree(d_params));
 }
 
 /**
@@ -488,11 +488,11 @@ void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
 
     new_lines_index = (unsigned long long*)malloc(sizeof(unsigned long long)*(num_lines+1));
     new_lines_index[0] = 0;
-    cudaMalloc(&d_filestring, (variants_size + 8)* sizeof(char));
-    cudaMalloc(&d_new_lines_index, (num_lines + 1) * sizeof(unsigned long long));
-    cudaMemcpy(d_filestring, filestring, sizeof(char)*variants_size, cudaMemcpyHostToDevice);
-    cudaMalloc(&d_count, sizeof(unsigned int));
-    cudaMemset(d_count, 0, sizeof(unsigned int));
+    CUDA_CHECK_ERROR(cudaMalloc(&d_filestring, (variants_size + 8)* sizeof(char)));
+    CUDA_CHECK_ERROR(cudaMalloc(&d_new_lines_index, (num_lines + 1) * sizeof(unsigned long long)));
+    CUDA_CHECK_ERROR(cudaMemcpy(d_filestring, filestring, sizeof(char)*variants_size, cudaMemcpyHostToDevice));
+    CUDA_CHECK_ERROR(cudaMalloc(&d_count, sizeof(unsigned int)));
+    CUDA_CHECK_ERROR(cudaMemset(d_count, 0, sizeof(unsigned int)));
     
     dim3 threads = 1024;
     // One thread past the end (idx == len) writes the leading 0 index, so cover len + 1 elements
@@ -505,13 +505,9 @@ void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
         d_count
     );
 
-    cudaError_t kernelErr = cudaGetLastError();
-    if (kernelErr != cudaSuccess) {
-        std::cerr << "Kernel launch error: " << cudaGetErrorString(kernelErr) << std::endl;
-        return;
-    }
+    CUDA_CHECK_ERROR(cudaGetLastError()); // kernel launch
 
-    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR(cudaDeviceSynchronize());
 
     //ordering with Thrust library
     thrust::device_ptr<unsigned long long> d_new_lines_index_ptr(d_new_lines_index);
@@ -526,9 +522,9 @@ void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
     }
 
 
-    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR(cudaDeviceSynchronize());
     
-    cudaMemcpy(new_lines_index, d_new_lines_index, sizeof(unsigned long long)*(num_lines+1), cudaMemcpyDeviceToHost);
+    CUDA_CHECK_ERROR(cudaMemcpy(new_lines_index, d_new_lines_index, sizeof(unsigned long long)*(num_lines+1), cudaMemcpyDeviceToHost));
 }
     
 /**
@@ -989,10 +985,10 @@ void vcf_parsed::reserve_var_columns(){
     */
 void vcf_parsed::allocParamPointers(KernelParams **d_params, KernelParams *h_params) {
     // Allocate memory for KernelParams on GPU
-    cudaMalloc((void**)d_params, sizeof(KernelParams));
+    CUDA_CHECK_ERROR(cudaMalloc((void**)d_params, sizeof(KernelParams)));
 
     // Copy the structure from host to device
-    cudaMemcpy(*d_params, h_params, sizeof(KernelParams), cudaMemcpyHostToDevice);
+    CUDA_CHECK_ERROR(cudaMemcpy(*d_params, h_params, sizeof(KernelParams), cudaMemcpyHostToDevice));
 }
 
 /**
@@ -1005,15 +1001,15 @@ void vcf_parsed::populate_runner(int numb_cores){
     int threadsPerBlock = 32;
     int blocksPerGrid = (numb_cores/threadsPerBlock) + 1; 
     cudaEvent_t kernel_done;
-    cudaEventCreate(&kernel_done);
+    CUDA_CHECK_ERROR(cudaEventCreate(&kernel_done));
     auto start = chrono::system_clock::now();
     char* my_mem;
     int batchSize = threadsPerBlock*blocksPerGrid;
-    cudaMalloc(&my_mem, batchSize*MAX_TOKEN_LEN*MAX_TOKENS*3);
+    CUDA_CHECK_ERROR(cudaMalloc(&my_mem, batchSize*MAX_TOKEN_LEN*MAX_TOKENS*3));
 
     cudaStream_t stream1, stream2;
-    cudaStreamCreate(&stream1);
-    cudaStreamCreate(&stream2);
+    CUDA_CHECK_ERROR(cudaStreamCreate(&stream1));
+    CUDA_CHECK_ERROR(cudaStreamCreate(&stream2));
 
     // Pass existing device pointers to h_params
     h_params.line = d_filestring;
@@ -1057,72 +1053,68 @@ void vcf_parsed::populate_runner(int numb_cores){
 
         // Launch kernel
         kernel<<<blocksPerGrid, threadsPerBlock, 0, stream1>>>(d_params, my_mem, batchSize, true);
+        CUDA_CHECK_ERROR(cudaGetLastError()); // kernel launch
 
-        cudaEventRecord(kernel_done, stream1);
+        CUDA_CHECK_ERROR(cudaEventRecord(kernel_done, stream1));
 
     }else{
         // Allocate d_params and copy h_params to GPU
         allocParamPointers(&d_params, &h_params);
         kernel<<<blocksPerGrid, threadsPerBlock, 0, stream1>>>(d_params, my_mem, batchSize, false);
-        cudaEventRecord(kernel_done, stream1);
+        CUDA_CHECK_ERROR(cudaEventRecord(kernel_done, stream1));
         
-        // Controllo errori di lancio del kernel
-        cudaError_t err = cudaGetLastError();
-        if(err != cudaSuccess) {
-            fprintf(stderr, "Errore nel lancio di get_vcf_line_kernel: %s\n", cudaGetErrorString(err));
-            exit(EXIT_FAILURE);
-        }
+        CUDA_CHECK_ERROR(cudaGetLastError()); // kernel launch
         
     }
     
-    cudaStreamWaitEvent(stream2, kernel_done, 0);
-    cudaMemcpyAsync(var_columns.var_number.data(), d_VC_var_number, (num_lines) * sizeof(unsigned int), cudaMemcpyDeviceToHost, stream2);
-    cudaMemcpyAsync(var_columns.pos.data(), d_VC_pos, (num_lines) * sizeof(unsigned int), cudaMemcpyDeviceToHost, stream2);
-    cudaMemcpyAsync(var_columns.qual.data(), d_VC_qual, (num_lines) * sizeof(__half), cudaMemcpyDeviceToHost, stream2);
+    CUDA_CHECK_ERROR(cudaStreamWaitEvent(stream2, kernel_done, 0));
+    CUDA_CHECK_ERROR(cudaMemcpyAsync(var_columns.var_number.data(), d_VC_var_number, (num_lines) * sizeof(unsigned int), cudaMemcpyDeviceToHost, stream2));
+    CUDA_CHECK_ERROR(cudaMemcpyAsync(var_columns.pos.data(), d_VC_pos, (num_lines) * sizeof(unsigned int), cudaMemcpyDeviceToHost, stream2));
+    CUDA_CHECK_ERROR(cudaMemcpyAsync(var_columns.qual.data(), d_VC_qual, (num_lines) * sizeof(__half), cudaMemcpyDeviceToHost, stream2));
 
     for(int i=0; i<var_columns.in_float.size(); i++){
-        cudaMemcpyAsync(var_columns.in_float[i].i_float.data(), d_VC_in_float->i_float + i * (num_lines), (num_lines)*sizeof(__half), cudaMemcpyDeviceToHost, stream2);
+        CUDA_CHECK_ERROR(cudaMemcpyAsync(var_columns.in_float[i].i_float.data(), d_VC_in_float->i_float + i * (num_lines), (num_lines)*sizeof(__half), cudaMemcpyDeviceToHost, stream2));
     }
 
     for(int i=0; i<var_columns.in_flag.size(); i++){
-        cudaMemcpyAsync(var_columns.in_flag[i].i_flag.data(), d_VC_in_flag->i_flag + i * (num_lines), (num_lines)*sizeof(uint8_t), cudaMemcpyDeviceToHost, stream2);
+        CUDA_CHECK_ERROR(cudaMemcpyAsync(var_columns.in_flag[i].i_flag.data(), d_VC_in_flag->i_flag + i * (num_lines), (num_lines)*sizeof(uint8_t), cudaMemcpyDeviceToHost, stream2));
     }
 
     for(int i=0; i<var_columns.in_int.size(); i++){
-        cudaMemcpyAsync(var_columns.in_int[i].i_int.data(), d_VC_in_int->i_int + i * (num_lines), (num_lines) * sizeof(int), cudaMemcpyDeviceToHost, stream2);
+        CUDA_CHECK_ERROR(cudaMemcpyAsync(var_columns.in_int[i].i_int.data(), d_VC_in_int->i_int + i * (num_lines), (num_lines) * sizeof(int), cudaMemcpyDeviceToHost, stream2));
     }
 
     if(hasDetSamples){
-        cudaMemcpyAsync(samp_columns.var_id.data(), d_SC_var_id, (num_lines) * samp_columns.numSample * sizeof(unsigned int), cudaMemcpyDeviceToHost, stream2);
-        cudaMemcpyAsync(samp_columns.samp_id.data(), d_SC_samp_id, (num_lines) * samp_columns.numSample * sizeof(unsigned short), cudaMemcpyDeviceToHost, stream2);
+        CUDA_CHECK_ERROR(cudaMemcpyAsync(samp_columns.var_id.data(), d_SC_var_id, (num_lines) * samp_columns.numSample * sizeof(unsigned int), cudaMemcpyDeviceToHost, stream2));
+        CUDA_CHECK_ERROR(cudaMemcpyAsync(samp_columns.samp_id.data(), d_SC_samp_id, (num_lines) * samp_columns.numSample * sizeof(unsigned short), cudaMemcpyDeviceToHost, stream2));
 
         for (int i = 0; i < samp_columns.samp_float.size(); i++) {
-            cudaMemcpyAsync(samp_columns.samp_float[i].i_float.data(), d_SC_samp_float->i_float + i * ((num_lines) * samp_columns.numSample), 
-                (num_lines) * samp_columns.numSample * sizeof(__half), cudaMemcpyDeviceToHost, stream2);
+            CUDA_CHECK_ERROR(cudaMemcpyAsync(samp_columns.samp_float[i].i_float.data(), d_SC_samp_float->i_float + i * ((num_lines) * samp_columns.numSample), 
+                (num_lines) * samp_columns.numSample * sizeof(__half), cudaMemcpyDeviceToHost, stream2));
         }
 
         for (int i = 0; i < samp_columns.samp_flag.size(); i++) {
-            cudaMemcpyAsync(samp_columns.samp_flag[i].i_flag.data(), d_SC_samp_flag->i_flag + i * ((num_lines) * samp_columns.numSample), 
-                (num_lines) * samp_columns.numSample * sizeof(uint8_t), cudaMemcpyDeviceToHost, stream2);
+            CUDA_CHECK_ERROR(cudaMemcpyAsync(samp_columns.samp_flag[i].i_flag.data(), d_SC_samp_flag->i_flag + i * ((num_lines) * samp_columns.numSample), 
+                (num_lines) * samp_columns.numSample * sizeof(uint8_t), cudaMemcpyDeviceToHost, stream2));
         }
 
         for (int i = 0; i < samp_columns.samp_int.size(); i++) {
-            cudaMemcpyAsync(samp_columns.samp_int[i].i_int.data(), d_SC_samp_int->i_int + (i * num_lines * samp_columns.numSample), 
-                (num_lines) * samp_columns.numSample * sizeof(int), cudaMemcpyDeviceToHost, stream2);                
+            CUDA_CHECK_ERROR(cudaMemcpyAsync(samp_columns.samp_int[i].i_int.data(), d_SC_samp_int->i_int + (i * num_lines * samp_columns.numSample), 
+                (num_lines) * samp_columns.numSample * sizeof(int), cudaMemcpyDeviceToHost, stream2));                
         }   
 
         for(int i=0; i<samp_columns.sample_GT.size(); i++){
-            cudaMemcpyAsync(samp_columns.sample_GT[i].GT.data(), d_SC_sample_GT->GT + i * ((num_lines) * samp_columns.numSample), 
-                (num_lines)*samp_columns.numSample*sizeof(char), cudaMemcpyDeviceToHost, stream2);
+            CUDA_CHECK_ERROR(cudaMemcpyAsync(samp_columns.sample_GT[i].GT.data(), d_SC_sample_GT->GT + i * ((num_lines) * samp_columns.numSample), 
+                (num_lines)*samp_columns.numSample*sizeof(char), cudaMemcpyDeviceToHost, stream2));
         } 
     }
-    cudaStreamSynchronize(stream2);
+    CUDA_CHECK_ERROR(cudaStreamSynchronize(stream2));
 
     // Cleanup
-    cudaEventDestroy(kernel_done);
-    cudaStreamDestroy(stream1);
-    cudaStreamDestroy(stream2);
-    cudaFree(my_mem);
+    CUDA_CHECK_ERROR(cudaEventDestroy(kernel_done));
+    CUDA_CHECK_ERROR(cudaStreamDestroy(stream1));
+    CUDA_CHECK_ERROR(cudaStreamDestroy(stream2));
+    CUDA_CHECK_ERROR(cudaFree(my_mem));
 }
 
 /**

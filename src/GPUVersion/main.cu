@@ -57,7 +57,7 @@ using namespace std;
  */
 int main(int argc, char *argv[]){
 
-    cudaSetDevice(0);  // Use device 0
+    CUDA_CHECK_ERROR(cudaSetDevice(0));  // Use device 0
 
     int opt, num_threadss = 4;      // -t is optional
     char *vcf_filename = nullptr;   // -v is required
