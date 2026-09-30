@@ -308,6 +308,8 @@ static void copy_fixed_name(char* dst, const string& name){
     * and INFO fields. If sample data is present, it also allocates memory for sample fields.
     */
 void vcf_parsed::device_allocation(){
+    // The kernel writes a column cell only when the record has that field: every column is zeroed here,
+    // or the cells left unwritten would be copied back with whatever the reused device memory held.
     CUDA_CHECK_ERROR(cudaMalloc(&d_VC_var_number, (num_lines) * sizeof(unsigned int)));
     CUDA_CHECK_ERROR(cudaMalloc(&d_VC_pos, (num_lines) * sizeof(unsigned int)));
     CUDA_CHECK_ERROR(cudaMalloc(&d_VC_qual, (num_lines) * sizeof(__half)));
@@ -315,6 +317,7 @@ void vcf_parsed::device_allocation(){
     int tmp = var_columns.in_float.size();
 
     CUDA_CHECK_ERROR(cudaMalloc(&(d_VC_in_float->i_float), tmp * (num_lines) * sizeof(__half)));
+    CUDA_CHECK_ERROR(cudaMemset(d_VC_in_float->i_float, 0, tmp * (num_lines) * sizeof(__half)));
     CUDA_CHECK_ERROR(cudaMalloc(&(d_VC_in_float->name), tmp * sizeof(char) * MAX_NAME_SIZE)); 
 
     for (int i = 0; i < tmp; i++) {
@@ -323,6 +326,7 @@ void vcf_parsed::device_allocation(){
 
     tmp = var_columns.in_flag.size();
     CUDA_CHECK_ERROR(cudaMalloc(&(d_VC_in_flag->i_flag), tmp * (num_lines) * sizeof(uint8_t)));
+    CUDA_CHECK_ERROR(cudaMemset(d_VC_in_flag->i_flag, 0, tmp * (num_lines) * sizeof(uint8_t)));
     CUDA_CHECK_ERROR(cudaMalloc(&(d_VC_in_flag->name), tmp * sizeof(char) * MAX_NAME_SIZE));
 
     for (int i = 0; i < tmp; i++) {
@@ -331,6 +335,7 @@ void vcf_parsed::device_allocation(){
 
     tmp = var_columns.in_int.size();
     CUDA_CHECK_ERROR(cudaMalloc(&(d_VC_in_int->i_int), tmp * (num_lines) * sizeof(int)));
+    CUDA_CHECK_ERROR(cudaMemset(d_VC_in_int->i_int, 0, tmp * (num_lines) * sizeof(int)));
     CUDA_CHECK_ERROR(cudaMalloc(&(d_VC_in_int->name), tmp * sizeof(char) * MAX_NAME_SIZE));
     for (int i = 0; i < tmp; i++) {
         copy_fixed_name(d_VC_in_int->name + i*MAX_NAME_SIZE, var_columns.in_int[i].name);
@@ -352,6 +357,7 @@ void vcf_parsed::device_allocation(){
         // Allocate and initialize samp_float
         tmp = samp_columns.samp_float.size();
         CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_float->i_float), tmp * (num_lines * samp_columns.numSample) * sizeof(__half)));
+        CUDA_CHECK_ERROR(cudaMemset(d_SC_samp_float->i_float, 0, tmp * (num_lines * samp_columns.numSample) * sizeof(__half)));
         CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_float->name), tmp * sizeof(char) * MAX_NAME_SIZE));
         CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_float->numb), tmp * sizeof(int)));
 
@@ -363,6 +369,7 @@ void vcf_parsed::device_allocation(){
         // Allocate and initialize samp_flag
         tmp = samp_columns.samp_flag.size();
         CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_flag->i_flag), tmp * (num_lines * samp_columns.numSample) * sizeof(uint8_t)));
+        CUDA_CHECK_ERROR(cudaMemset(d_SC_samp_flag->i_flag, 0, tmp * (num_lines * samp_columns.numSample) * sizeof(uint8_t)));
         CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_flag->name), tmp * sizeof(char) * MAX_NAME_SIZE));
         CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_flag->numb), tmp * sizeof(int)));
 
@@ -374,6 +381,7 @@ void vcf_parsed::device_allocation(){
         // Allocate and initialize samp_int
         tmp = samp_columns.samp_int.size();
         CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_int->i_int), tmp * (num_lines * samp_columns.numSample) * sizeof(int)));
+        CUDA_CHECK_ERROR(cudaMemset(d_SC_samp_int->i_int, 0, tmp * (num_lines * samp_columns.numSample) * sizeof(int)));
         CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_int->name), tmp * sizeof(char) * MAX_NAME_SIZE));
         CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_int->numb), tmp * sizeof(int)));
 
@@ -385,6 +393,7 @@ void vcf_parsed::device_allocation(){
         // Allocate and initialize samp_GT
         tmp = samp_columns.sample_GT.size();
         CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_sample_GT->GT), tmp * (num_lines * samp_columns.numSample) * sizeof(char)));
+        CUDA_CHECK_ERROR(cudaMemset(d_SC_sample_GT->GT, 0, tmp * (num_lines * samp_columns.numSample) * sizeof(char)));
         CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_sample_GT->numb), sizeof(int)));
         // sample_GT is empty when GT is not declared (or is Number=A, parsed on the host)
         if(!samp_columns.sample_GT.empty())
