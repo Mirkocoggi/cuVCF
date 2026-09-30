@@ -72,6 +72,7 @@ using namespace std;
     int numSample;                ///< Number of samples.
     unsigned int numLines;        ///< Total number of VCF lines (variants).
     int numGT;                    ///< Number of genotype entries.
+    int hasGT;                    ///< GT is declared in the header (an undeclared GT is skipped).
     int numInfoFloat;             ///< Number of entries in float_name.
     int numInfoFlag;              ///< Number of entries in flag_name.
     int numInfoInt;               ///< Number of entries in int_name.

@@ -437,10 +437,8 @@ PYBIND11_MODULE(GPUParser, m) {
     py::class_<vcf_parsed>(m, "vcf_parsed", py::module_local())
         .def(py::init<>())
         .def("run", [](vcf_parsed &self, const std::string &vcf_filename, int num_threadss) {
-            char* c_vcf_filename = new char[vcf_filename.size() + 1];
-            std::strcpy(c_vcf_filename, vcf_filename.c_str());
-            self.run(c_vcf_filename, num_threadss);
-            delete[] c_vcf_filename;
+            std::string c_vcf_filename = vcf_filename; // mutable copy: run() strips a .gz in place
+            self.run(c_vcf_filename.data(), num_threadss);
         }, py::arg("vcf_filename"), py::arg("num_threadss"),
            "Parses the VCF file using the specified number of threads")
         .def_readwrite("id", &vcf_parsed::id)

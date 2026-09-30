@@ -65,7 +65,7 @@ using namespace std;
 
 
 
-// Header attribute helpers (from cuVCF-internal betweenAngle/getAttr).
+// Header attribute helpers.
 /**
  * @brief True if a header Number= value is a fixed count ("0", "1", "2", ...).
  */
@@ -206,9 +206,7 @@ void vcf_parsed::run(char* vcf_filename, int num_threadss){
     omp_set_num_threads(num_threadss);
 
     // Open input file, gzip -df compressed_file1.gz
-    if(!strcmp((vcf_filename + strlen(vcf_filename) - 3), ".gz")){
-        unzip_gz_file(vcf_filename);
-    }
+    unzip_gz_file(vcf_filename); // no-op unless the name ends in .gz
     filename = vcf_filename; // after unzip_gz_file, which strips the .gz
     
     ifstream inFile(filename);
@@ -425,6 +423,7 @@ void vcf_parsed::device_free() {
         CUDA_CHECK_ERROR(cudaFree(d_SC_samp_flag->name));
         CUDA_CHECK_ERROR(cudaFree(d_SC_samp_flag->numb));
         CUDA_CHECK_ERROR(cudaFree(d_SC_samp_int->i_int));
+        CUDA_CHECK_ERROR(cudaFree(d_SC_samp_int->name));
         CUDA_CHECK_ERROR(cudaFree(d_SC_samp_int->numb));
         CUDA_CHECK_ERROR(cudaFree(d_SC_sample_GT->GT));
         CUDA_CHECK_ERROR(cudaFree(d_SC_sample_GT->numb));
@@ -1049,6 +1048,7 @@ void vcf_parsed::populate_runner(int numb_cores){
         h_params.sample_GT = d_SC_sample_GT->GT;
         h_params.numSample = samp_columns.numSample;
         h_params.numGT = (int)samp_columns.sample_GT.size(); // 0 without a Number=1 GT column
+        h_params.hasGT = FORMAT.hasGT;
 
         // Allocate d_params and copy h_params to GPU
         allocParamPointers(&d_params, &h_params);
@@ -1423,7 +1423,7 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
 }
 
 // Per-thread alternative buffers are pre-sized for ~2 ALTs per line; grow them when a chunk needs more
-// (same approach as the CPU backend in cuVCF-internal).
+// (same approach as the CPU backend).
 static void ensure_alt_capacity(alt_columns_df* tmp_alt, int needed){
     if(needed <= 0 || static_cast<int>(tmp_alt->alt.size()) >= needed) return;
     tmp_alt->var_id.resize(needed, 0);

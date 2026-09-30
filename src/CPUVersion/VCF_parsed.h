@@ -183,7 +183,7 @@ public:
             // A truncated stream ends with gzread() == 0 like a clean EOF: only gzerror() reports it
             int zerr = Z_OK;
             gzerror(in, &zerr);
-            if (n < 0 || zerr != Z_OK) ok = false;
+            if (n < 0 || zerr != Z_OK || gzdirect(in)) ok = false; // gzdirect: not gzip data
         }
         if (out && fclose(out) != 0) ok = false;
         if (in && gzclose(in) != Z_OK) ok = false;
@@ -203,9 +203,7 @@ public:
         // Setting number of threads
         omp_set_num_threads(num_threadss);
         // Open input file, gzip -df compressed_file1.gz
-        if(!strcmp((vcf_filename + strlen(vcf_filename) - 3), ".gz")){
-            unzip_gz_file(vcf_filename);
-        }
+        unzip_gz_file(vcf_filename); // no-op unless the name ends in .gz
         filename = vcf_filename; // after unzip_gz_file, which strips the .gz
         
         ifstream inFile(filename);

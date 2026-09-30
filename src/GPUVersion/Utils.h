@@ -125,7 +125,7 @@ void unzip_gz_file(char* vcf_filename) {
         // A truncated stream ends with gzread() == 0 like a clean EOF: only gzerror() reports it
         int zerr = Z_OK;
         gzerror(in, &zerr);
-        if (n < 0 || zerr != Z_OK) ok = false;
+        if (n < 0 || zerr != Z_OK || gzdirect(in)) ok = false; // gzdirect: not gzip data
     }
     if (out && fclose(out) != 0) ok = false;
     if (in && gzclose(in) != Z_OK) ok = false;
