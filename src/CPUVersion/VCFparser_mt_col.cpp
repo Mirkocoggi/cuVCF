@@ -89,10 +89,10 @@ void unzip_gz_file(char* vcf_filename) {
  * Creates and runs a vcf_parsed instance to process the input file.
  */
 int main(int argc, char *argv[]){
-   
-    int opt, num_threadss;
-    char *vcf_filename; 
-   
+
+    int opt, num_threadss = 4;      // -t is optional
+    char *vcf_filename = nullptr;   // -v is required
+
     while ((opt = getopt(argc, argv, "v:t:")) != -1)
     {
         switch (opt)
@@ -102,24 +102,42 @@ int main(int argc, char *argv[]){
             break;
         case 't':
             num_threadss = atoi(optarg);
-            if (num_threadss == 1)
-            {
-                cout << "Single thread execution, sequential process!!" << endl;
-            }
-            else
-            {
-                cout << "Multithreading execution, parallelization on " << num_threadss << " threads!!" << endl;
-            }
             break;
-        case '?':
-            cout << "Unknown option: " << optopt << endl;
-            break;
+        default: // '?': getopt already printed the error
+            cerr << "Usage: " << argv[0] << " -v <file.vcf[.gz]> [-t <threads>]" << endl;
+            return 1;
         }
     }
+    if (vcf_filename == nullptr || num_threadss < 1) {
+        cerr << "Usage: " << argv[0] << " -v <file.vcf[.gz]> [-t <threads>]" << endl;
+        return 1;
+    }
 
-    
+    if (num_threadss == 1)
+    {
+        cout << "Single thread execution, sequential process!!" << endl;
+    }
+    else
+    {
+        cout << "Multithreading execution, parallelization on " << num_threadss << " threads!!" << endl;
+    }
+
     vcf_parsed vcf;
+    auto s = std::chrono::steady_clock::now();
     vcf.run(vcf_filename, num_threadss);
+    auto e = std::chrono::steady_clock::now();
+    cerr << "vcf_parsed::run: " << std::chrono::duration<double, std::milli>(e - s).count() << " ms" << endl;
+
+    // Preview of the four DataFrames
+    cout << "------------------------------" << endl;
+    vcf.var_columns.print(10);
+    cout << "------------------------------" << endl;
+    vcf.alt_columns.print(10);
+    cout << "------------------------------" << endl;
+    vcf.samp_columns.print(10);
+    cout << "------------------------------" << endl;
+    vcf.alt_sample.print(10);
+    cout << "------------------------------" << endl;
 
     return 0;
 }
