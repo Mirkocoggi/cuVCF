@@ -206,9 +206,7 @@ void vcf_parsed::run(char* vcf_filename, int num_threadss){
     omp_set_num_threads(num_threadss);
 
     // Open input file, gzip -df compressed_file1.gz
-    if(!strcmp((vcf_filename + strlen(vcf_filename) - 3), ".gz")){
-        unzip_gz_file(vcf_filename);
-    }
+    unzip_gz_file(vcf_filename); // no-op unless the name ends in .gz
     filename = vcf_filename; // after unzip_gz_file, which strips the .gz
     
     ifstream inFile(filename);
