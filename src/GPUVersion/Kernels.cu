@@ -289,7 +289,9 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
                     bool find_type = false;
                     bool find_elem = false;
                     while (!find_type) {
-                        if (cuda_strncmp(&tmp_values[MAX_TOKEN_LEN*j], "GT", MAX_TOKEN_LEN) == 0) {
+                        if (cuda_strncmp(&tmp_values[MAX_TOKEN_LEN*j], "GT", MAX_TOKEN_LEN) == 0 && !params->hasGT) {
+                            find_type = true; // undeclared GT: no column, skipped like on the CPU
+                        } else if (cuda_strncmp(&tmp_values[MAX_TOKEN_LEN*j], "GT", MAX_TOKEN_LEN) == 0) {
                             // Process GT (Genotype)
                             params->samp_var_id[thID * params->numSample + samp] = thID;
                             params->samp_id[thID * params->numSample + samp] = static_cast<unsigned short>(samp);

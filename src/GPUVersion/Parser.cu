@@ -1050,6 +1050,7 @@ void vcf_parsed::populate_runner(int numb_cores){
         h_params.sample_GT = d_SC_sample_GT->GT;
         h_params.numSample = samp_columns.numSample;
         h_params.numGT = (int)samp_columns.sample_GT.size(); // 0 without a Number=1 GT column
+        h_params.hasGT = FORMAT.hasGT;
 
         // Allocate d_params and copy h_params to GPU
         allocParamPointers(&d_params, &h_params);
