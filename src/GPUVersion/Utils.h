@@ -23,7 +23,8 @@
 #ifndef UTILS_H
 #define UTILS_H
 
-#include <sys/wait.h>
+#include <zlib.h>
+#include <stdexcept>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -100,39 +101,40 @@ const std::unordered_map<std::string, char> csqCharMap = {
 };
 
 /**
- * @brief Securely unzips a .gz file using gzip
+ * @brief Decompresses a .gz file in place with zlib (like "gzip -df")
  *
  * @param vcf_filename [in,out] Pointer to filename, .gz extension removed on success
- * @throw std::runtime_error If fork() or exec() fails
- * @note Uses fork() and execlp() for secure execution
  * @warning Modifies the input filename string on successful decompression
  */
 void unzip_gz_file(char* vcf_filename) {
-    // Check if the filename ends with ".gz"
-    if (strcmp(vcf_filename + strlen(vcf_filename) - 3, ".gz") == 0) {
-        pid_t pid = fork();
-        if (pid == 0) {
-            // Child process: execute gzip command
-            execlp("gzip", "gzip", "-df", vcf_filename, nullptr);
-            // If execlp fails, output error and exit.
-            std::cout << "ERROR: Failed to execute gzip command" << std::endl;
-            exit(EXIT_FAILURE);
-        } else if (pid > 0) {
-            // Parent process: wait for the child process to finish.
-            int status;
-            waitpid(pid, &status, 0);
-            if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-                // On success, remove the ".gz" extension from the filename.
-                char* mutable_vcf_filename = const_cast<char*>(vcf_filename);
-                mutable_vcf_filename[strlen(vcf_filename) - 3] = '\0';
-            } else {
-                std::cout << "ERROR: cannot unzip file" << std::endl;
-            }
-        } else {
-            // Fork failed: output error message.
-            std::cout << "ERROR: Failed to fork process" << std::endl;
+    // Decompress in process with zlib (no external gzip binary, no fork),
+    // with the same effect as "gzip -df": the .gz is replaced by the plain file.
+    const size_t len = strlen(vcf_filename);
+    if (len < 4 || strcmp(vcf_filename + len - 3, ".gz") != 0) return;
+    const std::string out_name(vcf_filename, len - 3);
+
+    gzFile in = gzopen(vcf_filename, "rb");
+    FILE* out = in ? fopen(out_name.c_str(), "wb") : nullptr;
+    bool ok = in && out;
+    if (ok) {
+        std::vector<char> buf(1 << 16);
+        int n;
+        while ((n = gzread(in, buf.data(), buf.size())) > 0) {
+            if (fwrite(buf.data(), 1, n, out) != static_cast<size_t>(n)) { ok = false; break; }
         }
+        // A truncated stream ends with gzread() == 0 like a clean EOF: only gzerror() reports it
+        int zerr = Z_OK;
+        gzerror(in, &zerr);
+        if (n < 0 || zerr != Z_OK) ok = false;
     }
+    if (out && fclose(out) != 0) ok = false;
+    if (in && gzclose(in) != Z_OK) ok = false;
+    if (!ok) {
+        if (out) remove(out_name.c_str()); // no partial output, and the .gz is kept
+        throw std::runtime_error(std::string("cannot decompress ") + vcf_filename);
+    }
+    remove(vcf_filename);
+    vcf_filename[len - 3] = '\0'; // continue with the decompressed file
 }
 
 /**
@@ -185,13 +187,16 @@ void merge_member_vector(
     int num_threads,
     std::vector<U> T::* member_ptr
 ) {
+    size_t total = dest.size();
+    for (int i = 0; i < num_threads; i++) total += (tmp_alt[i].*member_ptr).size();
+    dest.reserve(total);
     for (int i = 0; i < num_threads; i++) {
         dest.insert(
             dest.end(),
             std::make_move_iterator((tmp_alt[i].*member_ptr).begin()),
             std::make_move_iterator((tmp_alt[i].*member_ptr).end())
         );
-        (tmp_alt[i].*member_ptr).clear();
+        std::vector<U>().swap(tmp_alt[i].*member_ptr); // releases the memory; clear() keeps the capacity
     }
 }
 
@@ -223,6 +228,11 @@ void merge_nested_member_vector(
     std::vector<S> T::* outer_member_ptr,
     std::vector<V> S::* inner_member_ptr
 ) {
+    for (int j = 0; j < num_nested; j++) {
+        size_t total = (dest[j].*inner_member_ptr).size();
+        for (int i = 0; i < num_threads; i++) total += ((tmp_alt[i].*outer_member_ptr)[j].*inner_member_ptr).size();
+        (dest[j].*inner_member_ptr).reserve(total);
+    }
     for (int i = 0; i < num_threads; i++) {
         for (int j = 0; j < num_nested; j++) {
             (dest[j].*inner_member_ptr).insert(
@@ -230,7 +240,7 @@ void merge_nested_member_vector(
                 std::make_move_iterator(((tmp_alt[i].*outer_member_ptr)[j].*inner_member_ptr).begin()),
                 std::make_move_iterator(((tmp_alt[i].*outer_member_ptr)[j].*inner_member_ptr).end())
             );
-            ((tmp_alt[i].*outer_member_ptr)[j].*inner_member_ptr).clear();
+            std::vector<V>().swap((tmp_alt[i].*outer_member_ptr)[j].*inner_member_ptr);
         }
     }
 }

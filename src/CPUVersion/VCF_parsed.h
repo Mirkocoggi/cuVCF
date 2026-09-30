@@ -34,6 +34,8 @@
 #include <functional>
 #include <future>
 #include <string_view>
+#include <stdexcept>
+#include <zlib.h>
 #include <algorithm>
 #include <cctype>
 
@@ -163,31 +165,34 @@ public:
     alt_format_df alt_sample;
 
     void unzip_gz_file(char* vcf_filename) {
-        // Check the extension ".gz"
-        if (strcmp(vcf_filename + strlen(vcf_filename) - 3, ".gz") == 0) {
-            pid_t pid = fork();
-            if (pid == 0) {
-                // Child proces
-                execlp("gzip", "gzip", "-df", vcf_filename, nullptr);
-                // If execlp fails
-                cout<< "ERROR: Failed to execute gzip command" << std::endl;
-                exit(EXIT_FAILURE);
-            } else if (pid > 0) {
-                // Parent proces waits for the child proces
-                int status;
-                waitpid(pid, &status, 0);
-                if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-                    // Remove ".gz" from the filename
-                    char* mutable_vcf_filename = const_cast<char*>(vcf_filename);
-                    mutable_vcf_filename[strlen(vcf_filename) - 3] = '\0';
-                } else {
-                    cout<< "ERROR: cannot unzip file" << std::endl;
-                }
-            } else {
-                // Error in the fork() call
-                cout<< "ERROR: Failed to fork process" << std::endl;
+        // Decompress in process with zlib (no external gzip binary, no fork),
+        // with the same effect as "gzip -df": the .gz is replaced by the plain file.
+        const size_t len = strlen(vcf_filename);
+        if (len < 4 || strcmp(vcf_filename + len - 3, ".gz") != 0) return;
+        const std::string out_name(vcf_filename, len - 3);
+
+        gzFile in = gzopen(vcf_filename, "rb");
+        FILE* out = in ? fopen(out_name.c_str(), "wb") : nullptr;
+        bool ok = in && out;
+        if (ok) {
+            std::vector<char> buf(1 << 16);
+            int n;
+            while ((n = gzread(in, buf.data(), buf.size())) > 0) {
+                if (fwrite(buf.data(), 1, n, out) != static_cast<size_t>(n)) { ok = false; break; }
             }
+            // A truncated stream ends with gzread() == 0 like a clean EOF: only gzerror() reports it
+            int zerr = Z_OK;
+            gzerror(in, &zerr);
+            if (n < 0 || zerr != Z_OK) ok = false;
         }
+        if (out && fclose(out) != 0) ok = false;
+        if (in && gzclose(in) != Z_OK) ok = false;
+        if (!ok) {
+            if (out) remove(out_name.c_str()); // no partial output, and the .gz is kept
+            throw std::runtime_error(std::string("cannot decompress ") + vcf_filename);
+        }
+        remove(vcf_filename);
+        vcf_filename[len - 3] = '\0'; // continue with the decompressed file
     }
 
     void run(char* vcf_filename, int num_threadss){
@@ -201,10 +206,11 @@ public:
         if(!strcmp((vcf_filename + strlen(vcf_filename) - 3), ".gz")){
             unzip_gz_file(vcf_filename);
         }
+        filename = vcf_filename; // after unzip_gz_file, which strips the .gz
         
         ifstream inFile(filename);
         if(!inFile){
-            cout << "ERROR: cannot open file " << filename << endl;
+            throw std::runtime_error("cannot open file " + filename);
         }
         // Saving filename
         get_filename(filename);
@@ -286,8 +292,8 @@ public:
         while (getline(*file, line) && line[0]=='#' && line[1]=='#'){
             header.append(line + '\n');
             header_size += line.length() + 1;
-            bool Info = (line[2]=='I');
-            bool Format = (line[2]=='F' && line[3]=='O');
+            bool Info = (line.rfind("##INFO=<", 0) == 0);
+            bool Format = (line.rfind("##FORMAT=<", 0) == 0);
             
             if(Info || Format){
                 // Attributes are looked up by name: the VCF spec does not fix their order.
@@ -319,7 +325,7 @@ public:
         }
 
         vector<string> tmp_split;
-        boost::split(tmp_split, line, boost::is_any_of("\t "));
+        boost::split(tmp_split, line, boost::is_any_of("\t")); // tab only: sample names may contain spaces
         if(tmp_split.size() > 9){
             samplesON = true;
             samp_columns.numSample = tmp_split.size() - 9;
@@ -560,7 +566,7 @@ public:
         samp_columns.samp_float.resize(FORMAT.floats);
         samp_columns.samp_string.resize(FORMAT.strings);
 
-        if(samplesON){
+        if(hasDetSamples){ // only Number=A FORMAT fields: everything goes to DF4, DF3 stays empty
             samp_columns.var_id.resize((num_lines-1)*samp_columns.numSample, 0);
             samp_columns.samp_id.resize((num_lines-1)*samp_columns.numSample, static_cast<unsigned short>(0));
         }
@@ -626,6 +632,14 @@ public:
                     var_columns.in_float.push_back(info_float_tmp);
                     info_map[INFO.ID[i]] = 2;
                     var_columns.info_map1[INFO.ID[i]] = 2;
+                } else if(strcmp(&INFO.Type[i][0], "String")==0 && INFO.ID[i] == "TSA"){
+                    // TSA values are encoded as Integer codes (see tsa_code), as on the GPU backend
+                    INFO.ints++;
+                    info_int_tmp.name = INFO.ID[i];
+                    info_int_tmp.i_int.resize(num_lines-1, 0);
+                    var_columns.in_int.push_back(info_int_tmp);
+                    info_map[INFO.ID[i]] = 1;
+                    var_columns.info_map1[INFO.ID[i]] = 1;
                 } else if(strcmp(&INFO.Type[i][0], "String")==0){
                     INFO.strings++;
                     info_string_tmp.name = INFO.ID[i];
@@ -780,9 +794,6 @@ public:
                 // There are samples in the dataset
                 tmp_alt_format[th_ID].init(alt_sample, FORMAT, batch_size);
                 tmp_num_alt_format[th_ID] = 0;
-                tmp_alt_format[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, 0);
-                tmp_alt_format[th_ID].alt_id.resize(batch_size*2*samp_columns.numSample, 0);
-                tmp_alt_format[th_ID].samp_id.resize(batch_size*2*samp_columns.numSample, static_cast<unsigned short>(0));
                 if(FORMAT.hasGT && FORMAT.numGT == 'A'){
                     tmp_alt_format[th_ID].sample_GT.GT.resize(batch_size*2*samp_columns.numSample, (char)0),
                     tmp_alt_format[th_ID].initMapGT();

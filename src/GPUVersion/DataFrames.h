@@ -233,7 +233,7 @@ class alt_columns_df //DF2
      * @param INFO Header element containing alternative info counts.
      * @param batch_size The batch size used for processing.
      */
-    void init(alt_columns_df ref, header_element INFO, long batch_size){
+    void init(const alt_columns_df& ref, const header_element& INFO, long batch_size){
         int numAlt = 2*batch_size;
         var_id.resize(numAlt, 0);
         alt.resize(numAlt, "\0");
@@ -284,7 +284,7 @@ class alt_columns_df //DF2
      * @param INFO Header element containing alternative info counts.
      * @param batch_size The batch size used for processing.
      */
-    void clone(alt_columns_df ref, header_element INFO, long batch_size){
+    void clone(const alt_columns_df& ref, const header_element& INFO, long batch_size){
         int numAlt = INFO.alt_values;
         var_id.resize(numAlt, 0);
         alt.resize(numAlt, "\0");
@@ -477,8 +477,8 @@ class sample_columns_df //aka df3
             }
             cout << "\t";
 
-            for(int j=0; j < sample_GT[0].numb; j++){
-                cout << "GT"<< j << "=" << getGTStringFromChar(sample_GT[j].GT[i]) << ";";
+            for(size_t j=0; j < sample_GT.size(); j++){ // empty without a Number=1 GT column
+                if (i < static_cast<int>(sample_GT[j].GT.size())) cout << "GT"<< j << "=" << getGTStringFromChar(sample_GT[j].GT[i]) << ";";
             }
 
             cout << endl;
@@ -532,10 +532,14 @@ class alt_format_df //aka df4 in progress
      * @param FORMAT Header element containing format information.
      * @param batch_size Batch size used for processing.
      */
-    void init(alt_format_df ref, header_element FORMAT, long batch_size){
+    void init(const alt_format_df& ref, const header_element& FORMAT, long batch_size){
         numSample = ref.numSample;
         sampNames = ref.sampNames;
-        int numAlt = batch_size*numSample*2;
+        // Rows are only written for Number=A FORMAT fields (or GT Number=A); without them
+        // start empty instead of allocating batch_size*numSample*2 rows per thread.
+        const bool has_alt_payload = FORMAT.floats_alt > 0 || FORMAT.ints_alt > 0 || FORMAT.strings_alt > 0 ||
+                                     (FORMAT.hasGT && FORMAT.numGT == 'A');
+        int numAlt = has_alt_payload ? batch_size*numSample*2 : 0;
         var_id.resize(numAlt, 0);
         samp_id.resize(numAlt, 0);
         alt_id.resize(numAlt, (char)0);
@@ -624,7 +628,7 @@ class alt_format_df //aka df4 in progress
      * @param ref Reference alt_format_df to clone from.
      * @param FORMAT Header element containing format information.
      */
-    void clone(alt_format_df ref, header_element FORMAT){
+    void clone(const alt_format_df& ref, const header_element& FORMAT){
         int numAlt = FORMAT.alt_values;
         var_id.resize(numAlt, 0);
         samp_id.resize(numAlt, 0);
@@ -711,7 +715,7 @@ class alt_format_df //aka df4 in progress
             }
 
             cout << "\t";
-            cout << getGTStringFromChar(sample_GT.GT[i]) << ";";
+            if (i < static_cast<int>(sample_GT.GT.size())) cout << getGTStringFromChar(sample_GT.GT[i]) << ";"; // only with GT Number=A
             cout << endl;
         }
     }

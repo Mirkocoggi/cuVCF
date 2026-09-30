@@ -49,7 +49,7 @@ using namespace std;
  * @return int Exit status (0 for success, non-zero for errors)
  *
  * @details Program workflow:
- *  1. Sets up CUDA device
+ *  1. Sets up CUDA device (in vcf_parsed::run)
  *  2. Processes command-line arguments
  *  3. Initializes VCF parser
  *  4. Runs parsing operation
@@ -57,11 +57,10 @@ using namespace std;
  */
 int main(int argc, char *argv[]){
 
-    cudaSetDevice(0);  // Use device 0
-   
-    int opt, num_threadss;
-    char *vcf_filename; 
-   
+
+    int opt, num_threadss = 4;      // -t is optional
+    char *vcf_filename = nullptr;   // -v is required
+
     while ((opt = getopt(argc, argv, "v:t:")) != -1)
     {
         switch (opt)
@@ -71,23 +70,47 @@ int main(int argc, char *argv[]){
             break;
         case 't':
             num_threadss = atoi(optarg);
-            if (num_threadss == 1)
-            {
-                cout << "Single thread execution, sequential process!!" << endl;
-            }
-            else
-            {
-                cout << "Multithreading execution, parallelization on " << num_threadss << " threads!!" << endl;
-            }
             break;
-        case '?':
-            cout << "Unknown option: " << optopt << endl;
-            break;
+        default: // '?': getopt already printed the error
+            cerr << "Usage: " << argv[0] << " -v <file.vcf[.gz]> [-t <threads>]" << endl;
+            return 1;
         }
     }
-    
+    if (vcf_filename == nullptr || num_threadss < 1) {
+        cerr << "Usage: " << argv[0] << " -v <file.vcf[.gz]> [-t <threads>]" << endl;
+        return 1;
+    }
+
+    if (num_threadss == 1)
+    {
+        cout << "Single thread execution, sequential process!!" << endl;
+    }
+    else
+    {
+        cout << "Multithreading execution, parallelization on " << num_threadss << " threads!!" << endl;
+    }
+
     vcf_parsed vcf;
-    vcf.run(vcf_filename, num_threadss);
+    auto s = std::chrono::steady_clock::now();
+    try {
+        vcf.run(vcf_filename, num_threadss);
+    } catch (const std::exception& ex) {
+        cerr << "ERROR: " << ex.what() << endl;
+        return 1;
+    }
+    auto e = std::chrono::steady_clock::now();
+    cerr << "vcf_parsed::run: " << std::chrono::duration<double, std::milli>(e - s).count() << " ms" << endl;
+
+    // Preview of the four DataFrames
+    cout << "------------------------------" << endl;
+    vcf.var_columns.print(10);
+    cout << "------------------------------" << endl;
+    vcf.alt_columns.print(10);
+    cout << "------------------------------" << endl;
+    vcf.samp_columns.print(10);
+    cout << "------------------------------" << endl;
+    vcf.alt_sample.print(10);
+    cout << "------------------------------" << endl;
 
     return 0;
 }

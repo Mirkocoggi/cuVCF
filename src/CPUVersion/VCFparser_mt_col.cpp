@@ -34,48 +34,6 @@
 using namespace std;
 
 /**
- * @brief Safely decompresses a gzipped VCF file
- * 
- * @param vcf_filename Path to the gzipped VCF file
- * 
- * @details Uses fork() and execlp() to safely execute gzip for decompression.
- * The function handles process management and error conditions:
- *   1. Checks for .gz extension
- *   2. Forks a child process for decompression
- *   3. Parent process waits for completion
- *   4. Updates filename after successful decompression
- * 
- * @note Uses system calls that are POSIX-compliant
- */
-void unzip_gz_file(char* vcf_filename) {
-    // Check the extension ".gz"
-    if (strcmp(vcf_filename + strlen(vcf_filename) - 3, ".gz") == 0) {
-        pid_t pid = fork();
-        if (pid == 0) {
-            // Child process
-            execlp("gzip", "gzip", "-df", vcf_filename, nullptr);
-            // If execlp fails
-            cout<< "ERROR: Failed to execute gzip command" << std::endl;
-            exit(EXIT_FAILURE);
-        } else if (pid > 0) {
-            // Parent process waits for the child process
-            int status;
-            waitpid(pid, &status, 0);
-            if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-                // Remove ".gz" from the filename
-                char* mutable_vcf_filename = const_cast<char*>(vcf_filename);
-                mutable_vcf_filename[strlen(vcf_filename) - 3] = '\0';
-            } else {
-                cout<< "ERROR: cannot unzip file" << std::endl;
-            }
-        } else {
-            // Error in the fork() call
-            cout<< "ERROR: Failed to fork process" << std::endl;
-        }
-    }
-}
-
-/**
  * @brief Program entry point
  * 
  * @param argc Number of command-line arguments
@@ -89,10 +47,10 @@ void unzip_gz_file(char* vcf_filename) {
  * Creates and runs a vcf_parsed instance to process the input file.
  */
 int main(int argc, char *argv[]){
-   
-    int opt, num_threadss;
-    char *vcf_filename; 
-   
+
+    int opt, num_threadss = 4;      // -t is optional
+    char *vcf_filename = nullptr;   // -v is required
+
     while ((opt = getopt(argc, argv, "v:t:")) != -1)
     {
         switch (opt)
@@ -102,24 +60,47 @@ int main(int argc, char *argv[]){
             break;
         case 't':
             num_threadss = atoi(optarg);
-            if (num_threadss == 1)
-            {
-                cout << "Single thread execution, sequential process!!" << endl;
-            }
-            else
-            {
-                cout << "Multithreading execution, parallelization on " << num_threadss << " threads!!" << endl;
-            }
             break;
-        case '?':
-            cout << "Unknown option: " << optopt << endl;
-            break;
+        default: // '?': getopt already printed the error
+            cerr << "Usage: " << argv[0] << " -v <file.vcf[.gz]> [-t <threads>]" << endl;
+            return 1;
         }
     }
+    if (vcf_filename == nullptr || num_threadss < 1) {
+        cerr << "Usage: " << argv[0] << " -v <file.vcf[.gz]> [-t <threads>]" << endl;
+        return 1;
+    }
 
-    
+    if (num_threadss == 1)
+    {
+        cout << "Single thread execution, sequential process!!" << endl;
+    }
+    else
+    {
+        cout << "Multithreading execution, parallelization on " << num_threadss << " threads!!" << endl;
+    }
+
     vcf_parsed vcf;
-    vcf.run(vcf_filename, num_threadss);
+    auto s = std::chrono::steady_clock::now();
+    try {
+        vcf.run(vcf_filename, num_threadss);
+    } catch (const std::exception& ex) {
+        cerr << "ERROR: " << ex.what() << endl;
+        return 1;
+    }
+    auto e = std::chrono::steady_clock::now();
+    cerr << "vcf_parsed::run: " << std::chrono::duration<double, std::milli>(e - s).count() << " ms" << endl;
+
+    // Preview of the four DataFrames
+    cout << "------------------------------" << endl;
+    vcf.var_columns.print(10);
+    cout << "------------------------------" << endl;
+    vcf.alt_columns.print(10);
+    cout << "------------------------------" << endl;
+    vcf.samp_columns.print(10);
+    cout << "------------------------------" << endl;
+    vcf.alt_sample.print(10);
+    cout << "------------------------------" << endl;
 
     return 0;
 }
