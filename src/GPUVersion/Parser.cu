@@ -572,8 +572,8 @@ void vcf_parsed::get_and_parse_header(ifstream *file){
     while (getline(*file, line) && line[0]=='#' && line[1]=='#'){
         header.append(line + '\n');
         header_size += line.length() + 1;
-        bool Info = (line[2]=='I');
-        bool Format = (line[2]=='F' && line[3]=='O');
+        bool Info = (line.rfind("##INFO=<", 0) == 0);
+        bool Format = (line.rfind("##FORMAT=<", 0) == 0);
         
         if(Info || Format){
             // Attributes are looked up by name: the VCF spec does not fix their order.
@@ -605,7 +605,7 @@ void vcf_parsed::get_and_parse_header(ifstream *file){
     }
 
     vector<string> tmp_split;
-    boost::split(tmp_split, line, boost::is_any_of("\t "));
+    boost::split(tmp_split, line, boost::is_any_of("\t")); // tab only: sample names may contain spaces
     if(tmp_split.size() > 9){
         samplesON = true;
         samp_columns.numSample = tmp_split.size() - 9;
