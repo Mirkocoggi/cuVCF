@@ -425,6 +425,7 @@ void vcf_parsed::device_free() {
         CUDA_CHECK_ERROR(cudaFree(d_SC_samp_flag->name));
         CUDA_CHECK_ERROR(cudaFree(d_SC_samp_flag->numb));
         CUDA_CHECK_ERROR(cudaFree(d_SC_samp_int->i_int));
+        CUDA_CHECK_ERROR(cudaFree(d_SC_samp_int->name));
         CUDA_CHECK_ERROR(cudaFree(d_SC_samp_int->numb));
         CUDA_CHECK_ERROR(cudaFree(d_SC_sample_GT->GT));
         CUDA_CHECK_ERROR(cudaFree(d_SC_sample_GT->numb));
