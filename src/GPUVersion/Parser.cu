@@ -31,6 +31,8 @@
 #include <unistd.h>
 #include <atomic>
 #include <cerrno>
+#include <charconv>
+#include <unordered_map>
 
 #include <boost/algorithm/string.hpp>
 #include <chrono>
@@ -1143,6 +1145,7 @@ void vcf_parsed::prebuild_chrom_filter_maps(){
     */
 void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
     prebuild_chrom_filter_maps();
+    build_host_lookup();
 
     // The CUDA worker runs next to the host parse: an exception thrown there would call
     // std::terminate, so it is caught and rethrown on this thread after join().
@@ -1168,10 +1171,12 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
     int totAlt = 0;
     int totSampAlt = 0;
 
-    #pragma omp parallel 
+    // One chunk per index (not per OpenMP thread): every chunk is parsed even with fewer threads
+    #pragma omp parallel for schedule(static)
+    for(int th_ID = 0; th_ID < num_threads; th_ID++)
     {
         long start, end;
-        int th_ID = omp_get_thread_num();
+        format_plan_cache plans; // FORMAT templates classified in this chunk
         // Temporary structure of the thread with alternatives.
         tmp_alt[th_ID].init(alt_columns, INFO, batch_size);
         
@@ -1191,7 +1196,7 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
 
             // For each line in the batch
             for(long i=start; i<end && i<num_lines; i++){ 
-                get_vcf_line_in_var_columns_format(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]), &samp_columns, &FORMAT, &(tmp_num_alt_format[th_ID]), &(tmp_alt_format[th_ID]));
+                get_vcf_line_in_var_columns_format(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]), &samp_columns, &FORMAT, &(tmp_num_alt_format[th_ID]), &(tmp_alt_format[th_ID]), &plans);
             }
             tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
             tmp_alt[th_ID].alt_id.resize(tmp_num_alt[th_ID]);
@@ -1426,16 +1431,222 @@ static void ensure_alt_format_capacity(alt_format_df* tmp_alt_format, int needed
     if(!tmp_alt_format->sample_GT.GT.empty()) tmp_alt_format->sample_GT.GT.resize(needed, (char)0);
 }
 
+// ---- Host line parsing -------------------------------------------------------------------------
+// The host side parses what the kernel does not: CHROM, ID, REF, ALT, FILTER, INFO String Number=1,
+// INFO Number=A, FORMAT String, FORMAT Number=A and GT Number=A. Fields are walked with pointers
+// (no std::string/boost::split per field) and keys are resolved once, in build_host_lookup.
+
+static inline bool is_field_end(char c){ return c == '\t' || c == ' ' || c == '\n'; }
+
+// End of the field starting at p (a tab, a space or the end of the line)
+static inline const char* field_end(const char* p, const char* e){
+    while(p < e && !is_field_end(*p)) ++p;
+    return p;
+}
+
+// Next field after a field ending at p
+static inline const char* next_field(const char* p, const char* e){
+    return (p < e && (*p == '\t' || *p == ' ')) ? p + 1 : p;
+}
+
+// Calls f(token_begin, token_end, index) for every sep-separated token of [b, e) (one token if none)
+template <class F>
+static inline int for_each_token(const char* b, const char* e, char sep, F&& f){
+    int n = 0;
+    for(const char* t = b;; ++n){
+        const char* q = static_cast<const char*>(memchr(t, sep, e - t));
+        if(!q) q = e;
+        f(t, q, n);
+        if(q == e) return n + 1;
+        t = q + 1;
+    }
+}
+
+static inline int count_tokens(const char* b, const char* e, char sep){
+    int n = 1;
+    for(const char* q = b; (q = static_cast<const char*>(memchr(q, sep, e - q))); ++q) ++n;
+    return n;
+}
+
+// Same result as safe_stoi (std::stoi): leading spaces and an optional sign, 0 if nothing parses or out of range
+static inline int parse_int_token(const char* b, const char* e){
+    while(b < e && isspace(static_cast<unsigned char>(*b))) ++b;
+    if(e - b > 1 && *b == '+' && isdigit(static_cast<unsigned char>(b[1]))) ++b;
+    int v = 0;
+    return std::from_chars(b, e, v).ec == std::errc() ? v : 0;
+}
+
+// Same result as safe_stof (std::stof is strtof: 0 if nothing parses or on ERANGE)
+static inline float parse_float_token(const char* b, const char* e){
+    char buf[64];
+    std::string big;
+    const size_t n = e - b;
+    const char* s = buf;
+    if(n < sizeof(buf)){ memcpy(buf, b, n); buf[n] = '\0'; }
+    else{ big.assign(b, n); s = big.c_str(); }
+    char* end;
+    errno = 0;
+    const float v = strtof(s, &end);
+    return (end == s || errno == ERANGE) ? 0.0f : v;
+}
+
+/**
+ * @brief Builds the read-only lookup tables used by the parallel host parse.
+ *
+ * Maps CHROM / FILTER names to their codes, and every INFO key to its type code and the index of its
+ * host-side column (in_string, alt_int, alt_float or alt_string; -1 when the host has nothing to do).
+ */
+void vcf_parsed::build_host_lookup(){
+    host_chrom.clear();
+    host_filter.clear();
+    host_info.clear();
+    for(const auto& kv : var_columns.chrom_map) host_chrom.emplace(kv.first, kv.second);
+    for(const auto& kv : var_columns.filter_map) host_filter.emplace(kv.first, kv.second);
+    auto index_of = [](const auto& columns, const std::string& name){
+        for(size_t el = 0; el < columns.size(); el++) if(columns[el].name == name) return static_cast<int>(el);
+        return -1;
+    };
+    for(const auto& kv : var_columns.info_map1){
+        int el = -1;
+        switch(kv.second){
+            case STRING:     el = index_of(var_columns.in_string, kv.first); break;
+            case INT_ALT:    el = index_of(alt_columns.alt_int, kv.first); break;
+            case FLOAT_ALT:  el = index_of(alt_columns.alt_float, kv.first); break;
+            case STRING_ALT: el = index_of(alt_columns.alt_string, kv.first); break;
+        }
+        host_info.emplace(kv.first, host_key{kv.second, el});
+    }
+}
+
+/**
+ * @brief Classifies the fields of a FORMAT template once: what the host does for each position.
+ */
+format_plan vcf_parsed::make_format_plan(const char* b, const char* e){
+    format_plan plan;
+    for_each_token(b, e, ':', [&](const char* tb, const char* te, int){
+        const std::string key(tb, te - tb);
+        format_step step;
+        if(key == "GT"){
+            // GT with Number=A goes to DF4; GT Number=1 is parsed by the kernel; an undeclared GT is skipped
+            if(samp_columns.sample_GT.empty() && FORMAT.hasGT) step.kind = format_step::GT_ALT;
+        }else{
+            const int code = var_columns.info_code(key);
+            const int code1 = var_columns.info_code(key + "1");
+            auto index_of = [&](const auto& columns, bool exact){
+                for(size_t el = 0; el < columns.size(); el++)
+                    if(exact ? columns[el].name == key : format_name_matches(columns[el].name, key)) return static_cast<int>(el);
+                return -1;
+            };
+            if(code == STRING_FORMAT || code1 == STRING_FORMAT){
+                step.el = index_of(samp_columns.samp_string, false);
+                if(step.el >= 0){ step.kind = format_step::STR; step.numb = samp_columns.samp_string[step.el].numb; }
+            }else if(code == INT_FORMAT || code1 == INT_FORMAT || code == FLOAT_FORMAT || code1 == FLOAT_FORMAT){
+                // parsed by the kernel
+            }else if(code == STRING_FORMAT_ALT){
+                step.el = index_of(alt_sample.samp_string, true);
+                if(step.el >= 0) step.kind = format_step::STR_ALT;
+            }else if(code == INT_FORMAT_ALT){
+                step.el = index_of(alt_sample.samp_int, true);
+                if(step.el >= 0) step.kind = format_step::INT_ALT;
+            }else if(code == FLOAT_FORMAT_ALT){
+                step.el = index_of(alt_sample.samp_float, true);
+                if(step.el >= 0) step.kind = format_step::FLT_ALT;
+            }
+        }
+        plan.steps.push_back(step);
+        if(step.kind != format_step::NONE) plan.used = plan.steps.size();
+    });
+    return plan;
+}
+
+/**
+ * @brief Parses the fixed fields and INFO of a record (everything up to FORMAT).
+ * @return Pointer to the field after INFO.
+ */
+const char* vcf_parsed::parse_record_head(const char* p, const char* e, long i, alt_columns_df* tmp_alt, int* tmp_num_alt){
+    if(p < e && *p == '\n') ++p;
+
+    // CHROM (chrom_map is filled before the parallel parse, read only here)
+    const char* q = field_end(p, e);
+    auto chrom_it = host_chrom.find(std::string_view(p, q - p));
+    var_columns.chrom[i] = (chrom_it != host_chrom.end()) ? chrom_it->second : static_cast<unsigned char>(0);
+    p = next_field(q, e);
+    // POS: on device
+    p = next_field(field_end(p, e), e);
+    // ID
+    q = field_end(p, e);
+    var_columns.id[i].assign(p, q - p);
+    p = next_field(q, e);
+    // REF
+    q = field_end(p, e);
+    var_columns.ref[i].assign(p, q - p);
+    p = next_field(q, e);
+    // ALT: one DF2 row per allele
+    q = field_end(p, e);
+    const int base = *tmp_num_alt;
+    const int local_alt = count_tokens(p, q, ',');
+    ensure_alt_capacity(tmp_alt, base + local_alt);
+    for_each_token(p, q, ',', [&](const char* tb, const char* te, int y){
+        tmp_alt->alt[base + y].assign(tb, te - tb);
+        tmp_alt->alt_id[base + y] = (char)y;
+        tmp_alt->var_id[base + y] = i;
+    });
+    p = next_field(q, e);
+    // QUAL: on device
+    p = next_field(field_end(p, e), e);
+    // FILTER
+    q = field_end(p, e);
+    auto filter_it = host_filter.find(std::string_view(p, q - p));
+    var_columns.filter[i] = (filter_it != host_filter.end()) ? filter_it->second : static_cast<char>(0);
+    p = next_field(q, e);
+
+    // INFO: key=value entries separated by ';' (an entry with no or more than one '=' is ignored)
+    q = field_end(p, e);
+    for_each_token(p, q, ';', [&](const char* tb, const char* te, int){
+        const char* eq = static_cast<const char*>(memchr(tb, '=', te - tb));
+        if(!eq || memchr(eq + 1, '=', te - eq - 1)) return;
+        auto it = host_info.find(std::string_view(tb, eq - tb));
+        if(it == host_info.end() || it->second.el < 0) return;
+        const int el = it->second.el;
+        const char* vb = eq + 1;
+        switch(it->second.code){
+            case STRING:
+                var_columns.in_string[el].i_string[i].assign(vb, te - vb);
+                break;
+            case INT_ALT:
+            case FLOAT_ALT:
+            case STRING_ALT: {
+                // One value per ALT; a missing value ('.' is a single token) gives 0 / ""
+                int y = 0;
+                for_each_token(vb, te, ',', [&](const char* vtb, const char* vte, int k){
+                    if(k >= local_alt) return;
+                    if(it->second.code == INT_ALT) tmp_alt->alt_int[el].i_int[base + k] = parse_int_token(vtb, vte);
+                    else if(it->second.code == FLOAT_ALT) tmp_alt->alt_float[el].i_float[base + k] = (__half)parse_float_token(vtb, vte);
+                    else tmp_alt->alt_string[el].i_string[base + k].assign(vtb, vte - vtb);
+                    y = k + 1;
+                });
+                for(; y < local_alt; y++){
+                    if(it->second.code == INT_ALT) tmp_alt->alt_int[el].i_int[base + y] = 0;
+                    else if(it->second.code == FLOAT_ALT) tmp_alt->alt_float[el].i_float[base + y] = (__half)0.0f;
+                    else tmp_alt->alt_string[el].i_string[base + y] = "";
+                }
+                break;
+            }
+        }
+    });
+    *tmp_num_alt = base + local_alt;
+    return next_field(q, e);
+}
+
 /**
     * @brief Parses a VCF line and populates variant columns data.
     *
-    * This function processes a single VCF line (from index @p start to @p end) by reading it character by character.
-    * It extracts key variant fields such as chromosome, variant ID, reference allele, alternative alleles,
-    * filter information, and the INFO field. The alternative allele field is split using commas and stored in
-    * the provided alt_columns_df structure (@p tmp_alt). The count of alternative alleles processed is tracked by
-    * the integer pointed to by @p tmp_num_alt.
+    * This function processes a single VCF line (from index @p start to @p end). It extracts the host-side
+    * fields (chromosome, variant ID, reference allele, alternative alleles, filter and the INFO fields the
+    * kernel does not parse). The alternative alleles are stored in the provided alt_columns_df structure
+    * (@p tmp_alt), and @p tmp_num_alt counts the alternative alleles processed.
     *
-    * @param line Pointer to the VCF line as a C-string.
+    * @param line Pointer to the VCF body.
     * @param start The starting index of the line within the file.
     * @param end The ending index of the line within the file.
     * @param i The index (row number) corresponding to the current variant.
@@ -1443,211 +1654,19 @@ static void ensure_alt_format_capacity(alt_format_df* tmp_alt_format, int needed
     * @param tmp_num_alt Pointer to an integer tracking the current number of alternative alleles processed.
     */
 void vcf_parsed::get_vcf_line_in_var_columns(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt)
-{ 
-    bool find1 = false;
-    long iter=0;
-    int local_alt = 1;
-    string tmp="\0";
-    vector<string> tmp_split;
-    vector<string> tmp_format_split;
-
-    if(line[start+iter]=='\n'){
-        iter++;
-    } 
-
-    //Chromosome
-    while(!find1){
-        if(line[start+iter]=='\t'||line[start+iter]==' '){
-            find1 = true;
-            iter++;
-            // chrom_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
-            auto chrom_it = var_columns.chrom_map.find(tmp);
-            var_columns.chrom[i] = (chrom_it != var_columns.chrom_map.end()) ? chrom_it->second : static_cast<unsigned char>(0);
-        }else{
-            tmp += line[start+iter];
-            iter++;
-        }
-    }
-
-    //Position on device
-    // Salta la sottostringa delimitata da '\t' o ' '
-    while (line[start + iter] != '\t' && line[start + iter] != ' ') {
-        iter++;
-    }
-    iter++; // Salta anche il delimitatore
-
-    //ID
-    tmp="\0";
-    find1=false;
-    while(!find1){
-        if(line[start+iter]=='\t'||line[start+iter]==' '){
-            find1 = true;
-            iter++;
-            var_columns.id[i] = tmp;
-        }else{
-            tmp += line[start+iter];
-            iter++;
-        }
-    }
-
-    //Reference
-    tmp="\0";
-    find1=false;
-    while(!find1){
-        if(line[start+iter]=='\t'||line[start+iter]==' '){
-            find1 = true;
-            iter++;
-            var_columns.ref[i] = tmp;
-        }else{
-            tmp += line[start+iter];
-            iter++;
-        }
-    }
-
-    //Alternative
-    tmp="\0";
-    find1=false;
-    while(!find1){
-        if(line[start+iter]=='\t'||line[start+iter]==' '){
-            find1 = true;
-            iter++;
-            boost::split(tmp_split, tmp, boost::is_any_of(","));
-            local_alt = tmp_split.size();
-            ensure_alt_capacity(tmp_alt, (*tmp_num_alt) + local_alt);
-            for(int y = 0; y<local_alt; y++){
-                (*tmp_alt).alt[(*tmp_num_alt) + y] = tmp_split[y];
-                (*tmp_alt).alt_id[(*tmp_num_alt) + y] = (char)y;
-                (*tmp_alt).var_id[(*tmp_num_alt) + y] = i;
-            }
-        }else{
-            tmp += line[start+iter];
-            iter++;
-        }
-    }
-
-    //Quality - on device
-    while (line[start + iter] != '\t' && line[start + iter] != ' ') {
-        iter++;
-    }
-    iter++;
-    
-    //Filter
-    tmp="\0";
-    find1=false;
-    while(!find1){
-        if(line[start+iter]=='\t'||line[start+iter]==' '){
-            find1 = true;
-            iter++;
-            // filter_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
-            auto filter_it = var_columns.filter_map.find(tmp);
-            var_columns.filter[i] = (filter_it != var_columns.filter_map.end()) ? filter_it->second : static_cast<char>(0);
-        }else{
-            tmp += line[start+iter];
-            iter++;
-        }
-    }
-
-    //Info
-    tmp="\0";
-    find1=false;
-    bool find_info_type = false;
-    bool find_info_elem = false;
-    int el=0;
-    while(!find1){
-        if(line[start+iter]=='\t'||line[start+iter]==' '||line[start+iter]=='\n'){
-            find1 = true;
-            iter++;
-            vector<string> tmp_el;
-            boost::split(tmp_el, tmp, boost::is_any_of(";")); //Info arguments separation
-            vector<string> tmp_elems;
-            for(int ii=0; ii<tmp_el.size(); ii++){
-                boost::split(tmp_elems, tmp_el[ii], boost::is_any_of("=")); //info_id separation from contents
-                find_info_type = false;
-                find_info_elem = false;
-                if(tmp_elems.size()==2){
-                    while(!find_info_type){
-                        if(var_columns.info_code(tmp_elems[0])==STRING){
-                            //String
-                            el=0;
-                            while(!find_info_elem){
-                                if(var_columns.in_string[el].name == tmp_elems[0]){
-                                    var_columns.in_string[el].i_string[i] = tmp_elems[1];
-                                    find_info_elem = true;
-                                } 
-                                el++;
-                            }
-                            find_info_type = true;
-                        }else if(var_columns.info_code(tmp_elems[0])==INT_ALT){
-                            //Int Alt
-                            el=0;
-                            while(!find_info_elem){
-                                if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
-                                    boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
-                                    for(int y = 0; y<local_alt; y++){
-                                        (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? safe_stoi(tmp_split[y]) : 0; // "." has a single token
-                                    }
-                                    find_info_elem = true;
-                                }
-                                el++;
-                            }
-                            find_info_type = true;
-                        }else if(var_columns.info_code(tmp_elems[0])==FLOAT_ALT){
-                            //Float Alt
-                            el=0;
-                            while(!find_info_elem){
-                                if((*tmp_alt).alt_float[el].name == tmp_elems[0]){
-                                    boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
-                                    
-                                    for(int y = 0; y<local_alt; y++){
-                                        try{
-                                            (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? (__half)safe_stof(tmp_split[y]) : (__half)0.0f; // "." has a single token
-                                        }catch (const std::exception& e){
-                                            (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
-                                        }
-                                    }
-                                    find_info_elem = true;
-                                }
-                                el++;
-                            }
-                            find_info_type = true;
-                        }else if(var_columns.info_code(tmp_elems[0])==STRING_ALT){
-                            //String Alt
-                            el=0;
-                            while(!find_info_elem){
-                                if((*tmp_alt).alt_string[el].name == tmp_elems[0]){
-                                    boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
-                                    for(int y = 0; y<local_alt; y++){
-                                        (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? tmp_split[y] : ""; // "." has a single token
-                                    }
-                                    find_info_elem = true;
-                                }
-                                el++;
-                            }
-                            find_info_type = true;                            
-                        }else{
-                            find_info_type = true;
-                        }
-                    }
-                } 
-            }
-        }else{
-            tmp += line[start+iter];
-            iter++;
-        }
-    }
-    (*tmp_num_alt) = (*tmp_num_alt)+local_alt;
+{
+    parse_record_head(line + start, line + end, i, tmp_alt, tmp_num_alt);
 }
 
 /**
-    * @brief Parses a VCF line with formatted variant and sample data.
+    * @brief Parses a VCF line with sample data.
     *
-    * This function processes a single VCF line to extract both variant and sample-related information,
-    * following a predefined FORMAT template. It parses the chromosome, variant ID, reference allele,
-    * alternative alleles, and filter field, and then further splits the FORMAT field to extract per-sample
-    * data (e.g., genotype, float, integer, and string values). The extracted sample data is stored in the
-    * provided alt_format_df structure (@p tmp_alt_format), while variant data is updated in the global structures.
+    * Parses the record head like get_vcf_line_in_var_columns, then the FORMAT template and the samples.
+    * The template is classified once (format_plan, cached per chunk in @p plans): when no FORMAT field
+    * needs the host (e.g. only GT Number=1 and numeric fields, all parsed by the kernel) the samples are
+    * not scanned at all, otherwise each sample is split only up to the last field the host needs.
     *
-    * @param line Pointer to the VCF line as a C-string.
+    * @param line Pointer to the VCF body.
     * @param start The starting index of the line within the file.
     * @param end The ending index of the line within the file.
     * @param i The index (row number) corresponding to the current variant.
@@ -1657,363 +1676,75 @@ void vcf_parsed::get_vcf_line_in_var_columns(char *line, long start, long end, l
     * @param FORMAT Pointer to a header_element structure describing the FORMAT fields.
     * @param tmp_num_alt_format Pointer to an integer tracking the number of formatted alternative entries processed.
     * @param tmp_alt_format Pointer to an alt_format_df structure for storing formatted sample data.
+    * @param plans Per-chunk cache of the classified FORMAT templates.
     */
-void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt, sample_columns_df* sample, header_element* FORMAT, int *tmp_num_alt_format, alt_format_df* tmp_alt_format)
+void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt, sample_columns_df* sample, header_element* FORMAT, int *tmp_num_alt_format, alt_format_df* tmp_alt_format, format_plan_cache* plans)
 {
-    bool find1 = false;
-    long iter=0;
-    int local_alt = 1;
-    string tmp="\0";
-    vector<string> tmp_split;
-    vector<string> tmp_format_split;
-    vector<string> tmp_subSplit;
+    const char* e = line + end;
+    const char* p = parse_record_head(line + start, e, i, tmp_alt, tmp_num_alt);
 
-    if(line[start+iter]=='\n'){
-        iter++;
-    } 
-    //Chromosome
-    while(!find1){
-        if(line[start+iter]=='\t'||line[start+iter]==' '){
-            find1 = true;
-            iter++;
-            // chrom_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
-            auto chrom_it = var_columns.chrom_map.find(tmp);
-            var_columns.chrom[i] = (chrom_it != var_columns.chrom_map.end()) ? chrom_it->second : static_cast<unsigned char>(0);
-        }else{
-            tmp += line[start+iter];
-            iter++;
-        }
+    // FORMAT template
+    const char* q = field_end(p, e);
+    const std::string template_key(p, q - p);
+    auto plan_it = plans->find(template_key);
+    if(plan_it == plans->end()){
+        plan_it = plans->emplace(template_key, make_format_plan(p, q)).first;
     }
+    const format_plan& plan = plan_it->second;
+    if(plan.used == 0) return; // nothing for the host in this record's samples
+    p = next_field(q, e);
 
-    //Position on device
-    // Salta la sottostringa delimitata da '\t' o ' '
-    while (line[start + iter] != '\t' && line[start + iter] != ' ') {
-        iter++;
-    }
-    iter++; // Salta anche il delimitatore
-
-    //ID
-    tmp="\0";
-    find1=false;
-    while(!find1){
-        if(line[start+iter]=='\t'||line[start+iter]==' '){
-            find1 = true;
-            iter++;
-            var_columns.id[i] = tmp;
-        }else{
-            tmp += line[start+iter];
-            iter++;
-        }
-    }
-
-    //Reference
-    tmp="\0";
-    find1=false;
-    while(!find1){
-        if(line[start+iter]=='\t'||line[start+iter]==' '){
-            find1 = true;
-            iter++;
-            var_columns.ref[i] = tmp;
-        }else{
-            tmp += line[start+iter];
-            iter++;
-        }
-    }
-
-    //Alternative
-    tmp="\0";
-    find1=false;
-    while(!find1){
-        if(line[start+iter]=='\t'||line[start+iter]==' '){
-            find1 = true;
-            iter++;
-            boost::split(tmp_split, tmp, boost::is_any_of(","));
-            local_alt = tmp_split.size();
-            ensure_alt_capacity(tmp_alt, (*tmp_num_alt) + local_alt);
-            for(int y = 0; y<local_alt; y++){
-                (*tmp_alt).alt[(*tmp_num_alt) + y] = tmp_split[y];
-                (*tmp_alt).alt_id[(*tmp_num_alt) + y] = (char)y;
-                (*tmp_alt).var_id[(*tmp_num_alt) + y] = i;
-            }
-        }else{
-            tmp += line[start+iter];
-            iter++;
-        }
-    }
-    
-    //Quality - on device
-    while (line[start + iter] != '\t' && line[start + iter] != ' ') {
-        iter++;
-    }
-    iter++;
-
-    //Filter
-    tmp="\0";
-    find1=false;
-    while(!find1){
-        if(line[start+iter]=='\t'||line[start+iter]==' '){
-            find1 = true;
-            iter++;
-            // filter_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
-            auto filter_it = var_columns.filter_map.find(tmp);
-            var_columns.filter[i] = (filter_it != var_columns.filter_map.end()) ? filter_it->second : static_cast<char>(0);
-        }else{
-            tmp += line[start+iter];
-            iter++;
-        }
-    }
-
-    //Info
-    tmp="\0";
-    find1=false;
-    bool find_info_type = false;
-    bool find_info_elem = false;
-    int el=0;
-    while(!find1){
-        if(line[start+iter]=='\t'||line[start+iter]==' '||line[start+iter]=='\n'){
-            find1 = true;
-            iter++;
-            vector<string> tmp_el;
-            boost::split(tmp_el, tmp, boost::is_any_of(";")); //Info arguments separation
-            vector<string> tmp_elems;
-            for(int ii=0; ii<tmp_el.size(); ii++){
-                boost::split(tmp_elems, tmp_el[ii], boost::is_any_of("=")); //info_id separation from contents
-                find_info_type = false;
-                find_info_elem = false;
-                if(tmp_elems.size()==2){
-                    while(!find_info_type){
-                        if(var_columns.info_code(tmp_elems[0])==STRING){
-                            //String
-                            el=0;
-                            while(!find_info_elem){
-                                if(var_columns.in_string[el].name == tmp_elems[0]){
-                                    var_columns.in_string[el].i_string[i] = tmp_elems[1];
-                                    find_info_elem = true;
-                                } 
-                                el++;
-                            }
-                            find_info_type = true;
-                        }else if(var_columns.info_code(tmp_elems[0])==INT_ALT){
-                            //Int Alt
-                            el=0;
-                            while(!find_info_elem){
-                                if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
-                                    boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
-                                    for(int y = 0; y<local_alt; y++){
-                                        (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? safe_stoi(tmp_split[y]) : 0; // "." has a single token
-                                    }
-                                    find_info_elem = true;
-                                }
-                                el++;
-                            }
-                            find_info_type = true;
-                        }else if(var_columns.info_code(tmp_elems[0])==FLOAT_ALT){
-                            //Float Alt
-                            el=0;
-                            while(!find_info_elem){
-                                if((*tmp_alt).alt_float[el].name == tmp_elems[0]){
-                                    boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
-                                    
-                                    for(int y = 0; y<local_alt; y++){
-                                        try{
-                                            (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? (__half)safe_stof(tmp_split[y]) : (__half)0.0f; // "." has a single token
-                                        }catch (const std::exception& e){
-                                            (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
-                                        }
-                                    }
-                                    find_info_elem = true;
-                                }
-                                el++;
-                            }
-                            find_info_type = true;
-                        }else if(var_columns.info_code(tmp_elems[0])==STRING_ALT){
-                            //String Alt
-                            el=0;
-                            while(!find_info_elem){
-                                if((*tmp_alt).alt_string[el].name == tmp_elems[0]){
-                                    boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
-                                    for(int y = 0; y<local_alt; y++){
-                                        (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? tmp_split[y] : ""; // "." has a single token
-                                    }
-                                    find_info_elem = true;
-                                }
-                                el++;
-                            }
-                            find_info_type = true;                            
-                        }else{
-                            find_info_type = true;
-                        }
+    const unsigned int n_samp = sample->numSample;
+    for(unsigned int samp = 0; samp < n_samp && p < e; samp++){
+        q = field_end(p, e);
+        const char* tb = p;
+        for(size_t j = 0; j < plan.used && tb <= q; j++){
+            const char* te = static_cast<const char*>(memchr(tb, ':', q - tb));
+            if(!te) te = q;
+            const format_step& step = plan.steps[j];
+            const size_t cell = i*sample->numSample + samp;
+            switch(step.kind){
+                case format_step::NONE: break;
+                case format_step::STR:
+                    if(step.numb == 1){
+                        sample->samp_string[step.el].i_string[cell].assign(tb, te - tb);
+                    }else{
+                        // Fixed Number>1: columns <ID>0..<ID>k-1; a '.' value has a single token
+                        int got = 0;
+                        for_each_token(tb, te, ',', [&](const char* vb, const char* ve, int k){
+                            if(k < step.numb){ sample->samp_string[step.el + k].i_string[cell].assign(vb, ve - vb); got = k + 1; }
+                        });
+                        for(int k = got; k < step.numb; k++) sample->samp_string[step.el + k].i_string[cell] = "";
                     }
-                } 
-            }
-        }else{
-            tmp += line[start+iter];
-            iter++;
-        }
-    }
-    (*tmp_num_alt) = (*tmp_num_alt)+local_alt;
-    
-    //Format decomposition
-    tmp="\0";
-    find1=false;
-
-    //Format's template
-    while(!find1){
-        if(line[start+iter]=='\t'||line[start+iter]==' '){
-            find1 = true;
-            iter++;
-            boost::split(tmp_format_split, tmp, boost::is_any_of(":"));
-        }else{
-            tmp += line[start+iter];
-            iter++;
-        }
-    }
-
-    int samp;
-    bool find_type = false;
-    bool find_elem = false;
-    for(samp = 0; samp < (*sample).numSample; samp++){
-        tmp="\0";
-        find1=false;
-        while(!find1){
-            if(line[start+iter]=='\t'||line[start+iter]==' '||line[start+iter]=='\n'){
-                find1 = true;
-                iter++;
-                boost::split(tmp_split, tmp, boost::is_any_of(":"));
-                vector<string> tmp_sub;
-                for(int j = 0; j < tmp_split.size(); j++){
-                    find_type = false;
-                    find_elem = false;
-                    while(!find_type){
-                        if(!strcmp(tmp_format_split[j].c_str(), "GT")){
-                            // GT with Number=A goes to DF4; an undeclared GT has no column and is skipped
-                            if((*sample).sample_GT.empty() && (*FORMAT).hasGT){
-                                boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
-                                local_alt = tmp_sub.size();
-                                ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
-                                for(int y = 0; y<local_alt; y++){
-                                    //Fill a tuple for each alternatives
-                                    (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = static_cast<unsigned int>(i); // var_number is still being copied back from the device
-                                    (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
-                                    (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
-                                    (*tmp_alt_format).sample_GT.GT[(*tmp_num_alt_format) + y] = (*tmp_alt_format).GTMap[tmp_sub[y]];
-                                }
-                                (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
+                    break;
+                default: {
+                    // Number=A (and GT Number=A): one DF4 row per value
+                    const int base = *tmp_num_alt_format;
+                    const int local_alt = count_tokens(tb, te, ',');
+                    ensure_alt_format_capacity(tmp_alt_format, base + local_alt);
+                    for_each_token(tb, te, ',', [&](const char* vb, const char* ve, int y){
+                        tmp_alt_format->var_id[base + y] = static_cast<unsigned int>(i); // var_number is still being copied back from the device
+                        tmp_alt_format->samp_id[base + y] = samp;
+                        tmp_alt_format->alt_id[base + y] = (char)y;
+                        switch(step.kind){
+                            case format_step::GT_ALT: {
+                                auto gt = tmp_alt_format->GTMap.find(std::string(vb, ve - vb));
+                                tmp_alt_format->sample_GT.GT[base + y] = (gt != tmp_alt_format->GTMap.end()) ? gt->second : (char)0;
+                                break;
                             }
-                            find_type = true;
-                        }else if(var_columns.info_code(tmp_format_split[j]) == STRING_FORMAT || var_columns.info_code(tmp_format_split[j] + std::to_string(1)) == STRING_FORMAT){
-                            //String - deterministic
-                            int el = 0;
-                            while(!find_elem){
-                                if(format_name_matches((*sample).samp_string[el].name, tmp_format_split[j])){
-                                    if((*sample).samp_string[el].numb==1){ //String with numb = 1
-                                        //Update the corresponing cell
-                                        (*sample).samp_string[el].i_string[i*(*sample).numSample + samp] = tmp_split[j];
-                                    }else{
-                                        //String with numb > 1 (separated by commas)
-                                        //Iterate over the alternatives (lists with the same name + ascending number, e.g., el1, el2, ...)
-                                        //referred with 'el + number'
-                                        vector<string> tmp_sub;
-                                        boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
-                                        for(int k = 0; k<(*sample).samp_string[el].numb; k++){
-                                            // A '.' value has a single token
-                                            (*sample).samp_string[el+k].i_string[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? tmp_sub[k] : "";
-                                        }
-                                    }
-                                    find_elem = true;
-                                }
-                                el++;
-                            }
-                            find_type = true;
-                        }else if(var_columns.info_code(tmp_format_split[j]) == INT_FORMAT || var_columns.info_code(tmp_format_split[j] + std::to_string(1)) == INT_FORMAT){
-                            //Integer - deterministic - on device
-                            find_elem = true;
-                            find_type = true;
-                        }else if(var_columns.info_code(tmp_format_split[j]) == FLOAT_FORMAT || var_columns.info_code(tmp_format_split[j] + std::to_string(1)) == FLOAT_FORMAT){
-                            //Float - deterministic - on device
-                            find_elem = true;
-                            find_type = true;
-                        }else if(var_columns.info_code(tmp_format_split[j]) == STRING_FORMAT_ALT){
-                            //String alternatives
-                            boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
-                            local_alt = tmp_sub.size();
-                            ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
-                            int el = 0;
-                            while(!find_elem){
-                                //Search the corresponding element
-                                if(!(*tmp_alt_format).samp_string[el].name.compare(tmp_format_split[j])){
-                                    for(int y = 0; y<local_alt; y++){
-                                        //Fill a tuple for each alternatives
-                                        (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = static_cast<unsigned int>(i); // var_number is still being copied back from the device
-                                        (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
-                                        (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
-                                        (*tmp_alt_format).samp_string[el].i_string[(*tmp_num_alt_format) + y] = tmp_sub[y];
-                                    }
-                                    find_elem = true;
-                                    (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
-                                }
-                                el++;
-                            }
-                            find_type = true;
-                        }else if(var_columns.info_code(tmp_format_split[j]) == INT_FORMAT_ALT){
-                            //Integer alternatives
-                            boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
-                            local_alt = tmp_sub.size();
-                            ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
-                            int el = 0;
-                            while(!find_elem){
-                                //Search the corresponding element
-                                if(!(*tmp_alt_format).samp_int[el].name.compare(tmp_format_split[j])){
-                                    //Fill a tuple for each alternatives
-                                    for(int y = 0; y<local_alt; y++){
-                                        (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = static_cast<unsigned int>(i); // var_number is still being copied back from the device
-                                        (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
-                                        (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
-                                        (*tmp_alt_format).samp_int[el].i_int[(*tmp_num_alt_format) + y] = safe_stoi(tmp_sub[y]);
-                                    }
-                                    find_elem = true;
-                                    (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
-                                }
-                                el++;
-                            }
-                            find_type = true;
-                        }else if(var_columns.info_code(tmp_format_split[j]) == FLOAT_FORMAT_ALT){
-                            //Float alternatives
-                            boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
-                            local_alt = tmp_sub.size();
-                            ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
-                            int el = 0;
-                            while(!find_elem){ 
-                                //Search the corresponding element
-                                if(!(*tmp_alt_format).samp_float[el].name.compare(tmp_format_split[j])){
-                                    //Fill a tuple for each alternatives
-                                    for(int y = 0; y<local_alt; y++){
-                                        (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = static_cast<unsigned int>(i); // var_number is still being copied back from the device
-                                        (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
-                                        (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
-                                        try{
-                                            (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = (__half)safe_stof(tmp_sub[y]);
-                                        }catch (const std::exception& e){
-                                            (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = 0;
-                                        }
-                                    }
-                                    find_elem = true;
-                                    (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
-                                }
-                                el++;
-                            }
-                            find_type = true;
-                        }else{
-                            // Unsupported or undeclared FORMAT field: skip it (the loop never ended otherwise)
-                            find_type = true;
+                            case format_step::STR_ALT: tmp_alt_format->samp_string[step.el].i_string[base + y].assign(vb, ve - vb); break;
+                            case format_step::INT_ALT: tmp_alt_format->samp_int[step.el].i_int[base + y] = parse_int_token(vb, ve); break;
+                            case format_step::FLT_ALT: tmp_alt_format->samp_float[step.el].i_float[base + y] = (__half)parse_float_token(vb, ve); break;
+                            default: break;
                         }
-                    }
+                    });
+                    *tmp_num_alt_format = base + local_alt;
                 }
-            }else{
-                tmp += line[start+iter];
-                iter++;
             }
+            if(te == q) break;
+            tb = te + 1;
         }
+        p = next_field(q, e);
     }
 }
 

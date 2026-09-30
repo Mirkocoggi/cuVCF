@@ -17,6 +17,9 @@
 
 #include <string>
 #include <map>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
 #include "DataStructures.h"
 #include "DataFrames.h"
 
@@ -41,6 +44,24 @@
  * @note All device memory is automatically managed
  * @warning Requires sufficient GPU memory for file size
  */
+
+/// Host-side handling of one INFO key: its type code and host column (-1 when the host has nothing to do)
+struct host_key { int code; int el; };
+
+/// What the host does for one position of a FORMAT template
+struct format_step {
+    enum kind_t : unsigned char { NONE, GT_ALT, STR, STR_ALT, INT_ALT, FLT_ALT } kind = NONE;
+    int el = -1;   ///< host column (samp_string of DF3, or samp_* of DF4)
+    int numb = 1;  ///< values per sample for STR
+};
+
+/// A classified FORMAT template: used = number of leading fields the host needs (0: skip the samples)
+struct format_plan {
+    std::vector<format_step> steps;
+    size_t used = 0;
+};
+
+using format_plan_cache = std::unordered_map<std::string, format_plan>;
 
 class vcf_parsed
 {
@@ -320,8 +341,23 @@ public:
     * @param FORMAT Pointer to a header_element structure describing the FORMAT fields.
     * @param tmp_num_alt_format Pointer to an integer tracking the number of formatted alternative entries processed.
     * @param tmp_alt_format Pointer to an alt_format_df structure for storing formatted sample data.
+    * @param plans Per-chunk cache of the classified FORMAT templates (see format_plan).
     */
-    void get_vcf_line_in_var_columns_format(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt, sample_columns_df* sample, header_element* FORMAT, int *tmp_num_alt_format, alt_format_df* tmp_alt_format);
+    void get_vcf_line_in_var_columns_format(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt, sample_columns_df* sample, header_element* FORMAT, int *tmp_num_alt_format, alt_format_df* tmp_alt_format, format_plan_cache* plans);
+
+    /// Read-only lookups for the parallel host parse (filled by build_host_lookup)
+    std::unordered_map<std::string_view, unsigned char> host_chrom;
+    std::unordered_map<std::string_view, char> host_filter;
+    std::unordered_map<std::string_view, host_key> host_info;
+
+    /// Fills host_chrom, host_filter and host_info from the header maps (before the parallel parse)
+    void build_host_lookup();
+
+    /// Classifies the FORMAT template [b, e)
+    format_plan make_format_plan(const char* b, const char* e);
+
+    /// Parses the fixed fields and INFO of a record; returns a pointer to the field after INFO
+    const char* parse_record_head(const char* p, const char* e, long i, alt_columns_df* tmp_alt, int* tmp_num_alt);
     
 };
  
