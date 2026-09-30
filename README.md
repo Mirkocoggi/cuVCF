@@ -117,9 +117,11 @@ After an Option B build:
 ./build/VCFparser_gpu -v data/tiny.vcf -t 4
 ```
 
-* `-v <file>` — input VCF (`.vcf`, or `.vcf.gz`: a gzipped input is decompressed **in place**, replacing the `.gz` file)
-* `-t <n>` — number of CPU threads
+* `-v <file>` — input VCF, required (`.vcf`, or `.vcf.gz`: a gzipped input is decompressed **in place**, replacing the `.gz` file)
+* `-t <n>` — number of CPU threads (default 4)
 * `VCFparser_cpu` takes the same options.
+
+The CLI prints the parse time on stderr and the first 10 rows of the four DataFrames on stdout.
 
 For full data access and analysis, the recommended entry point is the **Python bindings** (`CPUParser` / `GPUParser`).
 
