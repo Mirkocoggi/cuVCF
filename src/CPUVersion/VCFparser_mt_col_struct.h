@@ -291,8 +291,8 @@ class sample_columns_df //aka df3
             }
             cout << "\t";
 
-            for(int j=0; j < sample_GT.size(); j++){
-                cout << "GT"<< j << "=" << getGTStringFromChar(sample_GT[j].GT[i]) << ";";
+            for(size_t j=0; j < sample_GT.size(); j++){ // empty without a Number=1 GT column
+                if (i < static_cast<int>(sample_GT[j].GT.size())) cout << "GT"<< j << "=" << getGTStringFromChar(sample_GT[j].GT[i]) << ";";
             }
 
             cout << endl;
@@ -481,7 +481,7 @@ class alt_format_df //aka df4 in progress
             }
 
             cout << "\t";
-            cout << getGTStringFromChar(sample_GT.GT[i]) << ";";
+            if (i < static_cast<int>(sample_GT.GT.size())) cout << getGTStringFromChar(sample_GT.GT[i]) << ";"; // only with GT Number=A
             cout << endl;
         }
     }

@@ -955,32 +955,38 @@ public:
      * @param num_lines 
      */
     void print(long num_lines){
-        int iter = (num_lines>var_number.size()) ? var_number.size() : num_lines;
-        for(long i=0; i<num_lines; i++){
-            cout << "Var" << var_number[i] << ":\t";
-            cout << chrom_map.find(std::string(1, chrom[i]))->first << "\t";
-            cout << to_string(pos[i]) << "\t";
-            cout << id[i] << "\t";
-            cout << ref[i] << "\t";
-            cout << filter_map.find(std::string(1, filter[i]))->first << "\t";
+        // Reverse lookup of a code in chrom_map / filter_map
+        auto name_of = [](const std::map<std::string, char>& m, char code) -> std::string {
+            for (const auto& pair : m) if (pair.second == code) return pair.first;
+            return "nan";
+        };
+        cout << "VarID\tChrom\tPos\tID\tRef\tQUAL\tFilter\tFlag\t\tInt\t\tFloat\t\tString" << endl;
+        long iter = (num_lines > static_cast<long>(var_number.size())) ? var_number.size() : num_lines;
+        for(long i=0; i<iter; i++){
+            cout << var_number[i] << "\t" << name_of(chrom_map, chrom[i]) << "\t" << pos[i] << "\t"
+                 << id[i] << "\t" << ref[i] << "\t";
+            if (static_cast<float>(qual[i]) != -1.0f) cout << static_cast<float>(qual[i]) << "\t";
+            else cout << ".\t";
+            cout << name_of(filter_map, filter[i]) << "\t";
 
-
-            for(int j=0; j<in_flag.size(); j++){
-                cout<<in_flag[j].name<<": "<<in_flag[j].i_flag[i]<<", ";
+            for(size_t j=0; j<in_flag.size(); j++){
+                if (i < static_cast<long>(in_flag[j].i_flag.size()) && in_flag[j].i_flag[i]) cout << in_flag[j].name << ";";
             }
-            for(int j=0; j<in_int.size(); j++){
-                cout<<in_int[j].name<<": "<<in_int[j].i_int[i]<<", ";
+            cout << "\t";
+            for(size_t j=0; j<in_int.size(); j++){
+                if (i < static_cast<long>(in_int[j].i_int.size())) cout << in_int[j].name << ": " << in_int[j].i_int[i] << " ";
             }
-            for(int j=0; j<in_float.size(); j++){
-                cout<<in_float[j].name<<": "<<in_float[j].i_float[i]<<", ";
+            cout << "\t";
+            for(size_t j=0; j<in_float.size(); j++){
+                if (i < static_cast<long>(in_float[j].i_float.size())) cout << in_float[j].name << ": " << static_cast<float>(in_float[j].i_float[i]) << " ";
             }
-            for(int j=0; j<in_string.size(); j++){
-                cout<<in_string[j].name<<": "<<in_string[j].i_string[i]<<", ";
+            cout << "\t";
+            for(size_t j=0; j<in_string.size(); j++){
+                if (i < static_cast<long>(in_string[j].i_string.size())) cout << in_string[j].name << ": " << in_string[j].i_string[i] << " ";
             }
-            cout<<endl;
-
+            cout << endl;
         }
-    }    
+    }
 };
 
 #endif
