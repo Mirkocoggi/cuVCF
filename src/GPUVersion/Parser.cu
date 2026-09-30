@@ -65,7 +65,7 @@ using namespace std;
 
 
 
-// Header attribute helpers (from cuVCF-internal betweenAngle/getAttr).
+// Header attribute helpers.
 /**
  * @brief True if a header Number= value is a fixed count ("0", "1", "2", ...).
  */
@@ -1423,7 +1423,7 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
 }
 
 // Per-thread alternative buffers are pre-sized for ~2 ALTs per line; grow them when a chunk needs more
-// (same approach as the CPU backend in cuVCF-internal).
+// (same approach as the CPU backend).
 static void ensure_alt_capacity(alt_columns_df* tmp_alt, int needed){
     if(needed <= 0 || static_cast<int>(tmp_alt->alt.size()) >= needed) return;
     tmp_alt->var_id.resize(needed, 0);
