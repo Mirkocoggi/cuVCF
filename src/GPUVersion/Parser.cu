@@ -1122,14 +1122,6 @@ void vcf_parsed::populate_runner(int numb_cores){
 }
 
 /**
-    * @brief Populates variant columns by processing VCF lines in parallel.
-    *
-    * Spawns a worker thread to run the CUDA kernel for parsing and uses OpenMP to merge alternative allele
-    * data from multiple threads into the final data structures (alt_columns_df and alt_format_df).
-    *
-    * @param num_threads Number of threads to use for parallel merging.
-    */
-/**
     * @brief Fills var_columns.chrom_map / filter_map single-threaded, before the parallel parse.
     *
     * The parsing threads used to insert into these std::map concurrently (a data race that
@@ -1162,6 +1154,14 @@ void vcf_parsed::prebuild_chrom_filter_maps(){
     }
 }
 
+/**
+    * @brief Populates variant columns by processing VCF lines in parallel.
+    *
+    * Spawns a worker thread to run the CUDA kernel for parsing and uses OpenMP to merge alternative allele
+    * data from multiple threads into the final data structures (alt_columns_df and alt_format_df).
+    *
+    * @param num_threads Number of threads to use for parallel merging.
+    */
 void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
     prebuild_chrom_filter_maps();
 

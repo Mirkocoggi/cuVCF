@@ -271,6 +271,11 @@ public:
     void populate_runner(int numb_cores);
 
     /**
+    * @brief Builds chrom_map and filter_map before the parallel parse (threads only read them).
+    */
+    void prebuild_chrom_filter_maps();
+
+    /**
     * @brief Populates variant columns by processing VCF lines in parallel.
     *
     * Spawns a worker thread to run the CUDA kernel for parsing and uses OpenMP to merge alternative allele
@@ -278,11 +283,6 @@ public:
     *
     * @param num_threads Number of threads to use for parallel merging.
     */
-    /**
-    * @brief Builds chrom_map and filter_map before the parallel parse (threads only read them).
-    */
-    void prebuild_chrom_filter_maps();
-
     void populate_var_columns(int num_threads, int numb_cores);
 
     /**
