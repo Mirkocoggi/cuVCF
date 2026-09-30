@@ -44,21 +44,22 @@
 #include <future>
 #include <string_view>
 #include <stdexcept>
+#include <exception>
 #include <algorithm>
 #include <cctype>
 
 
 using namespace std;
 
+// Throws instead of exit(): exit() would kill the Python interpreter running GPUParser.
+// ponytail: device buffers allocated before the error are not freed; process exit reclaims them.
 #define CUDA_CHECK_ERROR(call)                             \
     do {                                                   \
         cudaError_t err = call;                            \
         if (err != cudaSuccess) {                          \
-            std::cerr << "CUDA error in " << #call         \
-                      << " at " << __FILE__ << ":" << __LINE__ \
-                      << " - " << cudaGetErrorString(err)    \
-                      << std::endl;                          \
-            exit(EXIT_FAILURE);                            \
+            throw std::runtime_error(std::string("CUDA error in ") + #call \
+                      + " at " + __FILE__ + ":" + std::to_string(__LINE__) \
+                      + " - " + cudaGetErrorString(err));  \
         }                                                  \
     } while (0)
 
@@ -143,8 +144,7 @@ void vcf_parsed::run(char* vcf_filename, int num_threadss){
     int deviceCount = 0;
     cudaError_t error = cudaGetDeviceCount(&deviceCount);
     if (error != cudaSuccess || deviceCount == 0) {
-        std::cerr << "No CUDA-capable devices found. Exiting..." << std::endl;
-        exit(1);
+        throw std::runtime_error("no CUDA-capable device found");
     }
 
     int deviceID = 0; 
@@ -1163,7 +1163,17 @@ void vcf_parsed::prebuild_chrom_filter_maps(){
 void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
     prebuild_chrom_filter_maps();
 
-    std::thread worker_thread(&vcf_parsed::populate_runner, this, numb_cores);
+    // The CUDA worker runs next to the host parse: an exception thrown there would call
+    // std::terminate, so it is caught and rethrown on this thread after join().
+    std::exception_ptr worker_error;
+    std::thread worker_thread([this, numb_cores, &worker_error]{
+        try{
+            populate_runner(numb_cores);
+        }catch(...){
+            cudaDeviceSynchronize(); // let queued async copies finish before the host vectors can go away
+            worker_error = std::current_exception();
+        }
+    });
 
     long batch_size = (num_lines-1+num_threads)/num_threads;
     
@@ -1408,7 +1418,8 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
         fut3.get();
         fut4.get();
     }
-    worker_thread.join();    
+    worker_thread.join();
+    if(worker_error) std::rethrow_exception(worker_error);
 }
 
 // Per-thread alternative buffers are pre-sized for ~2 ALTs per line; grow them when a chunk needs more
