@@ -33,6 +33,7 @@
 #include <cerrno>
 #include <charconv>
 #include <unordered_map>
+#include <unordered_set>
 
 #include <boost/algorithm/string.hpp>
 #include <chrono>
@@ -101,6 +102,20 @@ static inline std::string header_attr(std::string_view body, std::string_view ke
 
 // FORMAT columns are named <ID> (Number=1) or <ID>0, <ID>1, ... (Number>1): match the first column
 // of key exactly. A prefix match picked GQX for GQ when GQX was declared first.
+// VCF field walking: fields end at a tab, a space or the end of the line
+static inline bool is_field_end(char c){ return c == '\t' || c == ' ' || c == '\n'; }
+
+// End of the field starting at p (a tab, a space or the end of the line)
+static inline const char* field_end(const char* p, const char* e){
+    while(p < e && !is_field_end(*p)) ++p;
+    return p;
+}
+
+// Next field after a field ending at p
+static inline const char* next_field(const char* p, const char* e){
+    return (p < e && (*p == '\t' || *p == ' ')) ? p + 1 : p;
+}
+
 static inline bool format_name_matches(const std::string& name, const std::string& key){
     return name == key || (name.size() == key.size() + 1 && name.back() == '0' && name.compare(0, key.size(), key) == 0);
 }
@@ -1112,26 +1127,36 @@ void vcf_parsed::prebuild_chrom_filter_maps(){
     var_columns.chrom_map.clear();
     var_columns.filter_map.clear();
 
-    auto is_sep = [&](long p){ return filestring[p] == '\t' || filestring[p] == ' ' || filestring[p] == '\n'; };
-    string key;
-    for(long i = 0; i < num_lines; i++){
-        long p = new_lines_index[i];
-        const long e = new_lines_index[i + 1];
-        if(filestring[p] == '\n') p++;
+    // Each chunk lists its distinct CHROM / FILTER names in order of first appearance; merging the
+    // chunks in file order then gives the same codes as a single sequential pass.
+    const int n_chunks = std::max(1, omp_get_max_threads());
+    const long lines_per_chunk = (num_lines + n_chunks - 1)/n_chunks;
+    std::vector<std::vector<std::string_view>> chunk_chroms(n_chunks), chunk_filters(n_chunks);
 
-        key.clear();
-        while(p < e && !is_sep(p)) key.push_back(filestring[p++]);
-        var_columns.chrom_map.emplace(key, static_cast<unsigned char>(var_columns.chrom_map.size()));
-        if(p < e && filestring[p] != '\n') p++;
+    #pragma omp parallel for schedule(static)
+    for(int c = 0; c < n_chunks; c++){
+        std::unordered_set<std::string_view> seen_chrom, seen_filter;
+        const long first = c*lines_per_chunk, last = std::min(num_lines, first + lines_per_chunk);
+        for(long i = first; i < last; i++){
+            const char* p = filestring + new_lines_index[i];
+            const char* e = filestring + new_lines_index[i + 1];
+            if(p < e && *p == '\n') p++;
 
-        for(int field = 2; field <= 6 && p < e; field++){ // skip POS, ID, REF, ALT, QUAL
-            while(p < e && !is_sep(p)) p++;
-            if(p < e && filestring[p] != '\n') p++;
+            const char* q = field_end(p, e);
+            const std::string_view chrom(p, q - p);
+            if(seen_chrom.insert(chrom).second) chunk_chroms[c].push_back(chrom);
+            p = next_field(q, e);
+
+            for(int field = 2; field <= 6 && p < e; field++) p = next_field(field_end(p, e), e); // skip POS, ID, REF, ALT, QUAL
+
+            q = field_end(p, e);
+            const std::string_view filter(p, q - p);
+            if(seen_filter.insert(filter).second) chunk_filters[c].push_back(filter);
         }
-
-        key.clear();
-        while(p < e && !is_sep(p)) key.push_back(filestring[p++]);
-        var_columns.filter_map.emplace(key, static_cast<char>(var_columns.filter_map.size()));
+    }
+    for(int c = 0; c < n_chunks; c++){
+        for(auto name : chunk_chroms[c]) var_columns.chrom_map.emplace(std::string(name), static_cast<unsigned char>(var_columns.chrom_map.size()));
+        for(auto name : chunk_filters[c]) var_columns.filter_map.emplace(std::string(name), static_cast<char>(var_columns.filter_map.size()));
     }
 }
 
@@ -1435,19 +1460,6 @@ static void ensure_alt_format_capacity(alt_format_df* tmp_alt_format, int needed
 // The host side parses what the kernel does not: CHROM, ID, REF, ALT, FILTER, INFO String Number=1,
 // INFO Number=A, FORMAT String, FORMAT Number=A and GT Number=A. Fields are walked with pointers
 // (no std::string/boost::split per field) and keys are resolved once, in build_host_lookup.
-
-static inline bool is_field_end(char c){ return c == '\t' || c == ' ' || c == '\n'; }
-
-// End of the field starting at p (a tab, a space or the end of the line)
-static inline const char* field_end(const char* p, const char* e){
-    while(p < e && !is_field_end(*p)) ++p;
-    return p;
-}
-
-// Next field after a field ending at p
-static inline const char* next_field(const char* p, const char* e){
-    return (p < e && (*p == '\t' || *p == ' ')) ? p + 1 : p;
-}
 
 // Calls f(token_begin, token_end, index) for every sep-separated token of [b, e) (one token if none)
 template <class F>
