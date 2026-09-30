@@ -51,7 +51,7 @@ using namespace std;
     unsigned int *pos;            ///< Pointer to the array of variant positions.
     __half *qual;                 ///< Pointer to the array of quality scores (half precision).
     __half *in_float;             ///< Pointer to the array of float info values.
-    bool *in_flag;                ///< Pointer to the array of flag info values.
+    uint8_t *in_flag;                ///< Pointer to the array of flag info values.
     int *in_int;                  ///< Pointer to the array of integer info values.
     char* float_name;             ///< Pointer to the float field names.
     char* flag_name;              ///< Pointer to the flag field names.
@@ -60,7 +60,7 @@ using namespace std;
     unsigned int *samp_var_id;    ///< Pointer to the array of sample variant IDs.
     unsigned short *samp_id;      ///< Pointer to the array of sample IDs.
     __half *samp_float;           ///< Pointer to the array of sample float values.
-    bool *samp_flag;              ///< Pointer to the array of sample flag values.
+    uint8_t *samp_flag;              ///< Pointer to the array of sample flag values.
     int *samp_int;                ///< Pointer to the array of sample integer values.
     char* samp_float_name;        ///< Pointer to the sample float field names.
     char* samp_flag_name;         ///< Pointer to the sample flag field names.
@@ -97,7 +97,7 @@ struct info_flag {
  * Contains a pointer to a boolean array for flag values and a pointer to the flag field name.
  */
 struct info_flag_d {
-    bool* i_flag;  ///< Pointer to device flag array.
+    uint8_t* i_flag;  ///< Pointer to device flag array.
     char* name;    ///< Pointer to the flag field name.
 };
 
@@ -175,7 +175,7 @@ struct samp_Flag {
  */
 struct samp_Flag_d {   
     int *tot;    ///< Pointer to total count.
-    bool *i_flag;///< Pointer to device flag array.
+    uint8_t *i_flag;///< Pointer to device flag array.
     char *name;  ///< Pointer to the sample flag field name.
     int *numb;   ///< Pointer to the number of entries per sample.
 };

@@ -322,7 +322,7 @@ void vcf_parsed::device_allocation(){
     }
 
     tmp = var_columns.in_flag.size();
-    cudaMalloc(&(d_VC_in_flag->i_flag), tmp * (num_lines) * sizeof(bool));
+    cudaMalloc(&(d_VC_in_flag->i_flag), tmp * (num_lines) * sizeof(uint8_t));
     cudaMalloc(&(d_VC_in_flag->name), tmp * sizeof(char) * MAX_NAME_SIZE);
 
     for (int i = 0; i < tmp; i++) {
@@ -362,7 +362,7 @@ void vcf_parsed::device_allocation(){
 
         // Allocate and initialize samp_flag
         tmp = samp_columns.samp_flag.size();
-        cudaMalloc(&(d_SC_samp_flag->i_flag), tmp * (num_lines * samp_columns.numSample) * sizeof(bool));
+        cudaMalloc(&(d_SC_samp_flag->i_flag), tmp * (num_lines * samp_columns.numSample) * sizeof(uint8_t));
         cudaMalloc(&(d_SC_samp_flag->name), tmp * sizeof(char) * MAX_NAME_SIZE);
         cudaMalloc(&(d_SC_samp_flag->numb), tmp * sizeof(int));
 
@@ -1085,7 +1085,7 @@ void vcf_parsed::populate_runner(int numb_cores){
     }
 
     for(int i=0; i<var_columns.in_flag.size(); i++){
-        cudaMemcpyAsync(var_columns.in_flag[i].i_flag.data(), d_VC_in_flag->i_flag + i * (num_lines), (num_lines)*sizeof(bool), cudaMemcpyDeviceToHost, stream2);
+        cudaMemcpyAsync(var_columns.in_flag[i].i_flag.data(), d_VC_in_flag->i_flag + i * (num_lines), (num_lines)*sizeof(uint8_t), cudaMemcpyDeviceToHost, stream2);
     }
 
     for(int i=0; i<var_columns.in_int.size(); i++){
@@ -1103,7 +1103,7 @@ void vcf_parsed::populate_runner(int numb_cores){
 
         for (int i = 0; i < samp_columns.samp_flag.size(); i++) {
             cudaMemcpyAsync(samp_columns.samp_flag[i].i_flag.data(), d_SC_samp_flag->i_flag + i * ((num_lines) * samp_columns.numSample), 
-                (num_lines) * samp_columns.numSample * sizeof(bool), cudaMemcpyDeviceToHost, stream2);
+                (num_lines) * samp_columns.numSample * sizeof(uint8_t), cudaMemcpyDeviceToHost, stream2);
         }
 
         for (int i = 0; i < samp_columns.samp_int.size(); i++) {
@@ -1199,9 +1199,6 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
             // There are samples in the dataset
             tmp_alt_format[th_ID].init(alt_sample, FORMAT, batch_size);
             tmp_num_alt_format[th_ID] = 0;
-            tmp_alt_format[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, 0);
-            tmp_alt_format[th_ID].alt_id.resize(batch_size*2*samp_columns.numSample, 0);
-            tmp_alt_format[th_ID].samp_id.resize(batch_size*2*samp_columns.numSample, static_cast<unsigned short>(0));
             if(FORMAT.hasGT && FORMAT.numGT == 'A'){
                 tmp_alt_format[th_ID].sample_GT.GT.resize(batch_size*2*samp_columns.numSample, (char)0),
                 tmp_alt_format[th_ID].initMapGT();

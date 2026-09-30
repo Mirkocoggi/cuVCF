@@ -185,13 +185,16 @@ void merge_member_vector(
     int num_threads,
     std::vector<U> T::* member_ptr
 ) {
+    size_t total = dest.size();
+    for (int i = 0; i < num_threads; i++) total += (tmp_alt[i].*member_ptr).size();
+    dest.reserve(total);
     for (int i = 0; i < num_threads; i++) {
         dest.insert(
             dest.end(),
             std::make_move_iterator((tmp_alt[i].*member_ptr).begin()),
             std::make_move_iterator((tmp_alt[i].*member_ptr).end())
         );
-        (tmp_alt[i].*member_ptr).clear();
+        std::vector<U>().swap(tmp_alt[i].*member_ptr); // releases the memory; clear() keeps the capacity
     }
 }
 
@@ -223,6 +226,11 @@ void merge_nested_member_vector(
     std::vector<S> T::* outer_member_ptr,
     std::vector<V> S::* inner_member_ptr
 ) {
+    for (int j = 0; j < num_nested; j++) {
+        size_t total = (dest[j].*inner_member_ptr).size();
+        for (int i = 0; i < num_threads; i++) total += ((tmp_alt[i].*outer_member_ptr)[j].*inner_member_ptr).size();
+        (dest[j].*inner_member_ptr).reserve(total);
+    }
     for (int i = 0; i < num_threads; i++) {
         for (int j = 0; j < num_nested; j++) {
             (dest[j].*inner_member_ptr).insert(
@@ -230,7 +238,7 @@ void merge_nested_member_vector(
                 std::make_move_iterator(((tmp_alt[i].*outer_member_ptr)[j].*inner_member_ptr).begin()),
                 std::make_move_iterator(((tmp_alt[i].*outer_member_ptr)[j].*inner_member_ptr).end())
             );
-            ((tmp_alt[i].*outer_member_ptr)[j].*inner_member_ptr).clear();
+            std::vector<V>().swap((tmp_alt[i].*outer_member_ptr)[j].*inner_member_ptr);
         }
     }
 }

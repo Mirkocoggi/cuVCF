@@ -96,7 +96,7 @@ class alt_columns_df
     vector<info_int> alt_int;
     int numAlt;
 
-    void init(alt_columns_df ref, header_element INFO, long batch_size){
+    void init(const alt_columns_df& ref, const header_element& INFO, long batch_size){
         int numAlt = 2*batch_size;
         var_id.resize(numAlt, 0);
         alt.resize(numAlt, "\0");
@@ -137,7 +137,7 @@ class alt_columns_df
         }       
     }
 
-    void clone(alt_columns_df ref, header_element INFO, long batch_size){
+    void clone(const alt_columns_df& ref, const header_element& INFO, long batch_size){
         int numAlt = INFO.alt_values;//sigsegv
         var_id.resize(numAlt, 0);
         alt.resize(numAlt, "\0");
@@ -322,10 +322,14 @@ class alt_format_df //aka df4 in progress
     }
     int numSample; 
 
-    void init(alt_format_df ref, header_element FORMAT, long batch_size){
+    void init(const alt_format_df& ref, const header_element& FORMAT, long batch_size){
         numSample = ref.numSample;
         sampNames = ref.sampNames;
-        int numAlt = batch_size*numSample*2;
+        // Rows are only written for Number=A FORMAT fields (or GT Number=A); without them
+        // start empty instead of allocating batch_size*numSample*2 rows per thread.
+        const bool has_alt_payload = FORMAT.floats_alt > 0 || FORMAT.ints_alt > 0 || FORMAT.strings_alt > 0 ||
+                                     (FORMAT.hasGT && FORMAT.numGT == 'A');
+        int numAlt = has_alt_payload ? batch_size*numSample*2 : 0;
         var_id.resize(numAlt, 0);
         samp_id.resize(numAlt, 0);
         alt_id.resize(numAlt, (char)0);
@@ -398,7 +402,7 @@ class alt_format_df //aka df4 in progress
     }
 
     //Not used, need to be updated
-    void clone(alt_format_df ref, header_element FORMAT){
+    void clone(const alt_format_df& ref, const header_element& FORMAT){
         int numAlt = FORMAT.alt_values;
         var_id.resize(numAlt, 0);
         samp_id.resize(numAlt, 0);

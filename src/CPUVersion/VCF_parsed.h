@@ -780,9 +780,6 @@ public:
                 // There are samples in the dataset
                 tmp_alt_format[th_ID].init(alt_sample, FORMAT, batch_size);
                 tmp_num_alt_format[th_ID] = 0;
-                tmp_alt_format[th_ID].var_id.resize(batch_size*2*samp_columns.numSample, 0);
-                tmp_alt_format[th_ID].alt_id.resize(batch_size*2*samp_columns.numSample, 0);
-                tmp_alt_format[th_ID].samp_id.resize(batch_size*2*samp_columns.numSample, static_cast<unsigned short>(0));
                 if(FORMAT.hasGT && FORMAT.numGT == 'A'){
                     tmp_alt_format[th_ID].sample_GT.GT.resize(batch_size*2*samp_columns.numSample, (char)0),
                     tmp_alt_format[th_ID].initMapGT();
