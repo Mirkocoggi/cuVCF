@@ -93,7 +93,12 @@ int main(int argc, char *argv[]){
 
     vcf_parsed vcf;
     auto s = std::chrono::steady_clock::now();
-    vcf.run(vcf_filename, num_threadss);
+    try {
+        vcf.run(vcf_filename, num_threadss);
+    } catch (const std::exception& ex) {
+        cerr << "ERROR: " << ex.what() << endl;
+        return 1;
+    }
     auto e = std::chrono::steady_clock::now();
     cerr << "vcf_parsed::run: " << std::chrono::duration<double, std::milli>(e - s).count() << " ms" << endl;
 

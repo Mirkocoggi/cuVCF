@@ -43,6 +43,7 @@
 #include <functional>
 #include <future>
 #include <string_view>
+#include <stdexcept>
 #include <algorithm>
 #include <cctype>
 
@@ -208,10 +209,11 @@ void vcf_parsed::run(char* vcf_filename, int num_threadss){
     if(!strcmp((vcf_filename + strlen(vcf_filename) - 3), ".gz")){
         unzip_gz_file(vcf_filename);
     }
+    filename = vcf_filename; // after unzip_gz_file, which strips the .gz
     
     ifstream inFile(filename);
     if(!inFile){
-        cout << "ERROR: cannot open file " << filename << endl;
+        throw std::runtime_error("cannot open file " + filename);
     }
     // Saving filename
     filename = get_filename(filename, path_to_filename);

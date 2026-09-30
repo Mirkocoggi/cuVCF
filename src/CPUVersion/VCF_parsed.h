@@ -34,6 +34,8 @@
 #include <functional>
 #include <future>
 #include <string_view>
+#include <stdexcept>
+#include <zlib.h>
 #include <algorithm>
 #include <cctype>
 
@@ -163,31 +165,32 @@ public:
     alt_format_df alt_sample;
 
     void unzip_gz_file(char* vcf_filename) {
-        // Check the extension ".gz"
-        if (strcmp(vcf_filename + strlen(vcf_filename) - 3, ".gz") == 0) {
-            pid_t pid = fork();
-            if (pid == 0) {
-                // Child proces
-                execlp("gzip", "gzip", "-df", vcf_filename, nullptr);
-                // If execlp fails
-                cout<< "ERROR: Failed to execute gzip command" << std::endl;
-                exit(EXIT_FAILURE);
-            } else if (pid > 0) {
-                // Parent proces waits for the child proces
-                int status;
-                waitpid(pid, &status, 0);
-                if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-                    // Remove ".gz" from the filename
-                    char* mutable_vcf_filename = const_cast<char*>(vcf_filename);
-                    mutable_vcf_filename[strlen(vcf_filename) - 3] = '\0';
-                } else {
-                    cout<< "ERROR: cannot unzip file" << std::endl;
-                }
-            } else {
-                // Error in the fork() call
-                cout<< "ERROR: Failed to fork process" << std::endl;
+        // Decompress in process with zlib (no external gzip binary, no fork),
+        // with the same effect as "gzip -df": the .gz is replaced by the plain file.
+        const size_t len = strlen(vcf_filename);
+        if (len < 4 || strcmp(vcf_filename + len - 3, ".gz") != 0) return;
+        const std::string out_name(vcf_filename, len - 3);
+
+        gzFile in = gzopen(vcf_filename, "rb");
+        FILE* out = in ? fopen(out_name.c_str(), "wb") : nullptr;
+        bool ok = in && out;
+        if (ok) {
+            std::vector<char> buf(1 << 16);
+            int n;
+            while ((n = gzread(in, buf.data(), buf.size())) > 0) {
+                if (fwrite(buf.data(), 1, n, out) != static_cast<size_t>(n)) { ok = false; break; }
             }
+            if (n < 0) ok = false;
         }
+        if (out && fclose(out) != 0) ok = false;
+        if (in) gzclose(in);
+        if (!ok) {
+            if (out) remove(out_name.c_str()); // no partial output
+            std::cout << "ERROR: cannot unzip file" << std::endl;
+            return;
+        }
+        remove(vcf_filename);
+        vcf_filename[len - 3] = '\0'; // continue with the decompressed file
     }
 
     void run(char* vcf_filename, int num_threadss){
@@ -201,10 +204,11 @@ public:
         if(!strcmp((vcf_filename + strlen(vcf_filename) - 3), ".gz")){
             unzip_gz_file(vcf_filename);
         }
+        filename = vcf_filename; // after unzip_gz_file, which strips the .gz
         
         ifstream inFile(filename);
         if(!inFile){
-            cout << "ERROR: cannot open file " << filename << endl;
+            throw std::runtime_error("cannot open file " + filename);
         }
         // Saving filename
         get_filename(filename);

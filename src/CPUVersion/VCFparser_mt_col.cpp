@@ -34,48 +34,6 @@
 using namespace std;
 
 /**
- * @brief Safely decompresses a gzipped VCF file
- * 
- * @param vcf_filename Path to the gzipped VCF file
- * 
- * @details Uses fork() and execlp() to safely execute gzip for decompression.
- * The function handles process management and error conditions:
- *   1. Checks for .gz extension
- *   2. Forks a child process for decompression
- *   3. Parent process waits for completion
- *   4. Updates filename after successful decompression
- * 
- * @note Uses system calls that are POSIX-compliant
- */
-void unzip_gz_file(char* vcf_filename) {
-    // Check the extension ".gz"
-    if (strcmp(vcf_filename + strlen(vcf_filename) - 3, ".gz") == 0) {
-        pid_t pid = fork();
-        if (pid == 0) {
-            // Child process
-            execlp("gzip", "gzip", "-df", vcf_filename, nullptr);
-            // If execlp fails
-            cout<< "ERROR: Failed to execute gzip command" << std::endl;
-            exit(EXIT_FAILURE);
-        } else if (pid > 0) {
-            // Parent process waits for the child process
-            int status;
-            waitpid(pid, &status, 0);
-            if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-                // Remove ".gz" from the filename
-                char* mutable_vcf_filename = const_cast<char*>(vcf_filename);
-                mutable_vcf_filename[strlen(vcf_filename) - 3] = '\0';
-            } else {
-                cout<< "ERROR: cannot unzip file" << std::endl;
-            }
-        } else {
-            // Error in the fork() call
-            cout<< "ERROR: Failed to fork process" << std::endl;
-        }
-    }
-}
-
-/**
  * @brief Program entry point
  * 
  * @param argc Number of command-line arguments
@@ -124,7 +82,12 @@ int main(int argc, char *argv[]){
 
     vcf_parsed vcf;
     auto s = std::chrono::steady_clock::now();
-    vcf.run(vcf_filename, num_threadss);
+    try {
+        vcf.run(vcf_filename, num_threadss);
+    } catch (const std::exception& ex) {
+        cerr << "ERROR: " << ex.what() << endl;
+        return 1;
+    }
     auto e = std::chrono::steady_clock::now();
     cerr << "vcf_parsed::run: " << std::chrono::duration<double, std::milli>(e - s).count() << " ms" << endl;
 
