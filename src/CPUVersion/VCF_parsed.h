@@ -33,6 +33,38 @@
 #include <thread>
 #include <functional>
 #include <future>
+#include <string_view>
+#include <algorithm>
+#include <cctype>
+
+/**
+ * @brief True if a header Number= value is a fixed count ("0", "1", "2", ...).
+ */
+static inline bool is_fixed_number(const std::string& number) {
+    return !number.empty() && std::all_of(number.begin(), number.end(), [](unsigned char c){ return std::isdigit(c); });
+}
+
+/**
+ * @brief Returns the text between '<' and the last '>' of a ##INFO/##FORMAT header line.
+ */
+static inline std::string_view header_attr_body(std::string_view line) {
+    const auto l = line.find('<');
+    const auto r = line.rfind('>');
+    if (l == std::string_view::npos || r == std::string_view::npos || r <= l) return {};
+    return line.substr(l + 1, r - l - 1);
+}
+
+/**
+ * @brief Returns the value of attribute keyEq (e.g. "ID=") up to the next comma, whatever its position.
+ */
+static inline std::string header_attr(std::string_view body, std::string_view keyEq) {
+    const auto pos0 = body.find(keyEq);
+    if (pos0 == std::string_view::npos) return {};
+    const auto pos = pos0 + keyEq.size();
+    auto end = body.find(',', pos);
+    if (end == std::string_view::npos) end = body.size();
+    return std::string(body.substr(pos, end - pos));
+}
 using Imath::half;
 
 /**
@@ -122,7 +154,7 @@ public:
     long filesize;
     long variants_size;
     long num_lines=0;
-    unsigned int *new_lines_index;
+    unsigned long long *new_lines_index; // 64-bit: byte offsets exceed 4 GiB on large files
     bool samplesON = false;
     bool hasDetSamples = false;
     var_columns_df var_columns;
@@ -249,9 +281,6 @@ public:
     
     void get_and_parse_header(ifstream *file){
         string line;
-        vector<string> line_el;     //all the characteristics together
-        vector<string> line_el1;    //each characteristic
-        vector<string> line_el2;    //keys and values
         // removing the header and storing it in vcf.header
         
         while (getline(*file, line) && line[0]=='#' && line[1]=='#'){
@@ -261,35 +290,30 @@ public:
             bool Format = (line[2]=='F' && line[3]=='O');
             
             if(Info || Format){
-                boost::split(line_el, line, boost::is_any_of("><"));
-                boost::split(line_el1, line_el[1], boost::is_any_of(","));
-                for(int i=0; i<3; i++){
-                    boost::split(line_el2, line_el1[i], boost::is_any_of("="));
-                    if(Info){
-                        if(i==0) INFO.ID.push_back(line_el2[1]);
-                        if(i==1) INFO.Number.push_back(line_el2[1]);
-                        if(i==1 && line_el2[1] == "A") INFO.alt_values++;
-                        if(i==2) INFO.Type.push_back(line_el2[1]);
+                // Attributes are looked up by name: the VCF spec does not fix their order.
+                const std::string_view body = header_attr_body(line);
+                const string id = header_attr(body, "ID=");
+                const string number = header_attr(body, "Number=");
+                const string type = header_attr(body, "Type=");
+                if(Info){
+                    INFO.ID.push_back(id);
+                    INFO.Number.push_back(number);
+                    if(number == "A") INFO.alt_values++;
+                    INFO.Type.push_back(type);
+                }else if(id == "GT"){
+                    FORMAT.hasGT = true;
+                    // GT is Number=1 by spec: anything but A or a fixed count (e.g. '.') counts as 1
+                    FORMAT.numGT = (number == "A" || is_fixed_number(number)) ? number[0] : '1';
+                    hasDetSamples = true;
+                }else{
+                    FORMAT.ID.push_back(id);
+                    FORMAT.Number.push_back(number);
+                    if(number == "A"){
+                        FORMAT.alt_values++;
+                    }else{
+                        hasDetSamples = true;
                     }
-                    if(Format){
-                        if(i==0){
-                            if(line_el2[1] == "GT"){
-                                FORMAT.hasGT = true;
-                                boost::split(line_el2, line_el1[1], boost::is_any_of("="));
-                                FORMAT.numGT = line_el2[1][0];
-                                i+=3;
-                            }else{
-                                FORMAT.ID.push_back(line_el2[1]);
-                            }
-                        } 
-                        if(i==1) FORMAT.Number.push_back(line_el2[1]);
-                        if(i==1 && line_el2[1] == "A"){
-                            FORMAT.alt_values++;
-                        }else{
-                            hasDetSamples = true;
-                        }
-                        if(i==2) FORMAT.Type.push_back(line_el2[1]);
-                    }
+                    FORMAT.Type.push_back(type);
                 }
             }
         }
@@ -371,7 +395,7 @@ public:
         for(int i=1; i<num_threads; i++){
             num_lines= num_lines + tmp_num_lines[i];
         }
-        new_lines_index = (unsigned int*)malloc(sizeof(unsigned int)*(num_lines+1));
+        new_lines_index = (unsigned long long*)malloc(sizeof(unsigned long long)*(num_lines+1));
         new_lines_index[0] = 0;
         #pragma omp parallel
         {
@@ -412,7 +436,7 @@ public:
 
         int numIter = FORMAT.ID.size();
 
-        if(numIter == 0 ) return; //if no sample available
+        if(numIter == 0 && !FORMAT.hasGT) return; //if no sample available
 
         if(FORMAT.hasGT && FORMAT.numGT == 'A'){
             alt_sample.initMapGT();
@@ -429,6 +453,9 @@ public:
         }
 
         for(int i = 0; i < numIter; i++){
+            // Number=R, G and . are not supported yet: skip the field instead of throwing in
+            // std::stoi (R, G) or prompting on stdin (.). The line parser then ignores it.
+            if(strcmp(&FORMAT.Number[i][0], "A") != 0 && !is_fixed_number(FORMAT.Number[i])) continue;
             if(strcmp(&FORMAT.Number[i][0], "A") != 0){
                 // Without Alternatives
                 if(strcmp(&FORMAT.Number[i][0], "1")==0){ 
@@ -464,8 +491,8 @@ public:
                     samp_columns.samp_flag.push_back(samp_flag_tmp);
                     samp_columns.samp_flag.back().i_flag.resize((num_lines-1)*samp_columns.numSample, 0);
                     samp_columns.samp_flag.back().numb = std::stoi(FORMAT.Number[i]);
-                    info_map[FORMAT.ID[i]] = 11;
-                    var_columns.info_map1[FORMAT.ID[i]] = 11;
+                    info_map[FORMAT.ID[i]] = FLAG_FORMAT;
+                    var_columns.info_map1[FORMAT.ID[i]] = FLAG_FORMAT;
                     FORMAT.flags++;
                 }else{ 
                     //Number > 1
@@ -533,7 +560,7 @@ public:
         samp_columns.samp_float.resize(FORMAT.floats);
         samp_columns.samp_string.resize(FORMAT.strings);
 
-        if(hasDetSamples){
+        if(samplesON){
             samp_columns.var_id.resize((num_lines-1)*samp_columns.numSample, 0);
             samp_columns.samp_id.resize((num_lines-1)*samp_columns.numSample, static_cast<unsigned short>(0));
         }
@@ -542,8 +569,6 @@ public:
         alt_sample.samp_int.resize(FORMAT.ints_alt);
         alt_sample.samp_float.resize(FORMAT.floats_alt);
         alt_sample.samp_string.resize(FORMAT.strings_alt);
-        alt_sample.var_id.resize((num_lines-1)* alt_sample.numSample, 0);
-        alt_sample.samp_id.resize((num_lines-1)*alt_sample.numSample, static_cast<unsigned short>(0));
 
     }
     
@@ -682,6 +707,9 @@ public:
     
     void reserve_var_columns(){
         var_columns.var_number.resize(num_lines-1);
+        for(long i = 0; i < num_lines - 1; i++){
+            var_columns.var_number[i] = static_cast<unsigned int>(i);
+        }
         var_columns.chrom.resize(num_lines-1);
         var_columns.id.resize(num_lines-1);
         var_columns.pos.resize(num_lines-1);
@@ -690,7 +718,41 @@ public:
         var_columns.filter.resize(num_lines-1);
     }
     
+    /**
+     * @brief Fills var_columns.chrom_map / filter_map single-threaded, before the parallel parse.
+     *
+     * The parsing threads used to insert into these std::map concurrently (a data race that
+     * corrupted the trees). Codes are assigned in order of first appearance in the file.
+     */
+    void prebuild_chrom_filter_maps(){
+        var_columns.chrom_map.clear();
+        var_columns.filter_map.clear();
+
+        auto is_sep = [&](long p){ return filestring[p] == '\t' || filestring[p] == ' ' || filestring[p] == '\n'; };
+        std::string key;
+        for(long i = 0; i < num_lines - 1; i++){
+            long p = new_lines_index[i];
+            const long e = new_lines_index[i + 1];
+            if(filestring[p] == '\n') p++;
+
+            key.clear();
+            while(p < e && !is_sep(p)) key.push_back(filestring[p++]);
+            var_columns.chrom_map.emplace(key, static_cast<char>(var_columns.chrom_map.size()));
+            if(p < e && filestring[p] != '\n') p++;
+
+            for(int field = 2; field <= 6 && p < e; field++){ // skip POS, ID, REF, ALT, QUAL
+                while(p < e && !is_sep(p)) p++;
+                if(p < e && filestring[p] != '\n') p++;
+            }
+
+            key.clear();
+            while(p < e && !is_sep(p)) key.push_back(filestring[p++]);
+            var_columns.filter_map.emplace(key, static_cast<char>(var_columns.filter_map.size()));
+        }
+    }
+
     void populate_var_columns(int num_threads){
+        prebuild_chrom_filter_maps();
         std::size_t totAlt      = 0;
         std::size_t totSampAlt  = 0;
 

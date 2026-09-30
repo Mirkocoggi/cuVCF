@@ -18,6 +18,21 @@
 #include <boost/algorithm/string.hpp>
 #include <Imath/half.h>
 
+// FORMAT columns are named <ID> (Number=1) or <ID>0, <ID>1, ... (Number>1): match the first column
+// of key exactly. A prefix match picked GQX for GQ when GQX was declared first.
+static inline bool format_name_matches(const std::string& name, const std::string& key){
+    return name == key || (name.size() == key.size() + 1 && name.back() == '0' && name.compare(0, key.size(), key) == 0);
+}
+
+// Numeric conversions for VCF values: a missing value ('.') or a malformed token yields 0
+// instead of throwing and aborting the whole parse.
+static inline int safe_stoi(const std::string& s){
+    try{ return std::stoi(s); }catch(const std::exception&){ return 0; }
+}
+static inline float safe_stof(const std::string& s){
+    try{ return std::stof(s); }catch(const std::exception&){ return 0.0f; }
+}
+
 /**
  * @brief Constants defining the types of VCF fields
  * 
@@ -38,6 +53,7 @@ const int FLOAT_FORMAT = 10;
 const int STRING_FORMAT_ALT = 11;
 const int INT_FORMAT_ALT = 12;
 const int FLOAT_FORMAT_ALT = 13;
+const int FLAG_FORMAT = 17; // was 11, which collided with STRING_FORMAT_ALT
 
 /**
  * @class var_columns_df
@@ -97,6 +113,57 @@ public:
     /** @brief Maps INFO field names to their indices */
     map<string,int> info_map1;
 
+    // Read-only lookup for the parsing threads: operator[] would insert missing keys into the
+    // shared map concurrently (data race). Returns -1 for keys not declared in the header.
+    int info_code(const string& key) const {
+        auto it = info_map1.find(key);
+        return it == info_map1.end() ? -1 : it->second;
+    }
+
+    // Per-thread alternative buffers are pre-sized for ~2 ALTs per line; grow them when a chunk needs more.
+    void ensure_alt_capacity(alt_columns_df* tmp_alt, int needed)
+    {
+        if(needed <= 0) return;
+        if(static_cast<int>((*tmp_alt).alt.size()) >= needed) return;
+
+        (*tmp_alt).var_id.resize(needed, 0);
+        (*tmp_alt).alt.resize(needed, "\0");
+        (*tmp_alt).alt_id.resize(needed, static_cast<char>(0));
+
+        for(size_t j = 0; j < (*tmp_alt).alt_int.size(); j++){
+            (*tmp_alt).alt_int[j].i_int.resize(needed, 0);
+        }
+        for(size_t j = 0; j < (*tmp_alt).alt_float.size(); j++){
+            (*tmp_alt).alt_float[j].i_float.resize(needed, 0);
+        }
+        for(size_t j = 0; j < (*tmp_alt).alt_string.size(); j++){
+            (*tmp_alt).alt_string[j].i_string.resize(needed, "\0");
+        }
+    }
+
+    void ensure_alt_format_capacity(alt_format_df* tmp_alt_format, int needed)
+    {
+        if(needed <= 0) return;
+        if(static_cast<int>((*tmp_alt_format).var_id.size()) >= needed) return;
+
+        (*tmp_alt_format).var_id.resize(needed, 0);
+        (*tmp_alt_format).alt_id.resize(needed, static_cast<char>(0));
+        (*tmp_alt_format).samp_id.resize(needed, static_cast<unsigned short>(0));
+
+        for(size_t j = 0; j < (*tmp_alt_format).samp_int.size(); j++){
+            (*tmp_alt_format).samp_int[j].i_int.resize(needed, 0);
+        }
+        for(size_t j = 0; j < (*tmp_alt_format).samp_float.size(); j++){
+            (*tmp_alt_format).samp_float[j].i_float.resize(needed, 0);
+        }
+        for(size_t j = 0; j < (*tmp_alt_format).samp_string.size(); j++){
+            (*tmp_alt_format).samp_string[j].i_string.resize(needed, "\0");
+        }
+        if(!(*tmp_alt_format).sample_GT.GT.empty()){
+            (*tmp_alt_format).sample_GT.GT.resize(needed, static_cast<char>(0));
+        }
+    }
+
 
     /**
      * @brief Parses a VCF line and populates the variant columns
@@ -130,10 +197,9 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
-                if(chrom_map.find(tmp) == chrom_map.end()){
-                    chrom_map.insert(std::make_pair(tmp, (unsigned char)chrom_map.size()));
-                }
-                chrom[i] = chrom_map[tmp];
+                // chrom_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
+                auto chrom_it = chrom_map.find(tmp);
+                chrom[i] = (chrom_it != chrom_map.end()) ? chrom_it->second : static_cast<char>(0);
             }else{
                 tmp += line[start+iter];
                 iter++;
@@ -196,6 +262,7 @@ public:
                 iter++;
                 boost::split(tmp_split, tmp, boost::is_any_of(","));
                 local_alt = tmp_split.size();
+                ensure_alt_capacity(tmp_alt, (*tmp_num_alt) + local_alt);
                 for(int y = 0; y<local_alt; y++){
                     (*tmp_alt).alt[(*tmp_num_alt)+y] = tmp_split[y];
                     (*tmp_alt).alt_id[(*tmp_num_alt)+y] = (char)y;
@@ -218,7 +285,7 @@ public:
                     qual[i] = 0.0f;
                 }else{
                     try{
-                        qual[i] = (half)stof(tmp);
+                        qual[i] = (half)safe_stof(tmp);
                     }catch (const std::exception& e){
                         qual[i] = 0;
                     }
@@ -236,10 +303,9 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
-                if(filter_map.find(tmp) == filter_map.end()){
-                    filter_map.insert(std::make_pair(tmp, (char)filter_map.size()));
-                }
-                filter[i] = filter_map[tmp];
+                // filter_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
+                auto filter_it = filter_map.find(tmp);
+                filter[i] = (filter_it != filter_map.end()) ? filter_it->second : static_cast<char>(0);
             }else{
                 tmp += line[start+iter];
                 iter++;
@@ -262,25 +328,25 @@ public:
                     bool find_info_elem = false;
                     if(tmp_elems.size()==2){
                         while(!find_info_type){
-                            if(info_map1[tmp_elems[0]]==INT){
+                            if(info_code(tmp_elems[0])==INT){
                                 //Int
                                 bool isAlt = false;
                                 int el=0;
                                 while(!find_info_elem){
                                     if(in_int[el].name == tmp_elems[0]){
-                                        in_int[el].i_int[i] = stoi(tmp_elems[1]);
+                                        in_int[el].i_int[i] = safe_stoi(tmp_elems[1]);
                                         find_info_elem = true;
                                     }
                                     el++; 
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==FLOAT){
+                            }else if(info_code(tmp_elems[0])==FLOAT){
                                 //Float
                                 int el=0;
                                 while(!find_info_elem){
                                     if(in_float[el].name == tmp_elems[0]){
                                         try{
-                                            in_float[el].i_float[i] = (half)stof(tmp_elems[1]);
+                                            in_float[el].i_float[i] = (half)safe_stof(tmp_elems[1]);
                                         }catch (const std::exception& e){
                                             in_float[el].i_float[i] = 0;
                                         }
@@ -289,7 +355,7 @@ public:
                                     el++;
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==STRING){
+                            }else if(info_code(tmp_elems[0])==STRING){
                                 //String
                                 int el=0;
                                 while(!find_info_elem){
@@ -300,21 +366,21 @@ public:
                                     el++;
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==INT_ALT){
+                            }else if(info_code(tmp_elems[0])==INT_ALT){
                                 //Int Alt
                                 int el=0;
                                 while(!find_info_elem){
                                     if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                         for(int y = 0; y<local_alt; y++){
-                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = stoi(tmp_split[y]);
+                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? safe_stoi(tmp_split[y]) : 0; // "." has a single token
                                         }
                                         find_info_elem = true;
                                     }
                                     el++;
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==FLOAT_ALT){
+                            }else if(info_code(tmp_elems[0])==FLOAT_ALT){
                                 //Float Alt
                                 int el=0;
                                 while(!find_info_elem){
@@ -323,7 +389,7 @@ public:
                                         
                                         for(int y = 0; y<local_alt; y++){
                                             try{
-                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = (half)stof(tmp_split[y]);
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? (half)safe_stof(tmp_split[y]) : (half)0.0f; // "." has a single token
                                             }catch (const std::exception& e){
                                                 (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
                                             }
@@ -333,14 +399,14 @@ public:
                                     el++;
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==STRING_ALT){
+                            }else if(info_code(tmp_elems[0])==STRING_ALT){
                                 //String Alt
                                 int el=0;
                                 while(!find_info_elem){
                                     if((*tmp_alt).alt_string[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                         for(int y = 0; y<local_alt; y++){
-                                            (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = tmp_split[y];
+                                            (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? tmp_split[y] : ""; // "." has a single token
                                         }
                                         find_info_elem = true;
                                     }
@@ -352,7 +418,7 @@ public:
                             }
                         }
                     }else{
-                        if((info_map1[tmp_elems[0]]==FLAG) && strcmp(&tmp_elems[0][0],"")){
+                        if((info_code(tmp_elems[0])==FLAG) && strcmp(&tmp_elems[0][0],"")){
                             //Flag
                             int el=0;
                             const int nFlags = static_cast<int>(in_flag.size());
@@ -417,10 +483,9 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
-                if(chrom_map.find(tmp) == chrom_map.end()){
-                    chrom_map.insert(std::make_pair(tmp, (char)chrom_map.size()));
-                }
-                chrom[i] = chrom_map[tmp];
+                // chrom_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
+                auto chrom_it = chrom_map.find(tmp);
+                chrom[i] = (chrom_it != chrom_map.end()) ? chrom_it->second : static_cast<char>(0);
             }else{
                 tmp += line[start+iter];
                 iter++;
@@ -478,6 +543,7 @@ public:
                 iter++;
                 boost::split(tmp_split, tmp, boost::is_any_of(","));
                 local_alt = tmp_split.size();
+                ensure_alt_capacity(tmp_alt, (*tmp_num_alt) + local_alt);
                 for(int y = 0; y<local_alt; y++){
                     (*tmp_alt).alt[(*tmp_num_alt)+y] = tmp_split[y];
                     (*tmp_alt).alt_id[(*tmp_num_alt)+y] = (char)y;
@@ -500,7 +566,7 @@ public:
                     qual[i] = (half)0.0f;
                 }else{
                     try{
-                        qual[i] = (half)stof(tmp);
+                        qual[i] = (half)safe_stof(tmp);
                     }catch (const std::exception& e){
                         qual[i] = 0;
                     }
@@ -518,10 +584,9 @@ public:
             if(line[start+iter]=='\t'||line[start+iter]==' '){
                 find1 = true;
                 iter++;
-                if(filter_map.find(tmp) == filter_map.end()){
-                    filter_map.insert(std::make_pair(tmp, (char)filter_map.size()));
-                }
-                filter[i] = filter_map[tmp];
+                // filter_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
+                auto filter_it = filter_map.find(tmp);
+                filter[i] = (filter_it != filter_map.end()) ? filter_it->second : static_cast<char>(0);
             }else{
                 tmp += line[start+iter];
                 iter++;
@@ -544,25 +609,25 @@ public:
                     bool find_info_elem = false;
                     if(tmp_elems.size()==2){
                         while(!find_info_type){
-                            if(info_map1[tmp_elems[0]]==INT){
+                            if(info_code(tmp_elems[0])==INT){
                                 //Int
                                 bool isAlt = false;
                                 int el=0;
                                 while(!find_info_elem){
                                     if(in_int[el].name == tmp_elems[0]){
-                                        in_int[el].i_int[i] = stoi(tmp_elems[1]);
+                                        in_int[el].i_int[i] = safe_stoi(tmp_elems[1]);
                                         find_info_elem = true;
                                     }
                                     el++; 
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==FLOAT){
+                            }else if(info_code(tmp_elems[0])==FLOAT){
                                 //Float                  
                                 int el=0;
                                 while(!find_info_elem){
                                     if(in_float[el].name == tmp_elems[0]){
                                         try{
-                                            in_float[el].i_float[i] = (half)stof(tmp_elems[1]);
+                                            in_float[el].i_float[i] = (half)safe_stof(tmp_elems[1]);
                                         }catch (const std::exception& e){
                                             in_float[el].i_float[i] = 0;
                                         }
@@ -571,7 +636,7 @@ public:
                                     el++;
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==STRING){
+                            }else if(info_code(tmp_elems[0])==STRING){
                                 //String                                
                                 int el=0;
                                 while(!find_info_elem){
@@ -582,21 +647,21 @@ public:
                                     el++;
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==INT_ALT){
+                            }else if(info_code(tmp_elems[0])==INT_ALT){
                                 //Int Alternatives
                                 int el=0;
                                 while(!find_info_elem){
                                     if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                         for(int y = 0; y<local_alt; y++){
-                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = stoi(tmp_split[y]);
+                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? safe_stoi(tmp_split[y]) : 0; // "." has a single token
                                         }
                                         find_info_elem = true;
                                     }
                                     el++;
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==FLOAT_ALT){
+                            }else if(info_code(tmp_elems[0])==FLOAT_ALT){
                                 //Float Alt
                                 int el=0;
                                 while(!find_info_elem){
@@ -604,7 +669,7 @@ public:
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                         for(int y = 0; y<local_alt; y++){
                                             try{
-                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = (half)stof(tmp_split[y]);
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? (half)safe_stof(tmp_split[y]) : (half)0.0f; // "." has a single token
                                             }catch (const std::exception& e){
                                                 (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
                                             }
@@ -614,14 +679,14 @@ public:
                                     el++;
                                 }
                                 find_info_type = true;
-                            }else if(info_map1[tmp_elems[0]]==STRING_ALT){
+                            }else if(info_code(tmp_elems[0])==STRING_ALT){
                                 //String Alt
                                 int el=0;
                                 while(!find_info_elem){
                                     if((*tmp_alt).alt_string[el].name == tmp_elems[0]){
                                         boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                         for(int y = 0; y<local_alt; y++){
-                                            (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = tmp_split[y];
+                                            (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? tmp_split[y] : ""; // "." has a single token
                                         }
                                         find_info_elem = true;
                                     }
@@ -633,7 +698,7 @@ public:
                             }
                         }
                     }else{
-                        if((info_map1[tmp_elems[0]]==FLAG) && strcmp(&tmp_elems[0][0],"")){
+                        if((info_code(tmp_elems[0])==FLAG) && strcmp(&tmp_elems[0][0],"")){
                             //Flag
                             int el=0;
                             while(!find_info_elem){
@@ -693,31 +758,32 @@ public:
                                     tmp_sub;
                                     boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                     for(int k=0; k < (*sample).sample_GT[0].numb; k++){ 
-                                        (*sample).sample_GT[k].GT[i*(*sample).numSample + samp] = (*sample).GTMap[tmp_sub[k]];
+                                        (*sample).sample_GT[k].GT[i*(*sample).numSample + samp] = (*sample).gt_code(tmp_sub[k]);
                                     }
                                 }else if((*sample).sample_GT.size() == 1){
-                                    (*sample).sample_GT[0].GT[i*(*sample).numSample + samp] = (*sample).GTMap[tmp_split[j]];
+                                    (*sample).sample_GT[0].GT[i*(*sample).numSample + samp] = (*sample).gt_code(tmp_split[j]);
                                 }else{
                                     boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                     local_alt = tmp_sub.size();
+                                    ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
                                     for(int y = 0; y<local_alt; y++){
                                         //Fill a tuple for each alternatives
                                         (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_number[i];
                                         (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
                                         (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
-                                        (*tmp_alt_format).sample_GT.GT[(*tmp_num_alt_format) + y] = (*tmp_alt_format).GTMap[tmp_sub[y]];
+                                        (*tmp_alt_format).sample_GT.GT[(*tmp_num_alt_format) + y] = (*tmp_alt_format).gt_code(tmp_sub[y]);
                                     }
                                     (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
                                 }
                                 find_type = true;
-                            }else if(info_map1[tmp_format_split[j]] == STRING_FORMAT || info_map1[tmp_format_split[j] + std::to_string(1)] == STRING_FORMAT){
+                            }else if(info_code(tmp_format_split[j]) == STRING_FORMAT || info_code(tmp_format_split[j] + std::to_string(1)) == STRING_FORMAT){
                                 //String - deterministic
                                 (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
                                 (*sample).samp_id[i*(*sample).numSample + samp] =  static_cast<unsigned short>(samp);
                                 int el = 0;
                                 
                                 while(!find_elem){
-                                    if(!(*sample).samp_string[el].name.compare(0, tmp_format_split[j].length(), tmp_format_split[j], 0, tmp_format_split[j].length())){
+                                    if(format_name_matches((*sample).samp_string[el].name, tmp_format_split[j])){
                                         if((*sample).samp_string[el].numb==1){ //String with numb = 1
                                             //Update the corresponding cell
                                             (*sample).samp_string[el].i_string[i*(*sample).numSample + samp] = tmp_split[j];
@@ -728,7 +794,8 @@ public:
                                             vector<string> tmp_sub;
                                             boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                             for(int k = 0; k<(*sample).samp_string[el].numb; k++){
-                                                (*sample).samp_string[el+k].i_string[i*(*sample).numSample + samp] = tmp_sub[k];
+                                                // A '.' value has a single token
+                                                (*sample).samp_string[el+k].i_string[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? tmp_sub[k] : "";
                                             }
                                         }
                                         find_elem = true;
@@ -736,22 +803,23 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_map1[tmp_format_split[j]] == INT_FORMAT || info_map1[tmp_format_split[j] + std::to_string(1)] == INT_FORMAT){
+                            }else if(info_code(tmp_format_split[j]) == INT_FORMAT || info_code(tmp_format_split[j] + std::to_string(1)) == INT_FORMAT){
                                 //Integer - deterministic
                                 (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
                                 (*sample).samp_id[i*(*sample).numSample + samp] = samp;
                                 int el = 0;
                                 while(!find_elem){
-                                    if(!(*sample).samp_int[el].name.compare(0, tmp_format_split[j].length(), tmp_format_split[j], 0, tmp_format_split[j].length())){
+                                    if(format_name_matches((*sample).samp_int[el].name, tmp_format_split[j])){
                                         if((*sample).samp_int[el].numb==1){
                                             //Integer with numb = 1
-                                            (*sample).samp_int[el].i_int[i*(*sample).numSample + samp] = std::stoi(tmp_split[j]);
+                                            (*sample).samp_int[el].i_int[i*(*sample).numSample + samp] = safe_stoi(tmp_split[j]);
                                         }else{
                                             //Integer with numb > 1
                                             vector<string> tmp_sub;
                                             boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
-                                            for(int i = 0; i<(*sample).samp_int[el].numb; i++){
-                                                (*sample).samp_int[el+i].i_int[i*(*sample).numSample + samp] = std::stoi(tmp_sub[i]);
+                                            // k, not i: i is the record index. A '.' value has a single token.
+                                            for(int k = 0; k<(*sample).samp_int[el].numb; k++){
+                                                (*sample).samp_int[el+k].i_int[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? safe_stoi(tmp_sub[k]) : 0;
                                             }
                                         }
                                         find_elem = true;
@@ -759,17 +827,17 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_map1[tmp_format_split[j]] == FLOAT_FORMAT || info_map1[tmp_format_split[j] + std::to_string(1)] == FLOAT_FORMAT){
+                            }else if(info_code(tmp_format_split[j]) == FLOAT_FORMAT || info_code(tmp_format_split[j] + std::to_string(1)) == FLOAT_FORMAT){
                                 //Float - deterministic
                                 (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
                                 (*sample).samp_id[i*(*sample).numSample + samp] = samp;
                                 int el = 0;
                                 while(!find_elem){
-                                    if(!(*sample).samp_float[el].name.compare(0, tmp_format_split[j].length(), tmp_format_split[j], 0, tmp_format_split[j].length())){
+                                    if(format_name_matches((*sample).samp_float[el].name, tmp_format_split[j])){
                                         if((*sample).samp_float[el].numb==1){
                                             //Float with numb = 1
                                             try{ //Check if format is 10E-40 to crop to 0
-                                                (*sample).samp_float[el].i_float[i*(*sample).numSample + samp] = (half)std::stof(tmp_split[j]);
+                                                (*sample).samp_float[el].i_float[i*(*sample).numSample + samp] = (half)safe_stof(tmp_split[j]);
                                             }catch (const std::exception& e){
                                                 (*sample).samp_float[el].i_float[i*(*sample).numSample + samp] = 0;
                                             }
@@ -777,12 +845,9 @@ public:
                                             //Float with numb > 1
                                             vector<string> tmp_sub;
                                             boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
-                                            for(int i = 0; i<(*sample).samp_float[el].numb; i++){
-                                                try{ //Check if format is 10E-40 to crop to 0
-                                                    (*sample).samp_float[el+i].i_float[i*(*sample).numSample + samp] = (half)std::stof(tmp_sub[i]);
-                                                }catch (const std::exception& e){
-                                                    (*sample).samp_float[el+i].i_float[i*(*sample).numSample + samp] = 0;
-                                                }
+                                            // k, not i: i is the record index. A '.' value has a single token.
+                                            for(int k = 0; k<(*sample).samp_float[el].numb; k++){
+                                                (*sample).samp_float[el+k].i_float[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? (half)safe_stof(tmp_sub[k]) : (half)0.0f;
                                             }
                                         }
                                         find_elem = true;
@@ -790,10 +855,11 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_map1[tmp_format_split[j]] == STRING_FORMAT_ALT){
+                            }else if(info_code(tmp_format_split[j]) == STRING_FORMAT_ALT){
                                 //String alternatives
                                 boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                 local_alt = tmp_sub.size();
+                                ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
                                 int el = 0;
                                 while(!find_elem){
                                     //Search the corresponding element
@@ -811,10 +877,11 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_map1[tmp_format_split[j]] == INT_FORMAT_ALT){
+                            }else if(info_code(tmp_format_split[j]) == INT_FORMAT_ALT){
                                 //Integer alternatives
                                 boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                 local_alt = tmp_sub.size();
+                                ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
                                 int el = 0;
                                 while(!find_elem){
                                     //Search the corresponding element
@@ -824,7 +891,7 @@ public:
                                             (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_number[i];
                                             (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
                                             (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
-                                            (*tmp_alt_format).samp_int[el].i_int[(*tmp_num_alt_format) + y] = std::stoi(tmp_sub[y]);
+                                            (*tmp_alt_format).samp_int[el].i_int[(*tmp_num_alt_format) + y] = safe_stoi(tmp_sub[y]);
                                         }
                                         find_elem = true;
                                         (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
@@ -832,10 +899,11 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_map1[tmp_format_split[j]] == FLOAT_FORMAT_ALT){
+                            }else if(info_code(tmp_format_split[j]) == FLOAT_FORMAT_ALT){
                                 //Float alternatives
                                 boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                 local_alt = tmp_sub.size();
+                                ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
                                 int el = 0;
                                 while(!find_elem){ 
                                     //Search the corresponding element
@@ -846,7 +914,7 @@ public:
                                             (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
                                             (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
                                             try{
-                                                (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = (half)std::stof(tmp_sub[y]);
+                                                (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = (half)safe_stof(tmp_sub[y]);
                                             }catch (const std::exception& e){
                                                 (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = 0;
                                             }
@@ -856,6 +924,9 @@ public:
                                     }
                                     el++;
                                 }
+                                find_type = true;
+                            }else{
+                                // Unsupported or undeclared FORMAT field: skip it (the loop never ended otherwise)
                                 find_type = true;
                             }
                         }

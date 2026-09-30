@@ -42,6 +42,9 @@
 #include <thread>
 #include <functional>
 #include <future>
+#include <string_view>
+#include <algorithm>
+#include <cctype>
 
 
 using namespace std;
@@ -59,6 +62,51 @@ using namespace std;
     } while (0)
 
 
+
+// Header attribute helpers (from cuVCF-internal betweenAngle/getAttr).
+/**
+ * @brief True if a header Number= value is a fixed count ("0", "1", "2", ...).
+ */
+static inline bool is_fixed_number(const std::string& number) {
+    return !number.empty() && std::all_of(number.begin(), number.end(), [](unsigned char c){ return std::isdigit(c); });
+}
+
+/**
+ * @brief Returns the text between '<' and the last '>' of a ##INFO/##FORMAT header line.
+ */
+static inline std::string_view header_attr_body(std::string_view line) {
+    const auto l = line.find('<');
+    const auto r = line.rfind('>');
+    if (l == std::string_view::npos || r == std::string_view::npos || r <= l) return {};
+    return line.substr(l + 1, r - l - 1);
+}
+
+/**
+ * @brief Returns the value of attribute keyEq (e.g. "ID=") up to the next comma, whatever its position.
+ */
+static inline std::string header_attr(std::string_view body, std::string_view keyEq) {
+    const auto pos0 = body.find(keyEq);
+    if (pos0 == std::string_view::npos) return {};
+    const auto pos = pos0 + keyEq.size();
+    auto end = body.find(',', pos);
+    if (end == std::string_view::npos) end = body.size();
+    return std::string(body.substr(pos, end - pos));
+}
+
+// FORMAT columns are named <ID> (Number=1) or <ID>0, <ID>1, ... (Number>1): match the first column
+// of key exactly. A prefix match picked GQX for GQ when GQX was declared first.
+static inline bool format_name_matches(const std::string& name, const std::string& key){
+    return name == key || (name.size() == key.size() + 1 && name.back() == '0' && name.compare(0, key.size(), key) == 0);
+}
+
+// Numeric conversions for VCF values: a missing value ('.') or a malformed token yields 0
+// instead of throwing and aborting the whole parse.
+static inline int safe_stoi(const string& s){
+    try{ return std::stoi(s); }catch(const std::exception&){ return 0; }
+}
+static inline float safe_stof(const string& s){
+    try{ return std::stof(s); }catch(const std::exception&){ return 0.0f; }
+}
 
 /**
     * @brief Runs the VCF parsing process.
@@ -245,6 +293,15 @@ void vcf_parsed::initialize_map1(const std::map<std::string, int> &my_map){
 }
 
 /**
+    * @brief Copies a field name into a fixed-size MAX_NAME_SIZE device slot (truncated, zero-padded).
+    */
+static void copy_fixed_name(char* dst, const string& name){
+    char buf[MAX_NAME_SIZE] = {0};
+    strncpy(buf, name.c_str(), MAX_NAME_SIZE - 1);
+    cudaMemcpy(dst, buf, MAX_NAME_SIZE, cudaMemcpyHostToDevice);
+}
+
+/**
     * @brief Allocates device memory for VCF parsing data.
     *
     * Allocates memory on the GPU for variant numbers, positions, quality scores,
@@ -257,28 +314,26 @@ void vcf_parsed::device_allocation(){
 
     int tmp = var_columns.in_float.size();
 
-    const int max_name_size = 16;
-
     cudaMalloc(&(d_VC_in_float->i_float), tmp * (num_lines) * sizeof(__half));
-    cudaMalloc(&(d_VC_in_float->name), tmp * sizeof(char) * max_name_size); 
+    cudaMalloc(&(d_VC_in_float->name), tmp * sizeof(char) * MAX_NAME_SIZE); 
 
     for (int i = 0; i < tmp; i++) {
-        cudaMemcpy(d_VC_in_float->name+i*max_name_size, var_columns.in_float[i].name.c_str(), var_columns.in_float[i].name.size() + 1, cudaMemcpyHostToDevice);
+        copy_fixed_name(d_VC_in_float->name + i*MAX_NAME_SIZE, var_columns.in_float[i].name);
     }
 
     tmp = var_columns.in_flag.size();
     cudaMalloc(&(d_VC_in_flag->i_flag), tmp * (num_lines) * sizeof(bool));
-    cudaMalloc(&(d_VC_in_flag->name), tmp * sizeof(char) * max_name_size);
+    cudaMalloc(&(d_VC_in_flag->name), tmp * sizeof(char) * MAX_NAME_SIZE);
 
     for (int i = 0; i < tmp; i++) {
-        cudaMemcpy(d_VC_in_flag->name+i*max_name_size, var_columns.in_flag[i].name.c_str(), var_columns.in_flag[i].name.size() + 1, cudaMemcpyHostToDevice);
+        copy_fixed_name(d_VC_in_flag->name + i*MAX_NAME_SIZE, var_columns.in_flag[i].name);
     }
 
     tmp = var_columns.in_int.size();
     cudaMalloc(&(d_VC_in_int->i_int), tmp * (num_lines) * sizeof(int));
-    cudaMalloc(&(d_VC_in_int->name), tmp * sizeof(char) * max_name_size);
+    cudaMalloc(&(d_VC_in_int->name), tmp * sizeof(char) * MAX_NAME_SIZE);
     for (int i = 0; i < tmp; i++) {
-        cudaMemcpy(d_VC_in_int->name+i*max_name_size, var_columns.in_int[i].name.c_str(), var_columns.in_int[i].name.size() + 1, cudaMemcpyHostToDevice);
+        copy_fixed_name(d_VC_in_int->name + i*MAX_NAME_SIZE, var_columns.in_int[i].name);
     }
 
     initialize_map1(var_columns.info_map1);
@@ -292,38 +347,38 @@ void vcf_parsed::device_allocation(){
         
         // Allocate and initialize d_SC_samp_id
         cudaMalloc(&d_SC_samp_id, (num_lines) * samp_columns.numSample * sizeof(unsigned short));
-        cudaMemset(d_SC_samp_id, 0, (num_lines) * sizeof(unsigned short));
+        cudaMemset(d_SC_samp_id, 0, (num_lines) * samp_columns.numSample * sizeof(unsigned short));
 
         // Allocate and initialize samp_float
         tmp = samp_columns.samp_float.size();
         cudaMalloc(&(d_SC_samp_float->i_float), tmp * (num_lines * samp_columns.numSample) * sizeof(__half));
-        cudaMalloc(&(d_SC_samp_float->name), tmp * sizeof(char) * max_name_size);
+        cudaMalloc(&(d_SC_samp_float->name), tmp * sizeof(char) * MAX_NAME_SIZE);
         cudaMalloc(&(d_SC_samp_float->numb), tmp * sizeof(int));
 
         for (int i = 0; i < tmp; i++) {
-            cudaMemcpy(d_SC_samp_float->name+i*max_name_size, samp_columns.samp_float[i].name.c_str(), samp_columns.samp_float[i].name.size() + 1, cudaMemcpyHostToDevice);
+            copy_fixed_name(d_SC_samp_float->name + i*MAX_NAME_SIZE, samp_columns.samp_float[i].name);
             cudaMemcpy(d_SC_samp_float->numb+i, &(samp_columns.samp_float[i].numb), sizeof(int), cudaMemcpyHostToDevice);
         }
 
         // Allocate and initialize samp_flag
         tmp = samp_columns.samp_flag.size();
         cudaMalloc(&(d_SC_samp_flag->i_flag), tmp * (num_lines * samp_columns.numSample) * sizeof(bool));
-        cudaMalloc(&(d_SC_samp_flag->name), tmp * sizeof(char) * max_name_size);
+        cudaMalloc(&(d_SC_samp_flag->name), tmp * sizeof(char) * MAX_NAME_SIZE);
         cudaMalloc(&(d_SC_samp_flag->numb), tmp * sizeof(int));
 
         for (int i = 0; i < tmp; i++) {
-            cudaMemcpy(d_SC_samp_flag->name+i*max_name_size, samp_columns.samp_flag[i].name.c_str(), samp_columns.samp_flag[i].name.size() + 1, cudaMemcpyHostToDevice);
+            copy_fixed_name(d_SC_samp_flag->name + i*MAX_NAME_SIZE, samp_columns.samp_flag[i].name);
             cudaMemcpy(d_SC_samp_flag->numb+i, &(samp_columns.samp_flag[i].numb), sizeof(int), cudaMemcpyHostToDevice);
         }
 
         // Allocate and initialize samp_int
         tmp = samp_columns.samp_int.size();
         cudaMalloc(&(d_SC_samp_int->i_int), tmp * (num_lines * samp_columns.numSample) * sizeof(int));
-        cudaMalloc(&(d_SC_samp_int->name), tmp * sizeof(char) * max_name_size);
+        cudaMalloc(&(d_SC_samp_int->name), tmp * sizeof(char) * MAX_NAME_SIZE);
         cudaMalloc(&(d_SC_samp_int->numb), tmp * sizeof(int));
 
         for (int i = 0; i < tmp; i++) {
-            cudaMemcpy(d_SC_samp_int->name+i*max_name_size, samp_columns.samp_int[i].name.c_str(), samp_columns.samp_int[i].name.size() + 1, cudaMemcpyHostToDevice);
+            copy_fixed_name(d_SC_samp_int->name + i*MAX_NAME_SIZE, samp_columns.samp_int[i].name);
             cudaMemcpy(d_SC_samp_int->numb+i, &(samp_columns.samp_int[i].numb), sizeof(int), cudaMemcpyHostToDevice);
         }
 
@@ -412,28 +467,34 @@ void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
         }
     }
 
+    // Trailing newlines were counted above but are dropped here: keep the count in sync
+    long trimmed_newlines = 0;
     while(filestring[variants_size-1]=='\n'){
         variants_size--;
+        trimmed_newlines++;
     }
 
     filestring[variants_size] = '\n';
     variants_size++;
     before = chrono::system_clock::now();
-    num_lines = tmp_num_lines[0];
+    // tmp_num_lines[0] starts at 1 for the terminator written above (the last byte is never read),
+    // so num_lines is the number of '\n' in filestring, i.e. the number of variant records.
+    num_lines = tmp_num_lines[0] - trimmed_newlines;
     for(int i=1; i<num_threads; i++){
         num_lines= num_lines + tmp_num_lines[i];
     }
 
-    new_lines_index = (unsigned int*)malloc(sizeof(unsigned int)*(num_lines+1));
+    new_lines_index = (unsigned long long*)malloc(sizeof(unsigned long long)*(num_lines+1));
     new_lines_index[0] = 0;
     cudaMalloc(&d_filestring, (variants_size + 8)* sizeof(char));
-    cudaMalloc(&d_new_lines_index, (num_lines + 1) * sizeof(unsigned int));
+    cudaMalloc(&d_new_lines_index, (num_lines + 1) * sizeof(unsigned long long));
     cudaMemcpy(d_filestring, filestring, sizeof(char)*variants_size, cudaMemcpyHostToDevice);
     cudaMalloc(&d_count, sizeof(unsigned int));
     cudaMemset(d_count, 0, sizeof(unsigned int));
     
     dim3 threads = 1024;
-    dim3 blocks((variants_size + threads.x - 1) / threads.x);
+    // One thread past the end (idx == len) writes the leading 0 index, so cover len + 1 elements
+    dim3 blocks((variants_size + threads.x) / threads.x);
     cu_find_new_lines_index<<<blocks, threads>>>(
         d_filestring,
         variants_size,
@@ -451,7 +512,7 @@ void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
     cudaDeviceSynchronize();
 
     //ordering with Thrust library
-    thrust::device_ptr<unsigned int> d_new_lines_index_ptr(d_new_lines_index);
+    thrust::device_ptr<unsigned long long> d_new_lines_index_ptr(d_new_lines_index);
     if (!d_new_lines_index_ptr) {
         std::cerr << "Invalid device pointer for d_new_lines_index." << std::endl;
         return;
@@ -465,7 +526,7 @@ void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
 
     cudaDeviceSynchronize();
     
-    cudaMemcpy(new_lines_index, d_new_lines_index, sizeof(unsigned int)*(num_lines+1), cudaMemcpyDeviceToHost);
+    cudaMemcpy(new_lines_index, d_new_lines_index, sizeof(unsigned long long)*(num_lines+1), cudaMemcpyDeviceToHost);
 }
     
 /**
@@ -504,9 +565,6 @@ void vcf_parsed::print_header(){
     */
 void vcf_parsed::get_and_parse_header(ifstream *file){
     string line;
-    vector<string> line_el;     //all the characteristics together
-    vector<string> line_el1;    //each characteristic
-    vector<string> line_el2;    //keys and values
     // removing the header and storing it in vcf.header
     
     while (getline(*file, line) && line[0]=='#' && line[1]=='#'){
@@ -516,35 +574,30 @@ void vcf_parsed::get_and_parse_header(ifstream *file){
         bool Format = (line[2]=='F' && line[3]=='O');
         
         if(Info || Format){
-            boost::split(line_el, line, boost::is_any_of("><"));
-            boost::split(line_el1, line_el[1], boost::is_any_of(","));
-            for(int i=0; i<3; i++){
-                boost::split(line_el2, line_el1[i], boost::is_any_of("="));
-                if(Info){
-                    if(i==0) INFO.ID.push_back(line_el2[1]);
-                    if(i==1) INFO.Number.push_back(line_el2[1]);
-                    if(i==1 && line_el2[1] == "A") INFO.alt_values++;
-                    if(i==2) INFO.Type.push_back(line_el2[1]);
+            // Attributes are looked up by name: the VCF spec does not fix their order.
+            const std::string_view body = header_attr_body(line);
+            const string id = header_attr(body, "ID=");
+            const string number = header_attr(body, "Number=");
+            const string type = header_attr(body, "Type=");
+            if(Info){
+                INFO.ID.push_back(id);
+                INFO.Number.push_back(number);
+                if(number == "A") INFO.alt_values++;
+                INFO.Type.push_back(type);
+            }else if(id == "GT"){
+                FORMAT.hasGT = true;
+                // GT is Number=1 by spec: anything but A or a fixed count (e.g. '.') counts as 1
+                FORMAT.numGT = (number == "A" || is_fixed_number(number)) ? number[0] : '1';
+                hasDetSamples = true;
+            }else{
+                FORMAT.ID.push_back(id);
+                FORMAT.Number.push_back(number);
+                if(number == "A"){
+                    FORMAT.alt_values++;
+                }else{
+                    hasDetSamples = true;
                 }
-                if(Format){
-                    if(i==0){
-                        if(line_el2[1] == "GT"){
-                            FORMAT.hasGT = true;
-                            boost::split(line_el2, line_el1[1], boost::is_any_of("="));
-                            FORMAT.numGT = line_el2[1][0];
-                            i+=3;
-                        }else{
-                            FORMAT.ID.push_back(line_el2[1]);
-                        }
-                    } 
-                    if(i==1) FORMAT.Number.push_back(line_el2[1]);
-                    if(i==1 && line_el2[1] == "A"){
-                        FORMAT.alt_values++;
-                    }else{
-                        hasDetSamples = true;
-                    }
-                    if(i==2) FORMAT.Type.push_back(line_el2[1]);
-                }
+                FORMAT.Type.push_back(type);
             }
         }
     }
@@ -617,9 +670,12 @@ void vcf_parsed::create_sample_vectors(int num_threads){
     }
 
     int numIter = FORMAT.ID.size();
-    if(numIter == 0 ) return;
+    if(numIter == 0 && !FORMAT.hasGT) return;
 
     for(int i = 0; i < numIter; i++){
+        // Number=R, G and . are not supported yet: skip the field instead of throwing in
+        // std::stoi (R, G) or prompting on stdin (.). The line parser then ignores it.
+        if(strcmp(&FORMAT.Number[i][0], "A") != 0 && !is_fixed_number(FORMAT.Number[i])) continue;
         if(strcmp(&FORMAT.Number[i][0], "A") != 0){
             // Without Alternatives
             if(strcmp(&FORMAT.Number[i][0], "1")==0){ 
@@ -655,91 +711,9 @@ void vcf_parsed::create_sample_vectors(int num_threads){
                 samp_columns.samp_flag.push_back(samp_flag_tmp);
                 samp_columns.samp_flag.back().i_flag.resize((num_lines)*samp_columns.numSample, 0);
                 samp_columns.samp_flag.back().numb = std::stoi(FORMAT.Number[i]);
-                info_map[FORMAT.ID[i]] = 11;
-                var_columns.info_map1[FORMAT.ID[i]] = 11;
+                info_map[FORMAT.ID[i]] = FLAG_FORMAT;
+                var_columns.info_map1[FORMAT.ID[i]] = FLAG_FORMAT;
                 FORMAT.flags++;
-            }else if(strcmp(&FORMAT.Number[i][0], ".") == 0){
-                int userNumber = -1;
-
-                while(true) {
-                    std::cout << "Select the number for the field " 
-                            << FORMAT.ID[i] << " (non negative integer): ";
-                    if (std::cin >> userNumber && userNumber >= 0) {
-                        break; 
-                    } else {
-                        std::cout << "VInvalid value. Please try again." << std::endl;
-                        std::cin.clear(); 
-                        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Scarta l'input errato
-                    }
-                }
-            
-                if(userNumber == 1){
-                    if(!strcmp(&FORMAT.Type[i][0], "String")){
-                        samp_string_tmp.name = FORMAT.ID[i];
-                        samp_columns.samp_string.push_back(samp_string_tmp);
-                        samp_columns.samp_string.back().i_string.resize((num_lines)*samp_columns.numSample, "\0");
-                        samp_columns.samp_string.back().numb = userNumber;
-                        info_map[FORMAT.ID[i]] = 8;
-                        var_columns.info_map1[FORMAT.ID[i]] = 8;
-                        FORMAT.strings++;                        
-                    } else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
-                        samp_int_tmp.name = FORMAT.ID[i];
-                        samp_columns.samp_int.push_back(samp_int_tmp);
-                        samp_columns.samp_int.back().i_int.resize((num_lines)*samp_columns.numSample, 0);
-                        samp_columns.samp_int.back().numb = userNumber;
-                        info_map[FORMAT.ID[i]] = 9;
-                        var_columns.info_map1[FORMAT.ID[i]] = 9;
-                        FORMAT.ints++;
-                    } else if(!strcmp(&FORMAT.Type[i][0], "Float")){
-                        samp_float_tmp.name = FORMAT.ID[i];
-                        samp_columns.samp_float.push_back(samp_float_tmp);
-                        samp_columns.samp_float.back().i_float.resize((num_lines)*samp_columns.numSample, 0);
-                        samp_columns.samp_float.back().numb = userNumber;
-                        info_map[FORMAT.ID[i]] = 10;
-                        var_columns.info_map1[FORMAT.ID[i]] = 10;
-                        FORMAT.floats++;
-                    }
-                }else if(userNumber == 0){
-                    samp_flag_tmp.name = FORMAT.ID[i];
-                    samp_columns.samp_flag.push_back(samp_flag_tmp);
-                    samp_columns.samp_flag.back().i_flag.resize((num_lines)*samp_columns.numSample, 0);
-                    samp_columns.samp_flag.back().numb = userNumber;
-                    info_map[FORMAT.ID[i]] = 11;
-                    var_columns.info_map1[FORMAT.ID[i]] = 11;
-                    FORMAT.flags++;
-                }else { // userNumber>1
-                    if(!strcmp(&FORMAT.Type[i][0], "String")){
-                        for(int j = 0; j < userNumber; j++){
-                            samp_string_tmp.name = FORMAT.ID[i] + std::to_string(j);
-                            samp_columns.samp_string.push_back(samp_string_tmp);
-                            samp_columns.samp_string.back().i_string.resize((num_lines)*samp_columns.numSample, "\0");
-                            samp_columns.samp_string.back().numb = userNumber;
-                            info_map[FORMAT.ID[i] + std::to_string(j)] = 8;
-                            var_columns.info_map1[FORMAT.ID[i] + std::to_string(j)] = 8;
-                            FORMAT.strings++;
-                        }
-                    } else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
-                        for(int j = 0; j < userNumber; j++){
-                            samp_int_tmp.name = FORMAT.ID[i] + std::to_string(j);
-                            samp_columns.samp_int.push_back(samp_int_tmp);
-                            samp_columns.samp_int.back().i_int.resize((num_lines)*samp_columns.numSample, 0);
-                            samp_columns.samp_int.back().numb = userNumber;
-                            info_map[FORMAT.ID[i] + std::to_string(j)] = 9;
-                            var_columns.info_map1[FORMAT.ID[i] + std::to_string(j)] = 9;
-                            FORMAT.ints++;
-                        }
-                    } else if(!strcmp(&FORMAT.Type[i][0], "Float")){
-                        for(int j = 0; j < userNumber; j++){
-                            samp_float_tmp.name = FORMAT.ID[i] + std::to_string(j);
-                            samp_columns.samp_float.push_back(samp_float_tmp);
-                            samp_columns.samp_float.back().i_float.resize((num_lines)*samp_columns.numSample, 0);
-                            samp_columns.samp_float.back().numb = userNumber;
-                            info_map[FORMAT.ID[i] + std::to_string(j)] = 10;
-                            var_columns.info_map1[FORMAT.ID[i] + std::to_string(j)] = 10;
-                            FORMAT.floats++;
-                        }
-                    }
-                }                    
             }else{ 
                 //Number > 1
                 if(!strcmp(&FORMAT.Type[i][0], "String")){
@@ -808,7 +782,7 @@ void vcf_parsed::create_sample_vectors(int num_threads){
     samp_columns.samp_int.resize(FORMAT.ints);
     samp_columns.samp_float.resize(FORMAT.floats);
     samp_columns.samp_string.resize(FORMAT.strings);
-    if(hasDetSamples){
+    if(samplesON){
         samp_columns.var_id.resize((num_lines)*samp_columns.numSample, 0);
         samp_columns.samp_id.resize((num_lines)*samp_columns.numSample, static_cast<unsigned short>(0));
     }    
@@ -816,8 +790,6 @@ void vcf_parsed::create_sample_vectors(int num_threads){
     alt_sample.samp_int.resize(FORMAT.ints_alt);
     alt_sample.samp_float.resize(FORMAT.floats_alt);
     alt_sample.samp_string.resize(FORMAT.strings_alt);
-    alt_sample.var_id.resize((num_lines)* alt_sample.numSample, 0);
-    alt_sample.samp_id.resize((num_lines)*alt_sample.numSample, static_cast<unsigned short>(0));
 
 }
     
@@ -875,14 +847,14 @@ void vcf_parsed::create_info_vectors(int num_threads){
             if(strcmp(&INFO.Type[i][0], "Integer")==0){
                 INFO.ints++;
                 info_int_tmp.name = INFO.ID[i];
-                info_int_tmp.i_int.resize(num_lines-1, 0);
+                info_int_tmp.i_int.resize(num_lines, 0);
                 var_columns.in_int.push_back(info_int_tmp);
                 info_map[INFO.ID[i]] = 1;
                 var_columns.info_map1[INFO.ID[i]] = 1;
             } else if(strcmp(&INFO.Type[i][0], "Float")==0){
                 INFO.floats++;
                 info_float_tmp.name = INFO.ID[i];
-                info_float_tmp.i_float.resize(num_lines-1, 0);
+                info_float_tmp.i_float.resize(num_lines, 0);
                 var_columns.in_float.push_back(info_float_tmp);
                 info_map[INFO.ID[i]] = 2;
                 var_columns.info_map1[INFO.ID[i]] = 2;
@@ -890,14 +862,14 @@ void vcf_parsed::create_info_vectors(int num_threads){
                 if(strcmp(INFO.ID[i].c_str(), "TSA")==0){
                     INFO.ints++;
                     info_int_tmp.name = INFO.ID[i];
-                    info_int_tmp.i_int.resize(num_lines-1, 0);
+                    info_int_tmp.i_int.resize(num_lines, 0);
                     var_columns.in_int.push_back(info_int_tmp);
                     info_map[INFO.ID[i]] = 1;
                     var_columns.info_map1[INFO.ID[i]] = 1;
                 }else{ 
                     INFO.strings++;
                     info_string_tmp.name = INFO.ID[i];
-                    info_string_tmp.i_string.resize(num_lines-1, "\0");
+                    info_string_tmp.i_string.resize(num_lines, "\0");
                     var_columns.in_string.push_back(info_string_tmp);
                     info_map[INFO.ID[i]] = 3;
                     var_columns.info_map1[INFO.ID[i]] = 3;
@@ -905,7 +877,7 @@ void vcf_parsed::create_info_vectors(int num_threads){
             } else if(strcmp(&INFO.Type[i][0], "Flag")==0){
                 INFO.flags++;
                 info_flag_tmp.name = INFO.ID[i];
-                info_flag_tmp.i_flag.resize(num_lines-1, 0);
+                info_flag_tmp.i_flag.resize(num_lines, 0);
                 var_columns.in_flag.push_back(info_flag_tmp);
                 info_map[INFO.ID[i]] = 0;
                 var_columns.info_map1[INFO.ID[i]] = 0;
@@ -998,13 +970,13 @@ void vcf_parsed::print_info(){
     * Resizes the vectors in the var_columns_df structure based on the number of variants.
     */
 void vcf_parsed::reserve_var_columns(){
-    var_columns.var_number.resize(num_lines-1);
-    var_columns.chrom.resize(num_lines-1);
-    var_columns.id.resize(num_lines-1);
-    var_columns.pos.resize(num_lines-1);
-    var_columns.ref.resize(num_lines-1); 
-    var_columns.qual.resize(num_lines-1);
-    var_columns.filter.resize(num_lines-1);
+    var_columns.var_number.resize(num_lines);
+    var_columns.chrom.resize(num_lines);
+    var_columns.id.resize(num_lines);
+    var_columns.pos.resize(num_lines);
+    var_columns.ref.resize(num_lines); 
+    var_columns.qual.resize(num_lines);
+    var_columns.filter.resize(num_lines);
 }
 
 /**
@@ -1052,6 +1024,9 @@ void vcf_parsed::populate_runner(int numb_cores){
     h_params.float_name = d_VC_in_float->name;
     h_params.flag_name = d_VC_in_flag->name;
     h_params.int_name = d_VC_in_int->name;
+    h_params.numInfoFloat = var_columns.in_float.size();
+    h_params.numInfoFlag = var_columns.in_flag.size();
+    h_params.numInfoInt = var_columns.in_int.size();
     h_params.new_lines_index = d_new_lines_index;
     h_params.numLines = num_lines;
 
@@ -1065,6 +1040,8 @@ void vcf_parsed::populate_runner(int numb_cores){
         h_params.samp_float_name = d_SC_samp_float->name;
         h_params.samp_flag_name = d_SC_samp_flag->name;
         h_params.samp_int_name = d_SC_samp_int->name;
+        h_params.numSampFloat = samp_columns.samp_float.size();
+        h_params.numSampInt = samp_columns.samp_int.size();
         h_params.samp_float_numb = d_SC_samp_float->numb;
         h_params.samp_flag_numb = d_SC_samp_flag->numb;
         h_params.samp_int_numb = d_SC_samp_int->numb;
@@ -1146,6 +1123,39 @@ void vcf_parsed::populate_runner(int numb_cores){
 }
 
 /**
+    * @brief Fills var_columns.chrom_map / filter_map single-threaded, before the parallel parse.
+    *
+    * The parsing threads used to insert into these std::map concurrently (a data race that
+    * corrupted the trees). Codes are assigned in order of first appearance in the file.
+    */
+void vcf_parsed::prebuild_chrom_filter_maps(){
+    var_columns.chrom_map.clear();
+    var_columns.filter_map.clear();
+
+    auto is_sep = [&](long p){ return filestring[p] == '\t' || filestring[p] == ' ' || filestring[p] == '\n'; };
+    string key;
+    for(long i = 0; i < num_lines; i++){
+        long p = new_lines_index[i];
+        const long e = new_lines_index[i + 1];
+        if(filestring[p] == '\n') p++;
+
+        key.clear();
+        while(p < e && !is_sep(p)) key.push_back(filestring[p++]);
+        var_columns.chrom_map.emplace(key, static_cast<unsigned char>(var_columns.chrom_map.size()));
+        if(p < e && filestring[p] != '\n') p++;
+
+        for(int field = 2; field <= 6 && p < e; field++){ // skip POS, ID, REF, ALT, QUAL
+            while(p < e && !is_sep(p)) p++;
+            if(p < e && filestring[p] != '\n') p++;
+        }
+
+        key.clear();
+        while(p < e && !is_sep(p)) key.push_back(filestring[p++]);
+        var_columns.filter_map.emplace(key, static_cast<char>(var_columns.filter_map.size()));
+    }
+}
+
+/**
     * @brief Populates variant columns by processing VCF lines in parallel.
     *
     * Spawns a worker thread to run the CUDA kernel for parsing and uses OpenMP to merge alternative allele
@@ -1154,10 +1164,11 @@ void vcf_parsed::populate_runner(int numb_cores){
     * @param num_threads Number of threads to use for parallel merging.
     */
 void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
+    prebuild_chrom_filter_maps();
 
     std::thread worker_thread(&vcf_parsed::populate_runner, this, numb_cores);
 
-    long batch_size = (num_lines-2+num_threads)/num_threads;
+    long batch_size = (num_lines-1+num_threads)/num_threads;
     
     std::vector<alt_columns_df> tmp_alt(num_threads);
     std::vector<int> tmp_num_alt(num_threads);
@@ -1194,7 +1205,7 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
             }
 
             // For each line in the batch
-            for(long i=start; i<end && i<num_lines-1; i++){ 
+            for(long i=start; i<end && i<num_lines; i++){ 
                 get_vcf_line_in_var_columns_format(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]), &samp_columns, &FORMAT, &(tmp_num_alt_format[th_ID]), &(tmp_alt_format[th_ID]));
             }
             tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
@@ -1233,7 +1244,7 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
             tmp_alt_format[th_ID].numSample = tmp_num_alt_format[th_ID]; 
         }else{
             // There aren't samples in the dataset
-            for(long i=start; i<end && i<num_lines-1; i++){ 
+            for(long i=start; i<end && i<num_lines; i++){ 
                 get_vcf_line_in_var_columns(filestring, new_lines_index[i], new_lines_index[i+1], i, &(tmp_alt[th_ID]), &(tmp_num_alt[th_ID]));
             }                      
             tmp_alt[th_ID].var_id.resize(tmp_num_alt[th_ID]);
@@ -1406,6 +1417,29 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
     worker_thread.join();    
 }
 
+// Per-thread alternative buffers are pre-sized for ~2 ALTs per line; grow them when a chunk needs more
+// (same approach as the CPU backend in cuVCF-internal).
+static void ensure_alt_capacity(alt_columns_df* tmp_alt, int needed){
+    if(needed <= 0 || static_cast<int>(tmp_alt->alt.size()) >= needed) return;
+    tmp_alt->var_id.resize(needed, 0);
+    tmp_alt->alt.resize(needed, "\0");
+    tmp_alt->alt_id.resize(needed, (char)0);
+    for(auto& c : tmp_alt->alt_int) c.i_int.resize(needed, 0);
+    for(auto& c : tmp_alt->alt_float) c.i_float.resize(needed, 0.0f);
+    for(auto& c : tmp_alt->alt_string) c.i_string.resize(needed, "\0");
+}
+
+static void ensure_alt_format_capacity(alt_format_df* tmp_alt_format, int needed){
+    if(needed <= 0 || static_cast<int>(tmp_alt_format->var_id.size()) >= needed) return;
+    tmp_alt_format->var_id.resize(needed, 0);
+    tmp_alt_format->alt_id.resize(needed, (char)0);
+    tmp_alt_format->samp_id.resize(needed, static_cast<unsigned short>(0));
+    for(auto& c : tmp_alt_format->samp_int) c.i_int.resize(needed, 0);
+    for(auto& c : tmp_alt_format->samp_float) c.i_float.resize(needed, 0.0f);
+    for(auto& c : tmp_alt_format->samp_string) c.i_string.resize(needed, "\0");
+    if(!tmp_alt_format->sample_GT.GT.empty()) tmp_alt_format->sample_GT.GT.resize(needed, (char)0);
+}
+
 /**
     * @brief Parses a VCF line and populates variant columns data.
     *
@@ -1440,10 +1474,9 @@ void vcf_parsed::get_vcf_line_in_var_columns(char *line, long start, long end, l
         if(line[start+iter]=='\t'||line[start+iter]==' '){
             find1 = true;
             iter++;
-            if(var_columns.chrom_map.find(tmp) == var_columns.chrom_map.end()){
-                var_columns.chrom_map.insert(std::make_pair(tmp, (unsigned char)var_columns.chrom_map.size()));
-            }
-            var_columns.chrom[i] = var_columns.chrom_map[tmp];
+            // chrom_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
+            auto chrom_it = var_columns.chrom_map.find(tmp);
+            var_columns.chrom[i] = (chrom_it != var_columns.chrom_map.end()) ? chrom_it->second : static_cast<unsigned char>(0);
         }else{
             tmp += line[start+iter];
             iter++;
@@ -1494,10 +1527,11 @@ void vcf_parsed::get_vcf_line_in_var_columns(char *line, long start, long end, l
             iter++;
             boost::split(tmp_split, tmp, boost::is_any_of(","));
             local_alt = tmp_split.size();
+            ensure_alt_capacity(tmp_alt, (*tmp_num_alt) + local_alt);
             for(int y = 0; y<local_alt; y++){
-                (*tmp_alt).alt[(*tmp_num_alt)] = tmp_split[y];
-                (*tmp_alt).alt_id[(*tmp_num_alt)] = (char)y;
-                (*tmp_alt).var_id[(*tmp_num_alt)] = i;
+                (*tmp_alt).alt[(*tmp_num_alt) + y] = tmp_split[y];
+                (*tmp_alt).alt_id[(*tmp_num_alt) + y] = (char)y;
+                (*tmp_alt).var_id[(*tmp_num_alt) + y] = i;
             }
         }else{
             tmp += line[start+iter];
@@ -1518,10 +1552,9 @@ void vcf_parsed::get_vcf_line_in_var_columns(char *line, long start, long end, l
         if(line[start+iter]=='\t'||line[start+iter]==' '){
             find1 = true;
             iter++;
-            if(var_columns.filter_map.find(tmp) == var_columns.filter_map.end()){
-                var_columns.filter_map.insert(std::make_pair(tmp, (char)var_columns.filter_map.size()));
-            }
-            var_columns.filter[i] = var_columns.filter_map[tmp];
+            // filter_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
+            auto filter_it = var_columns.filter_map.find(tmp);
+            var_columns.filter[i] = (filter_it != var_columns.filter_map.end()) ? filter_it->second : static_cast<char>(0);
         }else{
             tmp += line[start+iter];
             iter++;
@@ -1547,7 +1580,7 @@ void vcf_parsed::get_vcf_line_in_var_columns(char *line, long start, long end, l
                 find_info_elem = false;
                 if(tmp_elems.size()==2){
                     while(!find_info_type){
-                        if(var_columns.info_map1[tmp_elems[0]]==STRING){
+                        if(var_columns.info_code(tmp_elems[0])==STRING){
                             //String
                             el=0;
                             while(!find_info_elem){
@@ -1558,21 +1591,21 @@ void vcf_parsed::get_vcf_line_in_var_columns(char *line, long start, long end, l
                                 el++;
                             }
                             find_info_type = true;
-                        }else if(var_columns.info_map1[tmp_elems[0]]==INT_ALT){
+                        }else if(var_columns.info_code(tmp_elems[0])==INT_ALT){
                             //Int Alt
                             el=0;
                             while(!find_info_elem){
                                 if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
                                     boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                     for(int y = 0; y<local_alt; y++){
-                                        (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = stoi(tmp_split[y]);
+                                        (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? safe_stoi(tmp_split[y]) : 0; // "." has a single token
                                     }
                                     find_info_elem = true;
                                 }
                                 el++;
                             }
                             find_info_type = true;
-                        }else if(var_columns.info_map1[tmp_elems[0]]==FLOAT_ALT){
+                        }else if(var_columns.info_code(tmp_elems[0])==FLOAT_ALT){
                             //Float Alt
                             el=0;
                             while(!find_info_elem){
@@ -1581,7 +1614,7 @@ void vcf_parsed::get_vcf_line_in_var_columns(char *line, long start, long end, l
                                     
                                     for(int y = 0; y<local_alt; y++){
                                         try{
-                                            (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = (__half)stof(tmp_split[y]);
+                                            (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? (__half)safe_stof(tmp_split[y]) : (__half)0.0f; // "." has a single token
                                         }catch (const std::exception& e){
                                             (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
                                         }
@@ -1591,14 +1624,14 @@ void vcf_parsed::get_vcf_line_in_var_columns(char *line, long start, long end, l
                                 el++;
                             }
                             find_info_type = true;
-                        }else if(var_columns.info_map1[tmp_elems[0]]==STRING_ALT){
+                        }else if(var_columns.info_code(tmp_elems[0])==STRING_ALT){
                             //String Alt
                             el=0;
                             while(!find_info_elem){
                                 if((*tmp_alt).alt_string[el].name == tmp_elems[0]){
                                     boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                     for(int y = 0; y<local_alt; y++){
-                                        (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = tmp_split[y];
+                                        (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? tmp_split[y] : ""; // "." has a single token
                                     }
                                     find_info_elem = true;
                                 }
@@ -1657,10 +1690,9 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
         if(line[start+iter]=='\t'||line[start+iter]==' '){
             find1 = true;
             iter++;
-            if(var_columns.chrom_map.find(tmp) == var_columns.chrom_map.end()){
-                var_columns.chrom_map.insert(std::make_pair(tmp, (unsigned char)var_columns.chrom_map.size()));
-            }
-            var_columns.chrom[i] = var_columns.chrom_map[tmp];
+            // chrom_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
+            auto chrom_it = var_columns.chrom_map.find(tmp);
+            var_columns.chrom[i] = (chrom_it != var_columns.chrom_map.end()) ? chrom_it->second : static_cast<unsigned char>(0);
         }else{
             tmp += line[start+iter];
             iter++;
@@ -1711,6 +1743,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
             iter++;
             boost::split(tmp_split, tmp, boost::is_any_of(","));
             local_alt = tmp_split.size();
+            ensure_alt_capacity(tmp_alt, (*tmp_num_alt) + local_alt);
             for(int y = 0; y<local_alt; y++){
                 (*tmp_alt).alt[(*tmp_num_alt) + y] = tmp_split[y];
                 (*tmp_alt).alt_id[(*tmp_num_alt) + y] = (char)y;
@@ -1735,10 +1768,9 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
         if(line[start+iter]=='\t'||line[start+iter]==' '){
             find1 = true;
             iter++;
-            if(var_columns.filter_map.find(tmp) == var_columns.filter_map.end()){
-                var_columns.filter_map.insert(std::make_pair(tmp, (char)var_columns.filter_map.size()));
-            }
-            var_columns.filter[i] = var_columns.filter_map[tmp];
+            // filter_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
+            auto filter_it = var_columns.filter_map.find(tmp);
+            var_columns.filter[i] = (filter_it != var_columns.filter_map.end()) ? filter_it->second : static_cast<char>(0);
         }else{
             tmp += line[start+iter];
             iter++;
@@ -1764,7 +1796,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                 find_info_elem = false;
                 if(tmp_elems.size()==2){
                     while(!find_info_type){
-                        if(var_columns.info_map1[tmp_elems[0]]==STRING){
+                        if(var_columns.info_code(tmp_elems[0])==STRING){
                             //String
                             el=0;
                             while(!find_info_elem){
@@ -1775,21 +1807,21 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                 el++;
                             }
                             find_info_type = true;
-                        }else if(var_columns.info_map1[tmp_elems[0]]==INT_ALT){
+                        }else if(var_columns.info_code(tmp_elems[0])==INT_ALT){
                             //Int Alt
                             el=0;
                             while(!find_info_elem){
                                 if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
                                     boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                     for(int y = 0; y<local_alt; y++){
-                                        (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = stoi(tmp_split[y]);
+                                        (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? safe_stoi(tmp_split[y]) : 0; // "." has a single token
                                     }
                                     find_info_elem = true;
                                 }
                                 el++;
                             }
                             find_info_type = true;
-                        }else if(var_columns.info_map1[tmp_elems[0]]==FLOAT_ALT){
+                        }else if(var_columns.info_code(tmp_elems[0])==FLOAT_ALT){
                             //Float Alt
                             el=0;
                             while(!find_info_elem){
@@ -1798,7 +1830,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                     
                                     for(int y = 0; y<local_alt; y++){
                                         try{
-                                            (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = (__half)stof(tmp_split[y]);
+                                            (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? (__half)safe_stof(tmp_split[y]) : (__half)0.0f; // "." has a single token
                                         }catch (const std::exception& e){
                                             (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
                                         }
@@ -1808,14 +1840,14 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                 el++;
                             }
                             find_info_type = true;
-                        }else if(var_columns.info_map1[tmp_elems[0]]==STRING_ALT){
+                        }else if(var_columns.info_code(tmp_elems[0])==STRING_ALT){
                             //String Alt
                             el=0;
                             while(!find_info_elem){
                                 if((*tmp_alt).alt_string[el].name == tmp_elems[0]){
                                     boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
                                     for(int y = 0; y<local_alt; y++){
-                                        (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = tmp_split[y];
+                                        (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? tmp_split[y] : ""; // "." has a single token
                                     }
                                     find_info_elem = true;
                                 }
@@ -1871,9 +1903,10 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                             if(!((*sample).sample_GT.size() >= 1)){
                                 boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                 local_alt = tmp_sub.size();
+                                ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
                                 for(int y = 0; y<local_alt; y++){
                                     //Fill a tuple for each alternatives
-                                    (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_columns.var_number[i];
+                                    (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = static_cast<unsigned int>(i); // var_number is still being copied back from the device
                                     (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
                                     (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
                                     (*tmp_alt_format).sample_GT.GT[(*tmp_num_alt_format) + y] = (*tmp_alt_format).GTMap[tmp_sub[y]];
@@ -1881,11 +1914,11 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                 (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
                             }
                             find_type = true;
-                        }else if(var_columns.info_map1[tmp_format_split[j]] == STRING_FORMAT || var_columns.info_map1[tmp_format_split[j] + std::to_string(1)] == STRING_FORMAT){
+                        }else if(var_columns.info_code(tmp_format_split[j]) == STRING_FORMAT || var_columns.info_code(tmp_format_split[j] + std::to_string(1)) == STRING_FORMAT){
                             //String - deterministic
                             int el = 0;
                             while(!find_elem){
-                                if(!(*sample).samp_string[el].name.compare(0, tmp_format_split[j].length(), tmp_format_split[j], 0, tmp_format_split[j].length())){
+                                if(format_name_matches((*sample).samp_string[el].name, tmp_format_split[j])){
                                     if((*sample).samp_string[el].numb==1){ //String with numb = 1
                                         //Update the corresponing cell
                                         (*sample).samp_string[el].i_string[i*(*sample).numSample + samp] = tmp_split[j];
@@ -1896,7 +1929,8 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                         vector<string> tmp_sub;
                                         boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                                         for(int k = 0; k<(*sample).samp_string[el].numb; k++){
-                                            (*sample).samp_string[el+k].i_string[i*(*sample).numSample + samp] = tmp_sub[k];
+                                            // A '.' value has a single token
+                                            (*sample).samp_string[el+k].i_string[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? tmp_sub[k] : "";
                                         }
                                     }
                                     find_elem = true;
@@ -1904,25 +1938,26 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                 el++;
                             }
                             find_type = true;
-                        }else if(var_columns.info_map1[tmp_format_split[j]] == INT_FORMAT || var_columns.info_map1[tmp_format_split[j] + std::to_string(1)] == INT_FORMAT){
+                        }else if(var_columns.info_code(tmp_format_split[j]) == INT_FORMAT || var_columns.info_code(tmp_format_split[j] + std::to_string(1)) == INT_FORMAT){
                             //Integer - deterministic - on device
                             find_elem = true;
                             find_type = true;
-                        }else if(var_columns.info_map1[tmp_format_split[j]] == FLOAT_FORMAT || var_columns.info_map1[tmp_format_split[j] + std::to_string(1)] == FLOAT_FORMAT){
+                        }else if(var_columns.info_code(tmp_format_split[j]) == FLOAT_FORMAT || var_columns.info_code(tmp_format_split[j] + std::to_string(1)) == FLOAT_FORMAT){
                             //Float - deterministic - on device
                             find_elem = true;
                             find_type = true;
-                        }else if(var_columns.info_map1[tmp_format_split[j]] == STRING_FORMAT_ALT){
+                        }else if(var_columns.info_code(tmp_format_split[j]) == STRING_FORMAT_ALT){
                             //String alternatives
                             boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                             local_alt = tmp_sub.size();
+                            ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
                             int el = 0;
                             while(!find_elem){
                                 //Search the corresponding element
                                 if(!(*tmp_alt_format).samp_string[el].name.compare(tmp_format_split[j])){
                                     for(int y = 0; y<local_alt; y++){
                                         //Fill a tuple for each alternatives
-                                        (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_columns.var_number[i];
+                                        (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = static_cast<unsigned int>(i); // var_number is still being copied back from the device
                                         (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
                                         (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
                                         (*tmp_alt_format).samp_string[el].i_string[(*tmp_num_alt_format) + y] = tmp_sub[y];
@@ -1933,20 +1968,21 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                 el++;
                             }
                             find_type = true;
-                        }else if(var_columns.info_map1[tmp_format_split[j]] == INT_FORMAT_ALT){
+                        }else if(var_columns.info_code(tmp_format_split[j]) == INT_FORMAT_ALT){
                             //Integer alternatives
                             boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                             local_alt = tmp_sub.size();
+                            ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
                             int el = 0;
                             while(!find_elem){
                                 //Search the corresponding element
                                 if(!(*tmp_alt_format).samp_int[el].name.compare(tmp_format_split[j])){
                                     //Fill a tuple for each alternatives
                                     for(int y = 0; y<local_alt; y++){
-                                        (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_columns.var_number[i];
+                                        (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = static_cast<unsigned int>(i); // var_number is still being copied back from the device
                                         (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
                                         (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
-                                        (*tmp_alt_format).samp_int[el].i_int[(*tmp_num_alt_format) + y] = std::stoi(tmp_sub[y]);
+                                        (*tmp_alt_format).samp_int[el].i_int[(*tmp_num_alt_format) + y] = safe_stoi(tmp_sub[y]);
                                     }
                                     find_elem = true;
                                     (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
@@ -1954,21 +1990,22 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                 el++;
                             }
                             find_type = true;
-                        }else if(var_columns.info_map1[tmp_format_split[j]] == FLOAT_FORMAT_ALT){
+                        }else if(var_columns.info_code(tmp_format_split[j]) == FLOAT_FORMAT_ALT){
                             //Float alternatives
                             boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
                             local_alt = tmp_sub.size();
+                            ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
                             int el = 0;
                             while(!find_elem){ 
                                 //Search the corresponding element
                                 if(!(*tmp_alt_format).samp_float[el].name.compare(tmp_format_split[j])){
                                     //Fill a tuple for each alternatives
                                     for(int y = 0; y<local_alt; y++){
-                                        (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = var_columns.var_number[i];
+                                        (*tmp_alt_format).var_id[(*tmp_num_alt_format) + y] = static_cast<unsigned int>(i); // var_number is still being copied back from the device
                                         (*tmp_alt_format).samp_id[(*tmp_num_alt_format) + y] = samp;
                                         (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
                                         try{
-                                            (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = (__half)std::stof(tmp_sub[y]);
+                                            (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = (__half)safe_stof(tmp_sub[y]);
                                         }catch (const std::exception& e){
                                             (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = 0;
                                         }
@@ -1978,6 +2015,9 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                                 }
                                 el++;
                             }
+                            find_type = true;
+                        }else{
+                            // Unsupported or undeclared FORMAT field: skip it (the loop never ended otherwise)
                             find_type = true;
                         }
                     }

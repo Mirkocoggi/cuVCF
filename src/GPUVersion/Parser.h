@@ -74,9 +74,9 @@ public:
     /// Number of variant lines (excluding the header).
     long num_lines = 0;
     /// Host-side array storing the starting index of each variant line.
-    unsigned int *new_lines_index;
+    unsigned long long *new_lines_index; // 64-bit: byte offsets exceed 4 GiB on large files
     /// Device-side array storing the starting index of each variant line.
-    unsigned int *d_new_lines_index;
+    unsigned long long *d_new_lines_index;
     /// Flag indicating whether sample data is present.
     bool samplesON = false;
     /// Flag indicating whether detailed sample data is available.
@@ -269,6 +269,11 @@ public:
     * and asynchronously copies the parsed data from device to host.
     */
     void populate_runner(int numb_cores);
+
+    /**
+    * @brief Builds chrom_map and filter_map before the parallel parse (threads only read them).
+    */
+    void prebuild_chrom_filter_maps();
 
     /**
     * @brief Populates variant columns by processing VCF lines in parallel.
