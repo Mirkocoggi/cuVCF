@@ -445,6 +445,7 @@ void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
     // Parallel pread of the variant body straight into filestring; each chunk counts its newlines,
     // then writes their positions at its prefix offset. Chunks are in file order and scanned forward,
     // so new_lines_index comes out sorted: no device kernel, sort or per-chunk buffers are needed.
+    const long filestring_size = variants_size + 8; // as allocated by allocate_filestring
     variants_size--;
     const long batch_infile = (variants_size - 1 + num_threads)/num_threads; // Number of characters each chunk holds
     std::vector<size_t> chunk_count(num_threads + 1, 0);
@@ -499,6 +500,7 @@ void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
     new_lines_index[num_lines] = terminator; // the trimmed trailing newlines were the last entries
     filestring[variants_size] = '\n';
     variants_size++;
+    memset(filestring + variants_size, '\0', filestring_size - variants_size); // NUL tail after the terminator
 
     CUDA_CHECK_ERROR(cudaMalloc(&d_filestring, (variants_size + 8)* sizeof(char)));
     CUDA_CHECK_ERROR(cudaMalloc(&d_new_lines_index, (num_lines + 1) * sizeof(unsigned long long)));
@@ -609,8 +611,9 @@ void vcf_parsed::get_and_parse_header(ifstream *file){
     * The allocated size is based on the file size minus the header size.
     */
 void vcf_parsed::allocate_filestring(){
+    // No memset: find_new_lines_index overwrites the whole body and zeroes the tail
     filestring = (char*)malloc(variants_size + 8);
-    memset(filestring, '\0', variants_size + 8);
+    if(!filestring) throw std::runtime_error("cannot allocate " + std::to_string(variants_size + 8) + " bytes for the VCF body");
 }
 
 /**
