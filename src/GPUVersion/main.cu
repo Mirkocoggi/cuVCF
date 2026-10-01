@@ -24,8 +24,6 @@
 
 #include <cuda_runtime.h>   
 #include <cuda_fp16.h>      
-#include <thrust/device_ptr.h> 
-#include <thrust/sort.h>
 
 #include <boost/algorithm/string.hpp> 
 #include <chrono>           

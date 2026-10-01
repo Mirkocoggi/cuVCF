@@ -55,15 +55,15 @@ __constant__ char d_values_gt[NUM_KEYS_GT];
 #define MAX_KEY_LENGTH_MAP1 32
  
 /**
-  * @brief Device memory holding the keys for Map1.
+  * @brief Constant memory holding the keys for Map1 (INFO/FORMAT names).
   * Each key can be up to MAX_KEY_LENGTH_MAP1 characters long.
   */
-__device__ char d_keys_map1[NUM_KEYS_MAP1][MAX_KEY_LENGTH_MAP1];
+__constant__ char d_keys_map1[NUM_KEYS_MAP1][MAX_KEY_LENGTH_MAP1];
  
 /**
-  * @brief Device memory holding the integer values corresponding to Map1 keys.
+  * @brief Constant memory holding the integer values corresponding to Map1 keys.
   */
-__device__ int d_values_map1[NUM_KEYS_MAP1];
+__constant__ int d_values_map1[NUM_KEYS_MAP1];
 
 /**
  * @brief Compares two strings (s1 and s2) up to n characters.
