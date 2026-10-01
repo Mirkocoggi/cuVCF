@@ -100,8 +100,6 @@ static inline std::string header_attr(std::string_view body, std::string_view ke
     return std::string(body.substr(pos, end - pos));
 }
 
-// FORMAT columns are named <ID> (Number=1) or <ID>0, <ID>1, ... (Number>1): match the first column
-// of key exactly. A prefix match picked GQX for GQ when GQX was declared first.
 // VCF field walking: fields end at a tab, a space or the end of the line
 static inline bool is_field_end(char c){ return c == '\t' || c == ' ' || c == '\n'; }
 
@@ -116,6 +114,8 @@ static inline const char* next_field(const char* p, const char* e){
     return (p < e && (*p == '\t' || *p == ' ')) ? p + 1 : p;
 }
 
+// FORMAT columns are named <ID> (Number=1) or <ID>0, <ID>1, ... (Number>1): match the first column
+// of key exactly. A prefix match picked GQX for GQ when GQX was declared first.
 static inline bool format_name_matches(const std::string& name, const std::string& key){
     return name == key || (name.size() == key.size() + 1 && name.back() == '0' && name.compare(0, key.size(), key) == 0);
 }
@@ -508,6 +508,7 @@ void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
     for(int c = 0; c < num_threads; c++) chunk_count[c + 1] += chunk_count[c]; // prefix offsets
     num_lines = chunk_count[num_threads] - trimmed_newlines + 1;
     new_lines_index = (unsigned long long*)malloc(sizeof(unsigned long long)*(chunk_count[num_threads] + 2));
+    if(!new_lines_index) throw std::runtime_error("cannot allocate the line index (" + std::to_string(chunk_count[num_threads] + 2) + " entries)");
     new_lines_index[0] = 0;
     #pragma omp parallel for schedule(static)
     for(int c = 0; c < num_threads; c++){
@@ -1697,17 +1698,18 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
 
     // FORMAT template
     const char* q = field_end(p, e);
-    const std::string template_key(p, q - p);
+    const std::string_view template_key(p, q - p); // points into filestring, which outlives the chunk's cache
     auto plan_it = plans->find(template_key);
     if(plan_it == plans->end()){
         plan_it = plans->emplace(template_key, make_format_plan(p, q)).first;
     }
     const format_plan& plan = plan_it->second;
-    if(plan.used == 0) return; // nothing for the host in this record's samples
-    p = next_field(q, e);
+    if(plan.used == 0 || q == e) return; // nothing for the host in this record's samples, or no samples
+    p = q + 1;
 
+    // Every separator opens one more sample, so an empty last sample (a trailing tab) is still parsed
     const unsigned int n_samp = sample->numSample;
-    for(unsigned int samp = 0; samp < n_samp && p < e; samp++){
+    for(unsigned int samp = 0; samp < n_samp; samp++){
         q = field_end(p, e);
         const char* tb = p;
         for(size_t j = 0; j < plan.used && tb <= q; j++){
@@ -1756,7 +1758,8 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
             if(te == q) break;
             tb = te + 1;
         }
-        p = next_field(q, e);
+        if(q == e) break; // last field of the line
+        p = q + 1;
     }
 }
 

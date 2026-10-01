@@ -61,7 +61,7 @@ struct format_plan {
     size_t used = 0;
 };
 
-using format_plan_cache = std::unordered_map<std::string, format_plan>;
+using format_plan_cache = std::unordered_map<std::string_view, format_plan>; // keys point into filestring
 
 class vcf_parsed
 {
