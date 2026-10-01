@@ -514,7 +514,11 @@ public:
             if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
-                pos[i] = stoul(tmp);
+                try{
+                    pos[i] = stoul(tmp);
+                }catch(const std::exception& e){
+                    pos[i] = 0;
+                }
             }else{
                 tmp += at(iter);
                 iter++;
