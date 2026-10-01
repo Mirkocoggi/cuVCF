@@ -20,7 +20,6 @@
 #define DATASTRUCTURES_H
 
 #include <chrono>
-#include <boost/algorithm/string.hpp>
 #include <cuda_runtime.h>     
 #include <cuda_fp16.h>  
 #include <iostream>
