@@ -1714,10 +1714,11 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
         plan_it = plans->emplace(template_key, make_format_plan(p, q)).first;
     }
     const format_plan& plan = plan_it->second;
-    if(plan.used == 0 || q == e) return; // nothing for the host in this record's samples, or no samples
-    p = q + 1;
+    if(plan.used == 0) return; // nothing for the host in this record's samples
+    p = q < e ? q + 1 : e;
 
-    // Every separator opens one more sample, so an empty last sample (a trailing tab) is still parsed
+    // Every separator opens one more sample, so an empty last sample (a trailing tab) is still parsed;
+    // sample columns missing at the end of the record read as empty samples, as on the CPU and the kernel
     const unsigned int n_samp = sample->numSample;
     for(unsigned int samp = 0; samp < n_samp; samp++){
         q = field_end(p, e);
@@ -1768,8 +1769,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
             if(te == q) break;
             tb = te + 1;
         }
-        if(q == e) break; // last field of the line
-        p = q + 1;
+        p = q < e ? q + 1 : e;
     }
 }
 

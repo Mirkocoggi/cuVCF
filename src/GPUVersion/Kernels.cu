@@ -243,7 +243,7 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
     //Qui ho GT:AD
     num_sample_tokens = split(tmp, ':', tmp_values);
 
-    // Process each sample
+    // Process each sample; columns missing at the end of the record read as empty samples
     for (int samp = 0; samp < params->numSample; samp++) {
         reset_tmp(tmp, tmp_idx);
         find1 = false;
