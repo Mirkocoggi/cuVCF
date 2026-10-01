@@ -247,6 +247,7 @@ void vcf_parsed::run(char* vcf_filename, int num_threadss){
     create_info_vectors(num_threadss);
     reserve_var_columns();
     create_sample_vectors(num_threadss);
+    if(num_lines == 0) return; // header-only file: the columns exist and are empty
     // Allocate and initialize device memory
     device_allocation();
     populate_var_columns(num_threadss, cudaCores);
@@ -472,7 +473,6 @@ void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
     // then writes their positions at its prefix offset. Chunks are in file order and scanned forward,
     // so new_lines_index comes out sorted: no device kernel, sort or per-chunk buffers are needed.
     const long filestring_size = variants_size + 8; // as allocated by allocate_filestring
-    variants_size--;
     const long batch_infile = (variants_size - 1 + num_threads)/num_threads; // Number of characters each chunk holds
     std::vector<size_t> chunk_count(num_threads + 1, 0);
 
@@ -511,6 +511,7 @@ void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
     long trimmed_newlines = 0;
     while(variants_size > 0 && filestring[variants_size-1]=='\n'){ variants_size--; trimmed_newlines++; }
     const unsigned long long terminator = variants_size;
+    if(variants_size == 0){ num_lines = 0; return; } // header-only file: no records, nothing for the device
 
     // new_lines_index = [0, position of every '\n' before the terminator..., terminator]:
     // record i spans new_lines_index[i]..new_lines_index[i+1], and num_lines is the number of records.
@@ -551,7 +552,7 @@ void vcf_parsed::get_header(ifstream *file){
         header_size += line.length() + 1;
     }
     header_size += line.length() + 1;
-    variants_size = filesize - header_size; // New size without the header
+    variants_size = std::max(0L, filesize - header_size); // New size without the header (0 when the header has no final '\n')
 }
     
 /**
@@ -629,7 +630,7 @@ void vcf_parsed::get_and_parse_header(ifstream *file){
 
     header_size += line.length() + 1;
 
-    variants_size = filesize - header_size; // New size without the header
+    variants_size = std::max(0L, filesize - header_size); // New size without the header (0 when the header has no final '\n')
 }   
     
 /**
