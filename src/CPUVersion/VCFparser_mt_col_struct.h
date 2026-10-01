@@ -103,7 +103,7 @@ class alt_columns_df
     vector<char> alt_id;
     vector<string> alt;
     vector<info_float> alt_float;
-    vector<info_flag> alt_flag; //non gestite per ora
+    vector<info_flag> alt_flag; // not handled yet
     vector<info_string> alt_string;
     vector<info_int> alt_int;
     int numAlt;
@@ -237,7 +237,7 @@ class sample_columns_df //aka df3
         return it == GTMap.end() ? static_cast<char>(255) : it->second;
     }
     vector<samp_GT> sample_GT;
-    int numSample; //numero di sample per riga
+    int numSample; // number of samples per line
 
     void initMapGT(){
         // Missing genotypes, same codes as the GPU backend and the Python bindings

@@ -1,7 +1,6 @@
 /**
  * @file DataStructures.h
  * @brief Contains fundamental data structures used for VCF parsing and GPU processing
- * @author Your Name
  * @date 2025-07-16
  * 
  * @details This file defines the core data structures used throughout the VCF parser:

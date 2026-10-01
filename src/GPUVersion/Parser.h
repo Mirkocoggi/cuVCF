@@ -1,7 +1,6 @@
 /**
  * @file Parser.h
  * @brief Header file defining the VCF parser class and its interface
- * @author Your Name
  * @date 2025-07-16
  *
  * @details This file defines the vcf_parsed class which provides:

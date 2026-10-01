@@ -107,25 +107,25 @@ public:
             }
             
             
-            // Stampa Pos
+            // Print Pos
             if (i < static_cast<long>(pos.size()))
                 std::cout << pos[i] << "\t";
             else
                 std::cout << "nan\t";
             
-            // Stampa ID
+            // Print ID
             if (i < static_cast<long>(id.size()))
                 std::cout << id[i] << "\t";
             else
                 std::cout << "nan\t";
             
-            // Stampa Ref
+            // Print Ref
             if (i < static_cast<long>(ref.size()))
                 std::cout << ref[i] << "\t";
             else
                 std::cout << "nan\t";
 
-            // Stampa Qual
+            // Print Qual
             if (i < static_cast<long>(qual.size()))
                 if(__half2float(qual[i]) != -1.0f){
                     std::cout << __half2float(qual[i]) << "\t";
@@ -135,7 +135,7 @@ public:
             else
                 std::cout << "nan\t";
             
-            // Stampa Filter: costruiamo la chiave dal carattere in filter
+            // Print Filter: look up the name of the code stored in filter
             if (i < static_cast<long>(filter.size())) {
                 char code = filter[i];
                 bool found = false;

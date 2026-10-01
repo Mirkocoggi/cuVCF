@@ -1,7 +1,6 @@
 /**
  * @file Parser.cu
  * @brief CUDA-accelerated VCF file parser implementation
- * @author Your Name
  * @date 2025-07-16
  *
  * @details Implements a parallel VCF parser using CUDA:
@@ -817,7 +816,7 @@ void vcf_parsed::create_info_vectors(int num_threads){
                 var_columns.info_map1[INFO.ID[i]] = 6;
                 
             }
-            if(strcmp(&INFO.Type[i][0], "Flag")==0){ //Per ora non gestito
+            if(strcmp(&INFO.Type[i][0], "Flag")==0){ // not handled yet
                 INFO.flags_alt++;
                 info_map[INFO.ID[i]] = 7;
             }
@@ -1348,44 +1347,44 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
 
     alt_columns.numAlt = totAlt;
     alt_sample.numSample = totSampAlt;
-    // Eseguiamo il resize in parallelo per alt_columns
+    // Resize the alt_columns vectors in parallel
     {
-        // Task per ridimensionare le vector "piatte"
+        // Task resizing the flat vectors
         auto fut1 = std::async(std::launch::async, [&]() {
             alt_columns.var_id.resize(totAlt);
             alt_columns.alt_id.resize(totAlt);
             alt_columns.alt.resize(totAlt);
         });
         
-        // Task per ridimensionare le vector interne di alt_int
+        // Task resizing the inner vectors of alt_int
         auto fut2 = std::async(std::launch::async, [&]() {
             for (int j = 0; j < INFO.ints_alt; j++) {
                 alt_columns.alt_int[j].i_int.resize(totAlt);
             }
         });
         
-        // Task per ridimensionare le vector interne di alt_float
+        // Task resizing the inner vectors of alt_float
         auto fut3 = std::async(std::launch::async, [&]() {
             for (int j = 0; j < INFO.floats_alt; j++) {
                 alt_columns.alt_float[j].i_float.resize(totAlt);
             }
         });
         
-        // Task per ridimensionare le vector interne di alt_string
+        // Task resizing the inner vectors of alt_string
         auto fut4 = std::async(std::launch::async, [&]() {
             for (int j = 0; j < INFO.strings_alt; j++) {
                 alt_columns.alt_string[j].i_string.resize(totAlt);
             }
         });
         
-        // Aspettiamo che tutti i task completino
+        // Wait for all the tasks to finish
         fut1.get();
         fut2.get();
         fut3.get();
         fut4.get();
     }
 
-    // Se samplesON è attivo, facciamo la stessa cosa per alt_sample
+    // With samplesON, do the same for alt_sample
     if (samplesON) {
         auto fut1 = std::async(std::launch::async, [&]() {
             alt_sample.var_id.resize(totSampAlt);

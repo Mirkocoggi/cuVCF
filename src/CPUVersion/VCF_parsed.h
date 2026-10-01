@@ -218,7 +218,7 @@ public:
         auto get_file_size = std::chrono::duration<double>(after - before).count();
         // Getting the header (Saving the header into a string and storing the header size )
         before = chrono::system_clock::now();
-        get_and_parse_header(&inFile); //serve per separare l'header dal resto del file
+        get_and_parse_header(&inFile); // separates the header from the rest of the file
         //vcf.print_header();
         after = chrono::system_clock::now();
         auto get_header = std::chrono::duration<double>(after - before).count();

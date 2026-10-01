@@ -1,7 +1,6 @@
 /**
  * @file Kernels.cu
  * @brief CUDA kernels and device functions for VCF file parsing
- * @author Your Name
  * @date 2025-07-16
  *
  * @details This file implements the GPU-accelerated parsing of VCF files through:
@@ -239,7 +238,7 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
     }
     ++iter;
     
-    //Qui ho GT:AD
+    // tmp holds the FORMAT template, e.g. GT:AD
     num_sample_tokens = split(tmp, ':', tmp_values);
 
     // Process each sample; columns missing at the end of the record read as empty samples

@@ -1,7 +1,6 @@
 /**
  * @file main.cu
  * @brief Entry point for the GPU-accelerated VCF parser
- * @author Your Name
  * @date 2025-07-16
  *
  * @details Main application that:

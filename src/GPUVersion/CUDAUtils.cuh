@@ -1,7 +1,6 @@
 /**
  * @file CUDAUtils.cuh
  * @brief CUDA device-side utilities for VCF parsing
- * @author Your Name
  * @date 2025-07-16
  * 
  * @details Provides CUDA device-side utilities including:
@@ -314,9 +313,9 @@ __device__ half safeStof(const char* tmp) {
 /// Maximum length of each key in the PolyPhen map (including null terminator)
 #define MAX_KEY_LENGTH_POLYPHEN 20
 
-/// Numero di chiavi per la mappa CSQ.
+/// Number of keys in the CSQ map
 #define NUM_KEYS_CSQ 32
-/// Lunghezza massima di ogni chiave per la mappa CSQ (includendo il terminatore null).
+/// Maximum length of each key in the CSQ map (including null terminator)
 #define MAX_KEY_LENGTH_CSQ 32
 
 /**
@@ -335,8 +334,8 @@ __constant__ char d_polyphen_keys[NUM_KEYS_POLYPHEN][MAX_KEY_LENGTH_POLYPHEN] = 
 };
 
 /**
- * @brief Memoria costante contenente i valori corrispondenti alle chiavi PolyPhen.
- * Ogni valore è rappresentato da un singolo char.
+ * @brief Constant memory array of the values of the PolyPhen keys
+ * @details One char per value.
  */
 __constant__ char d_polyphen_values[NUM_KEYS_POLYPHEN] = {0, 1, 2, 3};
 
@@ -377,8 +376,8 @@ __constant__ char d_csq_keys[NUM_KEYS_CSQ][MAX_KEY_LENGTH_CSQ] = {
 };
 
 /**
- * @brief Memoria costante contenente i valori corrispondenti alle chiavi CSQ.
- * Ogni valore è rappresentato da un singolo char.
+ * @brief Constant memory array of the values of the CSQ keys
+ * @details One char per value.
  */
 __constant__ char d_csq_values[NUM_KEYS_CSQ] = {
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,

@@ -71,7 +71,7 @@ const int INT_FORMAT_ALT = 12;
 const int FLOAT_FORMAT_ALT = 13;
 const int FLAG_FORMAT = 17; // was 11, which collided with STRING_FORMAT_ALT
 
-// Mappa per PolyPhen
+// PolyPhen map
 const std::unordered_map<std::string, char> polyphenCharMap = {
     {"", 0},
     {"benign", 1},
@@ -79,7 +79,7 @@ const std::unordered_map<std::string, char> polyphenCharMap = {
     {"probably_damaging", 3}
 };
 
-// Mappa per CSQ
+// CSQ map
 const std::unordered_map<std::string, char> csqCharMap = {
     {"synonymous_variant", 0},
     {"missense_variant", 1},
