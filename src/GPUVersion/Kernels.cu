@@ -99,21 +99,26 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
         return;
     }
     long start = params->new_lines_index[thID];
+    if(thID > 0) start++; // new_lines_index holds the '\n' that ends the previous record
+    const long end = params->new_lines_index[thID + 1]; // the '\n' that ends this record
+    // Reads stop at the end of the record: past it every char is '\n', so a short record ends
+    // its fields there instead of reading into the next record (or past the buffer on the last one)
+    auto at = [&](long k) -> char { return start + k < end ? __ldg(&params->line[start + k]) : '\n'; };
 
     
     //Var Number
     params->var_number[thID] = thID;
 
     //Chromosome - CPU
-    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ') {
+    while (at(iter) != '\t' && at(iter) != ' ' && at(iter) != '\n') {
         iter++;
     }
     iter++;
 
     //Position
     reset_tmp(tmp, tmp_idx);
-    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ') {
-        append_tmp(tmp, tmp_idx, __ldg(&params->line[start + iter]));
+    while (at(iter) != '\t' && at(iter) != ' ' && at(iter) != '\n') {
+        append_tmp(tmp, tmp_idx, at(iter));
         iter++;
     }
     iter++;
@@ -122,7 +127,7 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
     //ID - CPU
     reset_tmp(tmp, tmp_idx);
     find1=false;
-    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ') {
+    while (at(iter) != '\t' && at(iter) != ' ' && at(iter) != '\n') {
         iter++;
     }
     iter++;
@@ -130,22 +135,22 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
     //Reference - CPU
     reset_tmp(tmp, tmp_idx);
     find1=false;
-    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ') {
+    while (at(iter) != '\t' && at(iter) != ' ' && at(iter) != '\n') {
         iter++;
     }
     iter++;
 
     //Alternative - CPU
     reset_tmp(tmp, tmp_idx);
-    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ') {
+    while (at(iter) != '\t' && at(iter) != ' ' && at(iter) != '\n') {
         iter++;
     }
     iter++;
 
     //Quality
     reset_tmp(tmp, tmp_idx);
-    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ' && __ldg(&params->line[start + iter]) != '\n') {
-        append_tmp(tmp, tmp_idx, __ldg(&params->line[start + iter]));
+    while (at(iter) != '\t' && at(iter) != ' ' && at(iter) != '\n') {
+        append_tmp(tmp, tmp_idx, at(iter));
         ++iter;
     }
     ++iter;
@@ -153,15 +158,15 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
     
     //Filter
     reset_tmp(tmp, tmp_idx);
-    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ') {
+    while (at(iter) != '\t' && at(iter) != ' ' && at(iter) != '\n') {
         iter++;
     }
     iter++;
 
     // Info field (semicolon-separated key-value pairs)
     reset_tmp(tmp, tmp_idx);
-    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != '\n') {
-        append_tmp(tmp, tmp_idx, __ldg(&params->line[start + iter]));
+    while (at(iter) != '\t' && at(iter) != '\n') {
+        append_tmp(tmp, tmp_idx, at(iter));
         ++iter;
     }
     ++iter;
@@ -229,8 +234,8 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
 
     //Getting the format fields
     reset_tmp(tmp, tmp_idx);
-    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != '\n') {
-        append_tmp(tmp, tmp_idx, __ldg(&params->line[start + iter]));
+    while (at(iter) != '\t' && at(iter) != '\n') {
+        append_tmp(tmp, tmp_idx, at(iter));
         ++iter;
     }
     ++iter;
@@ -243,7 +248,7 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
         reset_tmp(tmp, tmp_idx);
         find1 = false;
         while (!find1) {
-            if (__ldg(&params->line[start + iter]) == '\t' || __ldg(&params->line[start + iter]) == ' ' || __ldg(&params->line[start + iter]) == '\n') {
+            if (at(iter) == '\t' || at(iter) == ' ' || at(iter) == '\n') {
                 find1 = true;
                 iter++;
 
@@ -323,7 +328,7 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
                     }
                 }
             } else {
-                append_tmp(tmp, tmp_idx, __ldg(&params->line[start + iter]));
+                append_tmp(tmp, tmp_idx, at(iter));
                 iter++;
             }
         }
