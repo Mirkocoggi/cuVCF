@@ -1,6 +1,7 @@
 #ifndef VCF_STRUCTS_H
 #define VCF_STRUCTS_H
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -20,7 +21,7 @@ using namespace std;
 
 struct info_flag
 {
-    vector<bool> i_flag;
+    vector<uint8_t> i_flag; // not vector<bool>: its bits share words, so threads writing nearby rows raced
     string name;
 };
 
@@ -44,7 +45,7 @@ struct info_int
 
 struct samp_Flag
 {
-    vector<bool> i_flag;
+    vector<uint8_t> i_flag; // not vector<bool>: its bits share words, so threads writing nearby rows raced
     string name;
     int numb;
 };

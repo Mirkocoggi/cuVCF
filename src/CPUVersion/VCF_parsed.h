@@ -644,7 +644,7 @@ public:
         for(int i=0; i<var_columns.in_flag.size(); i++){
             cout<<var_columns.in_flag[i].name<<": ";
             for(int j=0; j<10; j++){
-                cout<<var_columns.in_flag[i].i_flag[j]<<" ";
+                cout<<(int)var_columns.in_flag[i].i_flag[j]<<" ";
             }
             cout<<" size: "<<var_columns.in_flag[i].i_flag.size();
             cout<<endl;

@@ -19,7 +19,7 @@
  * @note CUDA device 0 is used by default
  */
 
-#include "Parser.h"        
+#include "Parser.h"
 
 #include <cuda_runtime.h>   
 #include <cuda_fp16.h>      

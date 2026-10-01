@@ -14,8 +14,6 @@
  * @warning Memory allocation sizes must account for maximum VCF file size
  */
 
-#ifndef PARSER_CU
-#define PARSER_CU
 
 #include "DataStructures.h"
 #include "Kernels.h"
@@ -1741,6 +1739,3 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
         p = q < e ? q + 1 : e;
     }
 }
-
-
-#endif
