@@ -165,7 +165,7 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
 
     // Info field (semicolon-separated key-value pairs)
     reset_tmp(tmp, tmp_idx);
-    while (at(iter) != '\t' && at(iter) != '\n') {
+    while (at(iter) != '\t' && at(iter) != ' ' && at(iter) != '\n') {
         append_tmp(tmp, tmp_idx, at(iter));
         ++iter;
     }
@@ -234,7 +234,7 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
 
     //Getting the format fields
     reset_tmp(tmp, tmp_idx);
-    while (at(iter) != '\t' && at(iter) != '\n') {
+    while (at(iter) != '\t' && at(iter) != ' ' && at(iter) != '\n') {
         append_tmp(tmp, tmp_idx, at(iter));
         ++iter;
     }
@@ -259,8 +259,10 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
                     continue;
                 }
 
-                split(tmp, ':', tmp_split);
-                for (int j = 0; j < num_sample_tokens; j++) {
+                // A sample may drop trailing FORMAT fields: those stay 0 (the columns are zeroed) like on the
+                // CPU, instead of reusing the previous sample's tokens still in tmp_split
+                const int num_values = split(tmp, ':', tmp_split);
+                for (int j = 0; j < num_sample_tokens && j < num_values; j++) {
                     bool find_type = false;
                     bool find_elem = false;
                     while (!find_type) {
@@ -321,6 +323,11 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
                                 }
                                 el++;
                             }
+                            find_type = true;
+                        } else if (getValueFromKeyMap1(&tmp_values[MAX_TOKEN_LEN*j]) == STRING_FORMAT) {
+                            // Parsed on the host; the row still gets its ids, as on the CPU
+                            params->samp_var_id[thID * params->numSample + samp] = thID;
+                            params->samp_id[thID * params->numSample + samp] = samp;
                             find_type = true;
                         } else {
                             find_type = true;
