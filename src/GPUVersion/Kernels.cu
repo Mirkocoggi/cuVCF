@@ -77,7 +77,7 @@ __device__ void append_tmp(char* tmp, int& tmp_idx, char c) {
  * @note Uses temporary buffers in my_mem for string operations
  * @warning Assumes my_mem size >= thID*MAX_TOKEN_LEN*MAX_TOKENS*3
  */
-__device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, int batch_size, bool hasSamp){
+__device__ void get_vcf_line(const KernelParams* params, char* my_mem, int currBatch, int batch_size, bool hasSamp){
     long thID =  threadIdx.x + blockIdx.x * blockDim.x;
     bool find1 = false;
     long iter=0;
@@ -355,7 +355,7 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
  * @note Uses batch processing to handle large files efficiently
  * @warning Ensure my_mem is large enough for all concurrent threads
  */
-__global__ void kernel (KernelParams* params, char* my_mem, int batch_size, bool hasSamp)
+__global__ void kernel (const KernelParams* __restrict__ params, char* __restrict__ my_mem, int batch_size, bool hasSamp)
 {
     int num_iteration = (params->numLines + batch_size - 1)/batch_size;
     for(int i=0; i<num_iteration; i++){
@@ -374,7 +374,7 @@ cudaError_t upload_map1_table(const char (&keys)[NUM_KEYS_MAP1][MAX_KEY_LENGTH_M
     return err != cudaSuccess ? err : cudaMemcpyToSymbol(d_values_map1, values, sizeof(values));
 }
 
-cudaError_t launch_parse_kernel(int blocks, int threads, cudaStream_t stream, KernelParams* params, char* my_mem, int batch_size, bool hasSamp){
+cudaError_t launch_parse_kernel(int blocks, int threads, cudaStream_t stream, const KernelParams* params, char* my_mem, int batch_size, bool hasSamp){
     kernel<<<blocks, threads, 0, stream>>>(params, my_mem, batch_size, hasSamp);
     return cudaGetLastError();
 }

@@ -43,28 +43,28 @@
  * @warning Memory management (allocation/deallocation) must be handled externally
  */
  struct KernelParams {
-    char *line;                   ///< Pointer to the VCF line.
+    const char *line;             ///< Pointer to the VCF line.
     unsigned int *var_number;     ///< Pointer to the array of variant numbers.
     unsigned int *pos;            ///< Pointer to the array of variant positions.
     __half *qual;                 ///< Pointer to the array of quality scores (half precision).
     __half *in_float;             ///< Pointer to the array of float info values.
     uint8_t *in_flag;                ///< Pointer to the array of flag info values.
     int *in_int;                  ///< Pointer to the array of integer info values.
-    char* float_name;             ///< Pointer to the float field names.
-    char* flag_name;              ///< Pointer to the flag field names.
-    char* int_name;               ///< Pointer to the integer field names.
-    unsigned long long *new_lines_index;///< Pointer to the array of new-line indices.
+    const char* float_name;       ///< Pointer to the float field names.
+    const char* flag_name;        ///< Pointer to the flag field names.
+    const char* int_name;         ///< Pointer to the integer field names.
+    const unsigned long long *new_lines_index;///< Pointer to the array of new-line indices.
     unsigned int *samp_var_id;    ///< Pointer to the array of sample variant IDs.
     unsigned short *samp_id;      ///< Pointer to the array of sample IDs.
     __half *samp_float;           ///< Pointer to the array of sample float values.
     uint8_t *samp_flag;              ///< Pointer to the array of sample flag values.
     int *samp_int;                ///< Pointer to the array of sample integer values.
-    char* samp_float_name;        ///< Pointer to the sample float field names.
-    char* samp_flag_name;         ///< Pointer to the sample flag field names.
-    char* samp_int_name;          ///< Pointer to the sample integer field names.
-    int* samp_float_numb;         ///< Pointer to the number of sample float values per entry.
-    int* samp_flag_numb;          ///< Pointer to the number of sample flag values per entry.
-    int* samp_int_numb;           ///< Pointer to the number of sample integer values per entry.
+    const char* samp_float_name;  ///< Pointer to the sample float field names.
+    const char* samp_flag_name;   ///< Pointer to the sample flag field names.
+    const char* samp_int_name;    ///< Pointer to the sample integer field names.
+    const int* samp_float_numb;   ///< Pointer to the number of sample float values per entry.
+    const int* samp_flag_numb;    ///< Pointer to the number of sample flag values per entry.
+    const int* samp_int_numb;     ///< Pointer to the number of sample integer values per entry.
     char *sample_GT;              ///< Pointer to the sample genotype array.
     int numSample;                ///< Number of samples.
     unsigned int numLines;        ///< Total number of VCF lines (variants).

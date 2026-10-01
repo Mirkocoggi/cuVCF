@@ -41,6 +41,6 @@ cudaError_t upload_gt_table(const char (&keys)[NUM_KEYS_GT][MAX_KEY_LENGTH_GT], 
 cudaError_t upload_map1_table(const char (&keys)[NUM_KEYS_MAP1][MAX_KEY_LENGTH_MAP1], const int (&values)[NUM_KEYS_MAP1]);
 
 /// Launches the parsing kernel on stream; returns the launch error, if any.
-cudaError_t launch_parse_kernel(int blocks, int threads, cudaStream_t stream, KernelParams* params, char* my_mem, int batch_size, bool hasSamp);
+cudaError_t launch_parse_kernel(int blocks, int threads, cudaStream_t stream, const KernelParams* params, char* my_mem, int batch_size, bool hasSamp);
 
 #endif
