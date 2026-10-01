@@ -20,7 +20,6 @@
 #include <stddef.h>
 #include "Kernels.h"
 
-using namespace std;
 
 /**
  * @brief Constant memory holding the GT keys.
