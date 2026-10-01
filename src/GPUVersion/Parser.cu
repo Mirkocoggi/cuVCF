@@ -469,30 +469,21 @@ void vcf_parsed::device_free() {
     * @param num_threads Number of threads to use for parallel processing.
     */
 void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
-    // Parallel pread of the variant body straight into filestring; each chunk counts its newlines,
-    // then writes their positions at its prefix offset. Chunks are in file order and scanned forward,
+    // Parallel pread of the variant body straight into filestring, then each chunk counts the record ends
+    // and writes their positions at its prefix offset. Chunks are in file order and scanned forward,
     // so new_lines_index comes out sorted: no device kernel, sort or per-chunk buffers are needed.
     const long filestring_size = variants_size + 8; // as allocated by allocate_filestring
     const long batch_infile = (variants_size - 1 + num_threads)/num_threads; // Number of characters each chunk holds
-    std::vector<size_t> chunk_count(num_threads + 1, 0);
 
     const int fd = open(w_filename.c_str(), O_RDONLY);
     if(fd < 0) throw std::runtime_error("cannot open file " + w_filename);
     posix_fadvise(fd, header_size, variants_size, POSIX_FADV_SEQUENTIAL); // read-ahead hint, best effort
     std::atomic<int> read_errno{0};
 
-    auto chunk_start = [&](int c){ return std::min(c*batch_infile, variants_size); };
-    // Calls f(position) for every '\n' of chunk c
-    auto for_each_newline = [&](int c, auto&& f){
-        const char* p = filestring + chunk_start(c);
-        const char* const e = filestring + chunk_start(c + 1);
-        while((p = static_cast<const char*>(memchr(p, '\n', e - p)))){ f(static_cast<unsigned long long>(p - filestring)); ++p; }
-    };
-
     #pragma omp parallel for schedule(static)
     for(int c = 0; c < num_threads; c++){
-        const long start = chunk_start(c);
-        const size_t want = chunk_start(c + 1) - start;
+        const long start = std::min(c*batch_infile, variants_size);
+        const size_t want = std::min(start + batch_infile, variants_size) - start;
         size_t got = 0;
         while(got < want){
             const ssize_t n = pread(fd, filestring + start + got, want - got, (off_t)header_size + start + got);
@@ -502,34 +493,50 @@ void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
             read_errno.compare_exchange_strong(none, n == 0 ? EIO : errno); // n == 0: the file got shorter
             break;
         }
-        if(got == want) for_each_newline(c, [&](unsigned long long){ chunk_count[c + 1]++; });
     }
     close(fd);
     if(read_errno) throw std::runtime_error("cannot read " + w_filename + ": " + strerror(read_errno));
 
     // Trailing newlines are dropped and a single '\n' terminator closes the last record
-    long trimmed_newlines = 0;
-    while(variants_size > 0 && filestring[variants_size-1]=='\n'){ variants_size--; trimmed_newlines++; }
-    const unsigned long long terminator = variants_size;
+    while(variants_size > 0 && filestring[variants_size-1]=='\n') variants_size--;
     if(variants_size == 0){ num_lines = 0; return; } // header-only file: no records, nothing for the device
-
-    // new_lines_index = [0, position of every '\n' before the terminator..., terminator]:
-    // record i spans new_lines_index[i]..new_lines_index[i+1], and num_lines is the number of records.
-    for(int c = 0; c < num_threads; c++) chunk_count[c + 1] += chunk_count[c]; // prefix offsets
-    num_lines = chunk_count[num_threads] - trimmed_newlines + 1;
-    new_lines_index = (unsigned long long*)malloc(sizeof(unsigned long long)*(chunk_count[num_threads] + 2));
-    if(!new_lines_index) throw std::runtime_error("cannot allocate the line index (" + std::to_string(chunk_count[num_threads] + 2) + " entries)");
-    new_lines_index[0] = 0;
-    #pragma omp parallel for schedule(static)
-    for(int c = 0; c < num_threads; c++){
-        unsigned long long* out = new_lines_index + 1 + chunk_count[c];
-        for_each_newline(c, [&](unsigned long long pos){ *out++ = pos; });
-    }
-    new_lines_index[num_lines] = terminator; // the trimmed trailing newlines were the last entries
     filestring[variants_size] = '\n';
     variants_size++;
     memset(filestring + variants_size, '\0', filestring_size - variants_size); // NUL tail after the terminator
 
+    // A '\n' ends a record unless a blank line follows it (the CPU parser skips blank lines the same way);
+    // the terminator, followed by the NUL tail, always does
+    const long batch = (variants_size + num_threads - 1)/num_threads;
+    auto chunk_start = [&](int c){ return std::min(c*batch, variants_size); };
+    // Calls f(position) for every record end of chunk c
+    auto for_each_record_end = [&](int c, auto&& f){
+        const char* p = filestring + chunk_start(c);
+        const char* const e = filestring + chunk_start(c + 1);
+        while((p = static_cast<const char*>(memchr(p, '\n', e - p)))){
+            if(p[1] != '\n') f(static_cast<unsigned long long>(p - filestring));
+            ++p;
+        }
+    };
+    std::vector<size_t> chunk_count(num_threads + 1, 0);
+    #pragma omp parallel for schedule(static)
+    for(int c = 0; c < num_threads; c++) for_each_record_end(c, [&](unsigned long long){ chunk_count[c + 1]++; });
+    for(int c = 0; c < num_threads; c++) chunk_count[c + 1] += chunk_count[c]; // prefix offsets
+
+    // new_lines_index = [0, every record end..., terminator]: record i spans new_lines_index[i]..
+    // new_lines_index[i+1] (a '\n' then the record, or the record itself for i == 0)
+    num_lines = chunk_count[num_threads];
+    new_lines_index = (unsigned long long*)malloc(sizeof(unsigned long long)*(num_lines + 1));
+    if(!new_lines_index) throw std::runtime_error("cannot allocate the line index (" + std::to_string(num_lines + 1) + " entries)");
+    new_lines_index[0] = 0;
+    #pragma omp parallel for schedule(static)
+    for(int c = 0; c < num_threads; c++){
+        unsigned long long* out = new_lines_index + 1 + chunk_count[c];
+        for_each_record_end(c, [&](unsigned long long pos){ *out++ = pos; });
+    }
+    if(filestring[0] == '\n'){ // blank lines before the first record: its start is the first record end found
+        memmove(new_lines_index, new_lines_index + 1, sizeof(unsigned long long)*num_lines);
+        num_lines--;
+    }
     CUDA_CHECK_ERROR(cudaMalloc(&d_filestring, (variants_size + 8)* sizeof(char)));
     CUDA_CHECK_ERROR(cudaMalloc(&d_new_lines_index, (num_lines + 1) * sizeof(unsigned long long)));
     CUDA_CHECK_ERROR(cudaMemcpy(d_filestring, filestring, sizeof(char)*variants_size, cudaMemcpyHostToDevice));

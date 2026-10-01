@@ -99,7 +99,7 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
         return;
     }
     long start = params->new_lines_index[thID];
-    if(thID > 0) start++; // new_lines_index holds the '\n' that ends the previous record
+    if(__ldg(&params->line[start]) == '\n') start++; // the '\n' that ends the previous record (or blank lines)
     const long end = params->new_lines_index[thID + 1]; // the '\n' that ends this record
     // Reads stop at the end of the record: past it every char is '\n', so a short record ends
     // its fields there instead of reading into the next record (or past the buffer on the last one)

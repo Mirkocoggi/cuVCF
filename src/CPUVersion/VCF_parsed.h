@@ -389,6 +389,10 @@ public:
             long k = 1 + chunk_count[c];
             for(long i = chunk_begin(c); i < chunk_begin(c + 1); i++) if(ends_record(i)) new_lines_index[k++] = i + 1;
         }
+        if(filestring[0] == '\n'){ // blank lines before the first record: its start is the first index entry
+            memmove(new_lines_index, new_lines_index + 1, sizeof(unsigned long long)*num_lines);
+            num_lines--;
+        }
     }
     
     void create_sample_vectors(int num_threads){
