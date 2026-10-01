@@ -18,23 +18,9 @@
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
 #include <stddef.h>
+#include "Kernels.h"
 
 using namespace std;
-
-/// Maximum number of keys in the GT map.
-#define NUM_KEYS_GT 244
-
-/// Maximum length for each key in the GT map.
-#define MAX_KEY_LENGTH_GT 5
-
-/// Maximum number of tokens when splitting strings.
-#define MAX_TOKENS 16
-
-/// Maximum length for each token after splitting.
-#define MAX_TOKEN_LEN 32
-
-/// Maximum length for temporary string buffers.
-#define MAX_TMP_LEN 128  // Fixed typo: "MAximum" -> "Maximum"
 
 /**
  * @brief Constant memory holding the GT keys.
@@ -48,10 +34,6 @@ __constant__ char d_keys_gt[NUM_KEYS_GT][MAX_KEY_LENGTH_GT];
   */
 __constant__ char d_values_gt[NUM_KEYS_GT];
  
-/// Maximum number of keys in Map1.
-#define NUM_KEYS_MAP1 128
-/// Maximum length for each key in Map1.
-#define MAX_KEY_LENGTH_MAP1 32
  
 /**
   * @brief Constant memory holding the keys for Map1 (INFO/FORMAT names).

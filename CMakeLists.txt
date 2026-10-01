@@ -73,14 +73,16 @@ if(CUVCF_WITH_CUDA)
 
   set(GPU_FLAGS -Xcompiler=-fopenmp $<$<CONFIG:Debug>:-G -lineinfo>)
 
-  # main.cu #includes Parser.cu, which #includes Kernels.cu: do not list them.
-  add_executable(VCFparser_gpu src/GPUVersion/main.cu)
+  # Kernels.cu holds the kernel and the constant memory it reads; Parser.cu reaches them
+  # through Kernels.h, so no relocatable device code (-rdc) is needed.
+  set(GPU_SOURCES src/GPUVersion/Parser.cu src/GPUVersion/Kernels.cu)
+  add_executable(VCFparser_gpu src/GPUVersion/main.cu ${GPU_SOURCES})
   target_compile_options(VCFparser_gpu PRIVATE ${GPU_FLAGS})
   target_link_libraries(VCFparser_gpu PRIVATE ${COMMON_DEPS})
 
   # Bindings.cpp includes CUDA headers (cuda_fp16.h), so compile it with nvcc.
   set_source_files_properties(src/GPUVersion/Bindings.cpp PROPERTIES LANGUAGE CUDA)
-  pybind11_add_module(GPUParser NO_EXTRAS src/GPUVersion/Bindings.cpp src/GPUVersion/Parser.cu)
+  pybind11_add_module(GPUParser NO_EXTRAS src/GPUVersion/Bindings.cpp ${GPU_SOURCES})
   target_compile_options(GPUParser PRIVATE ${GPU_FLAGS} -Xcompiler=-w)
   target_link_libraries(GPUParser PRIVATE ${COMMON_DEPS})
 

@@ -13,9 +13,7 @@
  * @warning Requires compute capability 3.0 or higher for __ldg operations
  */
 
-#ifndef KERNELS_CU
-#define KERNELS_CU
-
+#include "Kernels.h"
 #include "CUDAUtils.cuh"
 #include "Utils.h"
 #include "DataStructures.h"
@@ -366,5 +364,17 @@ __global__ void kernel (KernelParams* params, char* my_mem, int batch_size, bool
     
 }
 
+cudaError_t upload_gt_table(const char (&keys)[NUM_KEYS_GT][MAX_KEY_LENGTH_GT], const char (&values)[NUM_KEYS_GT]){
+    const cudaError_t err = cudaMemcpyToSymbol(d_keys_gt, keys, sizeof(keys));
+    return err != cudaSuccess ? err : cudaMemcpyToSymbol(d_values_gt, values, sizeof(values));
+}
 
-#endif
+cudaError_t upload_map1_table(const char (&keys)[NUM_KEYS_MAP1][MAX_KEY_LENGTH_MAP1], const int (&values)[NUM_KEYS_MAP1]){
+    const cudaError_t err = cudaMemcpyToSymbol(d_keys_map1, keys, sizeof(keys));
+    return err != cudaSuccess ? err : cudaMemcpyToSymbol(d_values_map1, values, sizeof(values));
+}
+
+cudaError_t launch_parse_kernel(int blocks, int threads, cudaStream_t stream, KernelParams* params, char* my_mem, int batch_size, bool hasSamp){
+    kernel<<<blocks, threads, 0, stream>>>(params, my_mem, batch_size, hasSamp);
+    return cudaGetLastError();
+}

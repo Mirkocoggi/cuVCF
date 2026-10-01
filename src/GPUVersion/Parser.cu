@@ -18,10 +18,9 @@
 #define PARSER_CU
 
 #include "DataStructures.h"
-#include "Kernels.cu"
+#include "Kernels.h"
 #include "Utils.h"
 #include "DataFrames.h"
-#include "CUDAUtils.cuh"
 #include "Parser.h"
 
 #include <cuda_runtime.h>
@@ -240,8 +239,7 @@ void vcf_parsed::copyMapToConstantMemory(const std::map<std::string, char>& map)
 
         ++index;
     }
-    CUDA_CHECK_ERROR(cudaMemcpyToSymbol(d_keys_gt, h_keys, sizeof(h_keys)));
-    CUDA_CHECK_ERROR(cudaMemcpyToSymbol(d_values_gt, h_values, sizeof(h_values)));
+    CUDA_CHECK_ERROR(upload_gt_table(h_keys, h_values));
 }
 
 /**
@@ -271,8 +269,7 @@ void vcf_parsed::initialize_map1(const std::map<std::string, int> &my_map){
     }
 
     // Copy to device memory
-    CUDA_CHECK_ERROR(cudaMemcpyToSymbol(d_keys_map1, h_keys, sizeof(h_keys)));
-    CUDA_CHECK_ERROR(cudaMemcpyToSymbol(d_values_map1, h_values, sizeof(h_values)));
+    CUDA_CHECK_ERROR(upload_map1_table(h_keys, h_values));
 }
 
 /**
@@ -1033,18 +1030,15 @@ void vcf_parsed::populate_runner(int numb_cores){
         allocParamPointers(&d_params, &h_params);
 
         // Launch kernel
-        kernel<<<blocksPerGrid, threadsPerBlock, 0, stream1>>>(d_params, my_mem, batchSize, true);
-        CUDA_CHECK_ERROR(cudaGetLastError()); // kernel launch
+        CUDA_CHECK_ERROR(launch_parse_kernel(blocksPerGrid, threadsPerBlock, stream1, d_params, my_mem, batchSize, true));
 
         CUDA_CHECK_ERROR(cudaEventRecord(kernel_done, stream1));
 
     }else{
         // Allocate d_params and copy h_params to GPU
         allocParamPointers(&d_params, &h_params);
-        kernel<<<blocksPerGrid, threadsPerBlock, 0, stream1>>>(d_params, my_mem, batchSize, false);
+        CUDA_CHECK_ERROR(launch_parse_kernel(blocksPerGrid, threadsPerBlock, stream1, d_params, my_mem, batchSize, false));
         CUDA_CHECK_ERROR(cudaEventRecord(kernel_done, stream1));
-        
-        CUDA_CHECK_ERROR(cudaGetLastError()); // kernel launch
         
     }
     
