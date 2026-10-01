@@ -120,15 +120,6 @@ static inline bool format_name_matches(const std::string& name, const std::strin
     return name == key || (name.size() == key.size() + 1 && name.back() == '0' && name.compare(0, key.size(), key) == 0);
 }
 
-// Numeric conversions for VCF values: a missing value ('.') or a malformed token yields 0
-// instead of throwing and aborting the whole parse.
-static inline int safe_stoi(const string& s){
-    try{ return std::stoi(s); }catch(const std::exception&){ return 0; }
-}
-static inline float safe_stof(const string& s){
-    try{ return std::stof(s); }catch(const std::exception&){ return 0.0f; }
-}
-
 /**
     * @brief Runs the VCF parsing process.
     *
@@ -146,18 +137,7 @@ static inline float safe_stof(const string& s){
     */
 void vcf_parsed::run(char* vcf_filename, int num_threadss){
     string filename = vcf_filename; 
-    string line;
-    vcf_parsed vcf;
-
-    // Variables to hold device information
-    size_t globalMemory = 0;       // Total global memory
-    size_t sharedMemory = 0;       // Shared memory per block
-    size_t constantMemory = 0;     // Constant memory
-    size_t textureAlignment = 0;   // Texture alignment
-    int maxThreadsPerBlock = 0;    // Maximum threads per block
     int cudaCores;                 // Total number of CUDA cores
-    int threadsDim[3] = {0};       // Maximum threads per block dimensions
-    int gridDim[3] = {0};          // Maximum grid dimensions
 
     // Query device properties
     int deviceCount = 0;
@@ -173,21 +153,6 @@ void vcf_parsed::run(char* vcf_filename, int num_threadss){
     cudaError_t err = cudaGetDeviceProperties(&prop, 0); // Query the first (and only) device
 
     if (err == cudaSuccess) {
-        globalMemory = prop.totalGlobalMem;
-        sharedMemory = prop.sharedMemPerBlock;
-        constantMemory = prop.totalConstMem;
-        textureAlignment = prop.textureAlignment;
-        maxThreadsPerBlock = prop.maxThreadsPerBlock;
-
-        // Threads and grid dimensions
-        threadsDim[0] = prop.maxThreadsDim[0];
-        threadsDim[1] = prop.maxThreadsDim[1];
-        threadsDim[2] = prop.maxThreadsDim[2];
-
-        gridDim[0] = prop.maxGridSize[0];
-        gridDim[1] = prop.maxGridSize[1];
-        gridDim[2] = prop.maxGridSize[2];
-
         // Determine number of CUDA cores per SM based on compute capability
         int coresPerSM = 0;
         if (prop.major == 1) {
@@ -247,6 +212,7 @@ void vcf_parsed::run(char* vcf_filename, int num_threadss){
     create_info_vectors(num_threadss);
     reserve_var_columns();
     create_sample_vectors(num_threadss);
+    if(num_lines == 0) return; // header-only file: the columns exist and are empty
     // Allocate and initialize device memory
     device_allocation();
     populate_var_columns(num_threadss, cudaCores);
@@ -459,40 +425,30 @@ void vcf_parsed::device_free() {
 }
 
 /**
-    * @brief Finds newline indices in the VCF file.
+    * @brief Reads the variant body and indexes its records.
     *
-    * Reads the VCF file in parallel using OpenMP to determine the starting index of each line.
-    * The indices are stored in an array and copied to device memory for use by CUDA kernels.
+    * Reads the body into filestring with parallel pread() calls, then builds new_lines_index on the host
+    * (one entry per record end, blank lines skipped) and copies both to the device for the kernel.
     *
     * @param w_filename The path to the VCF file.
     * @param num_threads Number of threads to use for parallel processing.
     */
 void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
-    // Parallel pread of the variant body straight into filestring; each chunk counts its newlines,
-    // then writes their positions at its prefix offset. Chunks are in file order and scanned forward,
+    // Parallel pread of the variant body straight into filestring, then each chunk counts the record ends
+    // and writes their positions at its prefix offset. Chunks are in file order and scanned forward,
     // so new_lines_index comes out sorted: no device kernel, sort or per-chunk buffers are needed.
     const long filestring_size = variants_size + 8; // as allocated by allocate_filestring
-    variants_size--;
     const long batch_infile = (variants_size - 1 + num_threads)/num_threads; // Number of characters each chunk holds
-    std::vector<size_t> chunk_count(num_threads + 1, 0);
 
     const int fd = open(w_filename.c_str(), O_RDONLY);
     if(fd < 0) throw std::runtime_error("cannot open file " + w_filename);
     posix_fadvise(fd, header_size, variants_size, POSIX_FADV_SEQUENTIAL); // read-ahead hint, best effort
     std::atomic<int> read_errno{0};
 
-    auto chunk_start = [&](int c){ return std::min(c*batch_infile, variants_size); };
-    // Calls f(position) for every '\n' of chunk c
-    auto for_each_newline = [&](int c, auto&& f){
-        const char* p = filestring + chunk_start(c);
-        const char* const e = filestring + chunk_start(c + 1);
-        while((p = static_cast<const char*>(memchr(p, '\n', e - p)))){ f(static_cast<unsigned long long>(p - filestring)); ++p; }
-    };
-
     #pragma omp parallel for schedule(static)
     for(int c = 0; c < num_threads; c++){
-        const long start = chunk_start(c);
-        const size_t want = chunk_start(c + 1) - start;
+        const long start = std::min(c*batch_infile, variants_size);
+        const size_t want = std::min(start + batch_infile, variants_size) - start;
         size_t got = 0;
         while(got < want){
             const ssize_t n = pread(fd, filestring + start + got, want - got, (off_t)header_size + start + got);
@@ -502,33 +458,50 @@ void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
             read_errno.compare_exchange_strong(none, n == 0 ? EIO : errno); // n == 0: the file got shorter
             break;
         }
-        if(got == want) for_each_newline(c, [&](unsigned long long){ chunk_count[c + 1]++; });
     }
     close(fd);
     if(read_errno) throw std::runtime_error("cannot read " + w_filename + ": " + strerror(read_errno));
 
     // Trailing newlines are dropped and a single '\n' terminator closes the last record
-    long trimmed_newlines = 0;
-    while(variants_size > 0 && filestring[variants_size-1]=='\n'){ variants_size--; trimmed_newlines++; }
-    const unsigned long long terminator = variants_size;
-
-    // new_lines_index = [0, position of every '\n' before the terminator..., terminator]:
-    // record i spans new_lines_index[i]..new_lines_index[i+1], and num_lines is the number of records.
-    for(int c = 0; c < num_threads; c++) chunk_count[c + 1] += chunk_count[c]; // prefix offsets
-    num_lines = chunk_count[num_threads] - trimmed_newlines + 1;
-    new_lines_index = (unsigned long long*)malloc(sizeof(unsigned long long)*(chunk_count[num_threads] + 2));
-    if(!new_lines_index) throw std::runtime_error("cannot allocate the line index (" + std::to_string(chunk_count[num_threads] + 2) + " entries)");
-    new_lines_index[0] = 0;
-    #pragma omp parallel for schedule(static)
-    for(int c = 0; c < num_threads; c++){
-        unsigned long long* out = new_lines_index + 1 + chunk_count[c];
-        for_each_newline(c, [&](unsigned long long pos){ *out++ = pos; });
-    }
-    new_lines_index[num_lines] = terminator; // the trimmed trailing newlines were the last entries
+    while(variants_size > 0 && filestring[variants_size-1]=='\n') variants_size--;
+    if(variants_size == 0){ num_lines = 0; return; } // header-only file: no records, nothing for the device
     filestring[variants_size] = '\n';
     variants_size++;
     memset(filestring + variants_size, '\0', filestring_size - variants_size); // NUL tail after the terminator
 
+    // A '\n' ends a record unless a blank line follows it (the CPU parser skips blank lines the same way);
+    // the terminator, followed by the NUL tail, always does
+    const long batch = (variants_size + num_threads - 1)/num_threads;
+    auto chunk_start = [&](int c){ return std::min(c*batch, variants_size); };
+    // Calls f(position) for every record end of chunk c
+    auto for_each_record_end = [&](int c, auto&& f){
+        const char* p = filestring + chunk_start(c);
+        const char* const e = filestring + chunk_start(c + 1);
+        while((p = static_cast<const char*>(memchr(p, '\n', e - p)))){
+            if(p[1] != '\n') f(static_cast<unsigned long long>(p - filestring));
+            ++p;
+        }
+    };
+    std::vector<size_t> chunk_count(num_threads + 1, 0);
+    #pragma omp parallel for schedule(static)
+    for(int c = 0; c < num_threads; c++) for_each_record_end(c, [&](unsigned long long){ chunk_count[c + 1]++; });
+    for(int c = 0; c < num_threads; c++) chunk_count[c + 1] += chunk_count[c]; // prefix offsets
+
+    // new_lines_index = [0, every record end..., terminator]: record i spans new_lines_index[i]..
+    // new_lines_index[i+1] (a '\n' then the record, or the record itself for i == 0)
+    num_lines = chunk_count[num_threads];
+    new_lines_index = (unsigned long long*)malloc(sizeof(unsigned long long)*(num_lines + 1));
+    if(!new_lines_index) throw std::runtime_error("cannot allocate the line index (" + std::to_string(num_lines + 1) + " entries)");
+    new_lines_index[0] = 0;
+    #pragma omp parallel for schedule(static)
+    for(int c = 0; c < num_threads; c++){
+        unsigned long long* out = new_lines_index + 1 + chunk_count[c];
+        for_each_record_end(c, [&](unsigned long long pos){ *out++ = pos; });
+    }
+    if(filestring[0] == '\n'){ // blank lines before the first record: its start is the first record end found
+        memmove(new_lines_index, new_lines_index + 1, sizeof(unsigned long long)*num_lines);
+        num_lines--;
+    }
     CUDA_CHECK_ERROR(cudaMalloc(&d_filestring, (variants_size + 8)* sizeof(char)));
     CUDA_CHECK_ERROR(cudaMalloc(&d_new_lines_index, (num_lines + 1) * sizeof(unsigned long long)));
     CUDA_CHECK_ERROR(cudaMemcpy(d_filestring, filestring, sizeof(char)*variants_size, cudaMemcpyHostToDevice));
@@ -551,7 +524,7 @@ void vcf_parsed::get_header(ifstream *file){
         header_size += line.length() + 1;
     }
     header_size += line.length() + 1;
-    variants_size = filesize - header_size; // New size without the header
+    variants_size = std::max(0L, filesize - header_size); // New size without the header (0 when the header has no final '\n')
 }
     
 /**
@@ -629,7 +602,7 @@ void vcf_parsed::get_and_parse_header(ifstream *file){
 
     header_size += line.length() + 1;
 
-    variants_size = filesize - header_size; // New size without the header
+    variants_size = std::max(0L, filesize - header_size); // New size without the header (0 when the header has no final '\n')
 }   
     
 /**
@@ -1142,9 +1115,10 @@ void vcf_parsed::prebuild_chrom_filter_maps(){
     const int n_chunks = std::max(1, omp_get_max_threads());
     const long lines_per_chunk = (num_lines + n_chunks - 1)/n_chunks;
     std::vector<std::vector<std::string_view>> chunk_chroms(n_chunks), chunk_filters(n_chunks);
+    std::exception_ptr chunk_error; // an exception may not leave an OpenMP region: kept, rethrown after it
 
     #pragma omp parallel for schedule(static)
-    for(int c = 0; c < n_chunks; c++){
+    for(int c = 0; c < n_chunks; c++) try {
         std::unordered_set<std::string_view> seen_chrom, seen_filter;
         const long first = c*lines_per_chunk, last = std::min(num_lines, first + lines_per_chunk);
         for(long i = first; i < last; i++){
@@ -1163,7 +1137,11 @@ void vcf_parsed::prebuild_chrom_filter_maps(){
             const std::string_view filter(p, q - p);
             if(seen_filter.insert(filter).second) chunk_filters[c].push_back(filter);
         }
+    } catch(...) {
+        #pragma omp critical(prebuild_chrom_filter_error)
+        if(!chunk_error) chunk_error = std::current_exception();
     }
+    if(chunk_error) std::rethrow_exception(chunk_error);
     for(int c = 0; c < n_chunks; c++){
         for(auto name : chunk_chroms[c]) var_columns.chrom_map.emplace(std::string(name), static_cast<unsigned char>(var_columns.chrom_map.size()));
         for(auto name : chunk_filters[c]) var_columns.filter_map.emplace(std::string(name), static_cast<char>(var_columns.filter_map.size()));
@@ -1490,7 +1468,7 @@ static inline int count_tokens(const char* b, const char* e, char sep){
     return n;
 }
 
-// Same result as safe_stoi (std::stoi): leading spaces and an optional sign, 0 if nothing parses or out of range
+// Same result as std::stoi, without throwing: leading spaces and an optional sign, 0 if nothing parses or out of range
 static inline int parse_int_token(const char* b, const char* e){
     while(b < e && isspace(static_cast<unsigned char>(*b))) ++b;
     if(e - b > 1 && *b == '+' && isdigit(static_cast<unsigned char>(b[1]))) ++b;
@@ -1498,7 +1476,7 @@ static inline int parse_int_token(const char* b, const char* e){
     return std::from_chars(b, e, v).ec == std::errc() ? v : 0;
 }
 
-// Same result as safe_stof (std::stof is strtof: 0 if nothing parses or on ERANGE)
+// Same result as std::stof, without throwing (stof is strtof: 0 if nothing parses or on ERANGE)
 static inline float parse_float_token(const char* b, const char* e){
     char buf[64];
     std::string big;
@@ -1713,10 +1691,11 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
         plan_it = plans->emplace(template_key, make_format_plan(p, q)).first;
     }
     const format_plan& plan = plan_it->second;
-    if(plan.used == 0 || q == e) return; // nothing for the host in this record's samples, or no samples
-    p = q + 1;
+    if(plan.used == 0) return; // nothing for the host in this record's samples
+    p = q < e ? q + 1 : e;
 
-    // Every separator opens one more sample, so an empty last sample (a trailing tab) is still parsed
+    // Every separator opens one more sample, so an empty last sample (a trailing tab) is still parsed;
+    // sample columns missing at the end of the record read as empty samples, as on the CPU and the kernel
     const unsigned int n_samp = sample->numSample;
     for(unsigned int samp = 0; samp < n_samp; samp++){
         q = field_end(p, e);
@@ -1767,8 +1746,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
             if(te == q) break;
             tb = te + 1;
         }
-        if(q == e) break; // last field of the line
-        p = q + 1;
+        p = q < e ? q + 1 : e;
     }
 }
 

@@ -99,21 +99,26 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
         return;
     }
     long start = params->new_lines_index[thID];
+    if(__ldg(&params->line[start]) == '\n') start++; // the '\n' that ends the previous record (or blank lines)
+    const long end = params->new_lines_index[thID + 1]; // the '\n' that ends this record
+    // Reads stop at the end of the record: past it every char is '\n', so a short record ends
+    // its fields there instead of reading into the next record (or past the buffer on the last one)
+    auto at = [&](long k) -> char { return start + k < end ? __ldg(&params->line[start + k]) : '\n'; };
 
     
     //Var Number
     params->var_number[thID] = thID;
 
     //Chromosome - CPU
-    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ') {
+    while (at(iter) != '\t' && at(iter) != ' ' && at(iter) != '\n') {
         iter++;
     }
     iter++;
 
     //Position
     reset_tmp(tmp, tmp_idx);
-    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ') {
-        append_tmp(tmp, tmp_idx, __ldg(&params->line[start + iter]));
+    while (at(iter) != '\t' && at(iter) != ' ' && at(iter) != '\n') {
+        append_tmp(tmp, tmp_idx, at(iter));
         iter++;
     }
     iter++;
@@ -122,7 +127,7 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
     //ID - CPU
     reset_tmp(tmp, tmp_idx);
     find1=false;
-    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ') {
+    while (at(iter) != '\t' && at(iter) != ' ' && at(iter) != '\n') {
         iter++;
     }
     iter++;
@@ -130,22 +135,22 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
     //Reference - CPU
     reset_tmp(tmp, tmp_idx);
     find1=false;
-    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ') {
+    while (at(iter) != '\t' && at(iter) != ' ' && at(iter) != '\n') {
         iter++;
     }
     iter++;
 
     //Alternative - CPU
     reset_tmp(tmp, tmp_idx);
-    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ') {
+    while (at(iter) != '\t' && at(iter) != ' ' && at(iter) != '\n') {
         iter++;
     }
     iter++;
 
     //Quality
     reset_tmp(tmp, tmp_idx);
-    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ' && __ldg(&params->line[start + iter]) != '\n') {
-        append_tmp(tmp, tmp_idx, __ldg(&params->line[start + iter]));
+    while (at(iter) != '\t' && at(iter) != ' ' && at(iter) != '\n') {
+        append_tmp(tmp, tmp_idx, at(iter));
         ++iter;
     }
     ++iter;
@@ -153,15 +158,15 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
     
     //Filter
     reset_tmp(tmp, tmp_idx);
-    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != ' ') {
+    while (at(iter) != '\t' && at(iter) != ' ' && at(iter) != '\n') {
         iter++;
     }
     iter++;
 
     // Info field (semicolon-separated key-value pairs)
     reset_tmp(tmp, tmp_idx);
-    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != '\n') {
-        append_tmp(tmp, tmp_idx, __ldg(&params->line[start + iter]));
+    while (at(iter) != '\t' && at(iter) != ' ' && at(iter) != '\n') {
+        append_tmp(tmp, tmp_idx, at(iter));
         ++iter;
     }
     ++iter;
@@ -229,8 +234,8 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
 
     //Getting the format fields
     reset_tmp(tmp, tmp_idx);
-    while (__ldg(&params->line[start + iter]) != '\t' && __ldg(&params->line[start + iter]) != '\n') {
-        append_tmp(tmp, tmp_idx, __ldg(&params->line[start + iter]));
+    while (at(iter) != '\t' && at(iter) != ' ' && at(iter) != '\n') {
+        append_tmp(tmp, tmp_idx, at(iter));
         ++iter;
     }
     ++iter;
@@ -238,12 +243,12 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
     //Qui ho GT:AD
     num_sample_tokens = split(tmp, ':', tmp_values);
 
-    // Process each sample
+    // Process each sample; columns missing at the end of the record read as empty samples
     for (int samp = 0; samp < params->numSample; samp++) {
         reset_tmp(tmp, tmp_idx);
         find1 = false;
         while (!find1) {
-            if (__ldg(&params->line[start + iter]) == '\t' || __ldg(&params->line[start + iter]) == ' ' || __ldg(&params->line[start + iter]) == '\n') {
+            if (at(iter) == '\t' || at(iter) == ' ' || at(iter) == '\n') {
                 find1 = true;
                 iter++;
 
@@ -254,8 +259,10 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
                     continue;
                 }
 
-                split(tmp, ':', tmp_split);
-                for (int j = 0; j < num_sample_tokens; j++) {
+                // A sample may drop trailing FORMAT fields: those stay 0 (the columns are zeroed) like on the
+                // CPU, instead of reusing the previous sample's tokens still in tmp_split
+                const int num_values = split(tmp, ':', tmp_split);
+                for (int j = 0; j < num_sample_tokens && j < num_values; j++) {
                     bool find_type = false;
                     bool find_elem = false;
                     while (!find_type) {
@@ -317,13 +324,18 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
                                 el++;
                             }
                             find_type = true;
+                        } else if (getValueFromKeyMap1(&tmp_values[MAX_TOKEN_LEN*j]) == STRING_FORMAT) {
+                            // Parsed on the host; the row still gets its ids, as on the CPU
+                            params->samp_var_id[thID * params->numSample + samp] = thID;
+                            params->samp_id[thID * params->numSample + samp] = samp;
+                            find_type = true;
                         } else {
                             find_type = true;
                         }
                     }
                 }
             } else {
-                append_tmp(tmp, tmp_idx, __ldg(&params->line[start + iter]));
+                append_tmp(tmp, tmp_idx, at(iter));
                 iter++;
             }
         }

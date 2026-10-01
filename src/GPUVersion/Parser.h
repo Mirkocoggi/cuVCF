@@ -190,10 +190,10 @@ public:
     void device_free();
 
     /**
-    * @brief Finds newline indices in the VCF file.
+    * @brief Reads the variant body and indexes its records.
     *
-    * Reads the VCF file in parallel using OpenMP to determine the starting index of each line.
-    * The indices are stored in an array and copied to device memory for use by CUDA kernels.
+    * Reads the body into filestring with parallel pread() calls, then builds new_lines_index on the host
+    * (one entry per record end, blank lines skipped) and copies both to the device for the kernel.
     *
     * @param w_filename The path to the VCF file.
     * @param num_threads Number of threads to use for parallel processing.
