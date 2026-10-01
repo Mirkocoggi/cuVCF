@@ -1,7 +1,6 @@
 /**
  * @file Kernels.cu
  * @brief CUDA kernels and device functions for VCF file parsing
- * @author Your Name
  * @date 2025-07-16
  *
  * @details This file implements the GPU-accelerated parsing of VCF files through:
@@ -14,9 +13,7 @@
  * @warning Requires compute capability 3.0 or higher for __ldg operations
  */
 
-#ifndef KERNELS_CU
-#define KERNELS_CU
-
+#include "Kernels.h"
 #include "CUDAUtils.cuh"
 #include "Utils.h"
 #include "DataStructures.h"
@@ -28,7 +25,6 @@
 #include <chrono>
 #include <fstream>
 #include <filesystem>
-#include <sys/wait.h>
 #include <unistd.h>
 #include <map>
 #include <omp.h> 
@@ -81,7 +77,7 @@ __device__ void append_tmp(char* tmp, int& tmp_idx, char c) {
  * @note Uses temporary buffers in my_mem for string operations
  * @warning Assumes my_mem size >= thID*MAX_TOKEN_LEN*MAX_TOKENS*3
  */
-__device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, int batch_size, bool hasSamp){
+__device__ void get_vcf_line(const KernelParams* params, char* my_mem, int currBatch, int batch_size, bool hasSamp){
     long thID =  threadIdx.x + blockIdx.x * blockDim.x;
     bool find1 = false;
     long iter=0;
@@ -240,7 +236,7 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
     }
     ++iter;
     
-    //Qui ho GT:AD
+    // tmp holds the FORMAT template, e.g. GT:AD
     num_sample_tokens = split(tmp, ':', tmp_values);
 
     // Process each sample; columns missing at the end of the record read as empty samples
@@ -359,7 +355,7 @@ __device__ void get_vcf_line(KernelParams* params, char* my_mem, int currBatch, 
  * @note Uses batch processing to handle large files efficiently
  * @warning Ensure my_mem is large enough for all concurrent threads
  */
-__global__ void kernel (KernelParams* params, char* my_mem, int batch_size, bool hasSamp)
+__global__ void kernel (const KernelParams* __restrict__ params, char* __restrict__ my_mem, int batch_size, bool hasSamp)
 {
     int num_iteration = (params->numLines + batch_size - 1)/batch_size;
     for(int i=0; i<num_iteration; i++){
@@ -368,5 +364,17 @@ __global__ void kernel (KernelParams* params, char* my_mem, int batch_size, bool
     
 }
 
+cudaError_t upload_gt_table(const char (&keys)[NUM_KEYS_GT][MAX_KEY_LENGTH_GT], const char (&values)[NUM_KEYS_GT]){
+    const cudaError_t err = cudaMemcpyToSymbol(d_keys_gt, keys, sizeof(keys));
+    return err != cudaSuccess ? err : cudaMemcpyToSymbol(d_values_gt, values, sizeof(values));
+}
 
-#endif
+cudaError_t upload_map1_table(const char (&keys)[NUM_KEYS_MAP1][MAX_KEY_LENGTH_MAP1], const int (&values)[NUM_KEYS_MAP1]){
+    const cudaError_t err = cudaMemcpyToSymbol(d_keys_map1, keys, sizeof(keys));
+    return err != cudaSuccess ? err : cudaMemcpyToSymbol(d_values_map1, values, sizeof(values));
+}
+
+cudaError_t launch_parse_kernel(int blocks, int threads, cudaStream_t stream, const KernelParams* params, char* my_mem, int batch_size, bool hasSamp){
+    kernel<<<blocks, threads, 0, stream>>>(params, my_mem, batch_size, hasSamp);
+    return cudaGetLastError();
+}

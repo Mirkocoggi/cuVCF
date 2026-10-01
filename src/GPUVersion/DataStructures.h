@@ -1,7 +1,6 @@
 /**
  * @file DataStructures.h
  * @brief Contains fundamental data structures used for VCF parsing and GPU processing
- * @author Your Name
  * @date 2025-07-16
  * 
  * @details This file defines the core data structures used throughout the VCF parser:
@@ -29,7 +28,6 @@
 /// Fixed slot size (bytes, including the terminator) of each field name in the device name tables.
 #define MAX_NAME_SIZE 32
 
-using namespace std;
 
 /**
  * @struct KernelParams
@@ -45,28 +43,28 @@ using namespace std;
  * @warning Memory management (allocation/deallocation) must be handled externally
  */
  struct KernelParams {
-    char *line;                   ///< Pointer to the VCF line.
+    const char *line;             ///< Pointer to the VCF line.
     unsigned int *var_number;     ///< Pointer to the array of variant numbers.
     unsigned int *pos;            ///< Pointer to the array of variant positions.
     __half *qual;                 ///< Pointer to the array of quality scores (half precision).
     __half *in_float;             ///< Pointer to the array of float info values.
     uint8_t *in_flag;                ///< Pointer to the array of flag info values.
     int *in_int;                  ///< Pointer to the array of integer info values.
-    char* float_name;             ///< Pointer to the float field names.
-    char* flag_name;              ///< Pointer to the flag field names.
-    char* int_name;               ///< Pointer to the integer field names.
-    unsigned long long *new_lines_index;///< Pointer to the array of new-line indices.
+    const char* float_name;       ///< Pointer to the float field names.
+    const char* flag_name;        ///< Pointer to the flag field names.
+    const char* int_name;         ///< Pointer to the integer field names.
+    const unsigned long long *new_lines_index;///< Pointer to the array of new-line indices.
     unsigned int *samp_var_id;    ///< Pointer to the array of sample variant IDs.
     unsigned short *samp_id;      ///< Pointer to the array of sample IDs.
     __half *samp_float;           ///< Pointer to the array of sample float values.
     uint8_t *samp_flag;              ///< Pointer to the array of sample flag values.
     int *samp_int;                ///< Pointer to the array of sample integer values.
-    char* samp_float_name;        ///< Pointer to the sample float field names.
-    char* samp_flag_name;         ///< Pointer to the sample flag field names.
-    char* samp_int_name;          ///< Pointer to the sample integer field names.
-    int* samp_float_numb;         ///< Pointer to the number of sample float values per entry.
-    int* samp_flag_numb;          ///< Pointer to the number of sample flag values per entry.
-    int* samp_int_numb;           ///< Pointer to the number of sample integer values per entry.
+    const char* samp_float_name;  ///< Pointer to the sample float field names.
+    const char* samp_flag_name;   ///< Pointer to the sample flag field names.
+    const char* samp_int_name;    ///< Pointer to the sample integer field names.
+    const int* samp_float_numb;   ///< Pointer to the number of sample float values per entry.
+    const int* samp_flag_numb;    ///< Pointer to the number of sample flag values per entry.
+    const int* samp_int_numb;     ///< Pointer to the number of sample integer values per entry.
     char *sample_GT;              ///< Pointer to the sample genotype array.
     int numSample;                ///< Number of samples.
     unsigned int numLines;        ///< Total number of VCF lines (variants).
@@ -86,8 +84,8 @@ using namespace std;
  * Contains a vector of flag values (as uint8_t) and the name of the flag field.
  */
 struct info_flag {
-    vector<uint8_t> i_flag;  ///< Vector storing flag values.
-    string name;             ///< Name of the flag field.
+    std::vector<uint8_t> i_flag;  ///< Vector storing flag values.
+    std::string name;             ///< Name of the flag field.
 };
 
 /**
@@ -108,8 +106,8 @@ struct info_flag_d {
  * Contains a vector of strings and the corresponding field name.
  */
 struct info_string {
-    vector<string> i_string;  ///< Vector storing string values.
-    string name;              ///< Name of the string field.
+    std::vector<std::string> i_string;  ///< Vector storing string values.
+    std::string name;              ///< Name of the string field.
 };
 
 /**
@@ -119,8 +117,8 @@ struct info_string {
  * @see KernelParams For how these values are passed to CUDA kernels
  */
 struct info_float {
-    vector<__half> i_float;   ///< Vector storing float values (half precision).
-    string name;              ///< Name of the float field.
+    std::vector<__half> i_float;   ///< Vector storing float values (half precision).
+    std::string name;              ///< Name of the float field.
 };
 
 /**
@@ -140,8 +138,8 @@ struct info_float_d {
  * Contains a vector of integers and the corresponding field name.
  */
 struct info_int {
-    vector<int> i_int;  ///< Vector storing integer values.
-    string name;        ///< Name of the integer field.
+    std::vector<int> i_int;  ///< Vector storing integer values.
+    std::string name;        ///< Name of the integer field.
 };
 
 /**
@@ -162,8 +160,8 @@ struct info_int_d {
  * Contains a vector of flag values, the field name, and the number of entries.
  */
 struct samp_Flag {
-    vector<uint8_t> i_flag;  ///< Vector storing sample flag values.
-    string name;             ///< Name of the sample flag field.
+    std::vector<uint8_t> i_flag;  ///< Vector storing sample flag values.
+    std::string name;             ///< Name of the sample flag field.
     int numb;                ///< Number of entries per sample.
 };
 
@@ -187,8 +185,8 @@ struct samp_Flag_d {
  * Contains a vector of sample strings, the field name, and the number of entries.
  */
 struct samp_String {
-    vector<string> i_string;  ///< Vector storing sample string values.
-    string name;              ///< Name of the sample string field.
+    std::vector<std::string> i_string;  ///< Vector storing sample string values.
+    std::string name;              ///< Name of the sample string field.
     int numb;                 ///< Number of entries per sample.
 };
 
@@ -199,8 +197,8 @@ struct samp_String {
  * Contains a vector of half-precision float values, the field name, and the number of entries.
  */
 struct samp_Float {
-    vector<__half> i_float;  ///< Vector storing sample float values (half precision).
-    string name;             ///< Name of the sample float field.
+    std::vector<__half> i_float;  ///< Vector storing sample float values (half precision).
+    std::string name;             ///< Name of the sample float field.
     int numb;                ///< Number of entries per sample.
 };
 
@@ -224,8 +222,8 @@ struct samp_Float_d {
  * Contains a vector of sample integer values, the field name, and the number of entries.
  */
 struct samp_Int {
-    vector<int> i_int;  ///< Vector storing sample integer values.
-    string name;        ///< Name of the sample integer field.
+    std::vector<int> i_int;  ///< Vector storing sample integer values.
+    std::string name;        ///< Name of the sample integer field.
     int numb;           ///< Number of entries per sample.
 };
 
@@ -249,7 +247,7 @@ struct samp_Int_d {
  * Contains a vector of genotype characters and the number of genotype entries.
  */
 struct samp_GT {
-    vector<char> GT;  ///< Vector storing genotype values.
+    std::vector<char> GT;  ///< Vector storing genotype values.
     int numb;         ///< Number of genotype entries.
 };
 
@@ -272,9 +270,9 @@ struct samp_GT_d {
  * as well as counters for various types of values.
  */
 struct header_element {
-    vector<string> ID;       ///< Vector of header IDs.
-    vector<string> Number;   ///< Vector of header Number values.
-    vector<string> Type;     ///< Vector of header Type values.
+    std::vector<std::string> ID;       ///< Vector of header IDs.
+    std::vector<std::string> Number;   ///< Vector of header Number values.
+    std::vector<std::string> Type;     ///< Vector of header Type values.
     int total_values = 0;    ///< Total number of header values.
     int alt_values = 0;      ///< Number of alternative allele values.
     int no_alt_values = 0;   ///< Number of non-alternative values.

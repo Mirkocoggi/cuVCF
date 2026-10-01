@@ -1,7 +1,6 @@
 /**
  * @file Parser.h
  * @brief Header file defining the VCF parser class and its interface
- * @author Your Name
  * @date 2025-07-16
  *
  * @details This file defines the vcf_parsed class which provides:
@@ -69,15 +68,15 @@ public:
     /// Unique identifier for this VCF parsing instance.
     int id;
     /// Name of the VCF file.
-    string filename;
+    std::string filename;
     /// Full path to the VCF file.
-    string path_to_filename;
+    std::string path_to_filename;
     /// The header content of the VCF file.
-    string header;
+    std::string header;
     /// Parsed header information for INFO fields.
     header_element INFO;
     /// Mapping of INFO field names to type codes (Flag=0, Int=1, Float=2, String=3).
-    map<string,int> info_map;
+    std::map<std::string,int> info_map;
     /// Parsed header information for FORMAT fields.
     header_element FORMAT;
     /// Host-side storage for variant data as a large character array.
@@ -198,7 +197,7 @@ public:
     * @param w_filename The path to the VCF file.
     * @param num_threads Number of threads to use for parallel processing.
     */
-    void find_new_lines_index(string w_filename, int num_threads);
+    void find_new_lines_index(std::string w_filename, int num_threads);
     
     /**
     * @brief Reads the VCF header from the input file.
@@ -208,7 +207,7 @@ public:
     *
     * @param file Pointer to the input file stream.
     */
-    void get_header(ifstream *file);
+    void get_header(std::ifstream *file);
     
     /**
     * @brief Prints the VCF header to standard output.
@@ -223,7 +222,7 @@ public:
     *
     * @param file Pointer to the input file stream.
     */
-    void get_and_parse_header(ifstream *file);
+    void get_and_parse_header(std::ifstream *file);
     
     /**
     * @brief Allocates a character array to store the variant portion of the VCF file.

@@ -24,7 +24,6 @@
 #include <omp.h>
 #include <fstream>
 #include <filesystem>
-#include <sys/wait.h>
 #include <unistd.h>
 #include "VCFparser_mt_col_struct.h"
 #include "VCF_var.h"
@@ -219,7 +218,7 @@ public:
         auto get_file_size = std::chrono::duration<double>(after - before).count();
         // Getting the header (Saving the header into a string and storing the header size )
         before = chrono::system_clock::now();
-        get_and_parse_header(&inFile); //serve per separare l'header dal resto del file
+        get_and_parse_header(&inFile); // separates the header from the rest of the file
         //vcf.print_header();
         after = chrono::system_clock::now();
         auto get_header = std::chrono::duration<double>(after - before).count();
@@ -645,7 +644,7 @@ public:
         for(int i=0; i<var_columns.in_flag.size(); i++){
             cout<<var_columns.in_flag[i].name<<": ";
             for(int j=0; j<10; j++){
-                cout<<var_columns.in_flag[i].i_flag[j]<<" ";
+                cout<<(int)var_columns.in_flag[i].i_flag[j]<<" ";
             }
             cout<<" size: "<<var_columns.in_flag[i].i_flag.size();
             cout<<endl;

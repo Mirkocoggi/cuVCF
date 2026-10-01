@@ -22,7 +22,6 @@
 #include <iostream>
 #include <vector>
 
-using namespace std;
 
 /**
  * @class var_columns_df
@@ -35,37 +34,37 @@ class var_columns_df //DF1
 {
 public:
     /// Vector of variant numbers.
-    vector<unsigned int> var_number;
+    std::vector<unsigned int> var_number;
     /// Map from chromosome string to a unique unsigned char code.
     std::map<std::string, unsigned char> chrom_map;
     /// Vector of chromosome codes.
-    vector<char> chrom;
+    std::vector<char> chrom;
     /// Vector of variant positions.
-    vector<unsigned int> pos;
+    std::vector<unsigned int> pos;
     /// Vector of variant IDs.
-    vector<string> id;
+    std::vector<std::string> id;
     /// Vector of reference alleles.
-    vector<string> ref;
+    std::vector<std::string> ref;
     /// Vector of quality scores in half precision.
-    vector<__half> qual;
+    std::vector<__half> qual;
     /// Map from filter string to a unique char code.
     std::map<std::string, char> filter_map;
     /// Vector of filter codes.
-    vector<char> filter;
+    std::vector<char> filter;
     /// Vector of float info fields.
-    vector<info_float> in_float;
+    std::vector<info_float> in_float;
     /// Vector of flag info fields.
-    vector<info_flag> in_flag;
+    std::vector<info_flag> in_flag;
     /// Vector of string info fields.
-    vector<info_string> in_string;
+    std::vector<info_string> in_string;
     /// Vector of integer info fields.
-    vector<info_int> in_int;
+    std::vector<info_int> in_int;
     /// Map for additional info, mapping field names to integer codes.
-    map<string, int> info_map1;
+    std::map<std::string, int> info_map1;
 
     // Read-only lookup for the parsing threads: operator[] would insert missing keys into the
     // shared map concurrently (data race). Returns -1 for keys not declared in the header.
-    int info_code(const string& key) const {
+    int info_code(const std::string& key) const {
         auto it = info_map1.find(key);
         return it == info_map1.end() ? -1 : it->second;
     }
@@ -107,25 +106,25 @@ public:
             }
             
             
-            // Stampa Pos
+            // Print Pos
             if (i < static_cast<long>(pos.size()))
                 std::cout << pos[i] << "\t";
             else
                 std::cout << "nan\t";
             
-            // Stampa ID
+            // Print ID
             if (i < static_cast<long>(id.size()))
                 std::cout << id[i] << "\t";
             else
                 std::cout << "nan\t";
             
-            // Stampa Ref
+            // Print Ref
             if (i < static_cast<long>(ref.size()))
                 std::cout << ref[i] << "\t";
             else
                 std::cout << "nan\t";
 
-            // Stampa Qual
+            // Print Qual
             if (i < static_cast<long>(qual.size()))
                 if(__half2float(qual[i]) != -1.0f){
                     std::cout << __half2float(qual[i]) << "\t";
@@ -135,7 +134,7 @@ public:
             else
                 std::cout << "nan\t";
             
-            // Stampa Filter: costruiamo la chiave dal carattere in filter
+            // Print Filter: look up the name of the code stored in filter
             if (i < static_cast<long>(filter.size())) {
                 char code = filter[i];
                 bool found = false;
@@ -206,19 +205,19 @@ class alt_columns_df //DF2
 {
     public:
     /// Vector of variant IDs corresponding to each alternative allele entry.
-    vector<unsigned int> var_id;
+    std::vector<unsigned int> var_id;
     /// Vector of alternative allele IDs.
-    vector<unsigned char> alt_id;
+    std::vector<unsigned char> alt_id;
     /// Vector of alternative allele strings.
-    vector<string> alt;
+    std::vector<std::string> alt;
     /// Vector of float information related to alternative alleles.
-    vector<info_float> alt_float;
+    std::vector<info_float> alt_float;
     /// Vector of flag information (not yet handled) for alternative alleles.
-    vector<info_flag> alt_flag;
+    std::vector<info_flag> alt_flag;
     /// Vector of string information related to alternative alleles.
-    vector<info_string> alt_string;
+    std::vector<info_string> alt_string;
     /// Vector of integer information related to alternative alleles.
-    vector<info_int> alt_int;
+    std::vector<info_int> alt_int;
     /// Number of alternative alleles.
     int numAlt;
 
@@ -333,29 +332,29 @@ class alt_columns_df //DF2
      * @param n Number of entries to print.
      */
     void print(int n){
-        cout << "VarID\tAltID\tAlt\tFloat\t\tInt\t\tStr" << endl;
+        std::cout << "VarID\tAltID\tAlt\tFloat\t\tInt\t\tStr" << std::endl;
         int iter = (n>var_id.size()) ? var_id.size() : n;
         for(int i=0; i<iter; i++){
 
-            cout << var_id[i] << "\t" << (int)alt_id[i] << "\t" << alt[i] << "\t";
+            std::cout << var_id[i] << "\t" << (int)alt_id[i] << "\t" << alt[i] << "\t";
             
             for(int j=0; j < alt_float.size(); j++){
-                cout << alt_float[j].name << "=" << static_cast<float>(alt_float[j].i_float[i]) << ";";
+                std::cout << alt_float[j].name << "=" << static_cast<float>(alt_float[j].i_float[i]) << ";";
             }
         
-            cout << "\t";
+            std::cout << "\t";
 
             for(int j=0; j < alt_int.size(); j++){
-                cout << alt_int[j].name << "=" << alt_int[j].i_int[i] << ";";
+                std::cout << alt_int[j].name << "=" << alt_int[j].i_int[i] << ";";
             }
 
-            cout << "\t";
+            std::cout << "\t";
 
             for(int j=0; j < alt_string.size(); j++){
-                cout << alt_string[j].name << "=" << alt_string[j].i_string[i] << ";";
+                std::cout << alt_string[j].name << "=" << alt_string[j].i_string[i] << ";";
             }
             
-            cout << endl;
+            std::cout << std::endl;
         }
     }
 };
@@ -372,23 +371,23 @@ class sample_columns_df //aka df3
 {
     public:
     /// Vector of variant IDs for sample data.
-    vector<unsigned int> var_id;
+    std::vector<unsigned int> var_id;
     /// Vector of sample IDs.
-    vector<unsigned short> samp_id;
+    std::vector<unsigned short> samp_id;
     /// Vector of sample float data.
-    vector<samp_Float> samp_float;
+    std::vector<samp_Float> samp_float;
     /// Vector of sample flag data.
-    vector<samp_Flag> samp_flag;
+    std::vector<samp_Flag> samp_flag;
     /// Vector of sample string data.
-    vector<samp_String> samp_string;
+    std::vector<samp_String> samp_string;
     /// Vector of sample integer data.
-    vector<samp_Int> samp_int;
+    std::vector<samp_Int> samp_int;
     /// Map from sample name to sample ID.
     std::map<std::string, unsigned short> sampNames;
     /// Map from genotype string to a char code.
-    map<string, char> GTMap;
+    std::map<std::string, char> GTMap;
     /// Vector of sample genotype data.
-    vector<samp_GT> sample_GT;
+    std::vector<samp_GT> sample_GT;
     /// Number of samples per row.
     int numSample;
 
@@ -447,40 +446,40 @@ class sample_columns_df //aka df3
      * @param n Number of entries to print.
      */
    void print(int n){
-        cout << "VarID\tSampID\tFloat\t\tInt\t\tStr\t\tGT" << endl;
+        std::cout << "VarID\tSampID\tFloat\t\tInt\t\tStr\t\tGT" << std::endl;
         
         int iter = (n>var_id.size()) ? var_id.size() : n;
 
         for(int i=0; i<iter; i++){
-            cout << var_id[i] << "\t";
+            std::cout << var_id[i] << "\t";
             // Reverse lookup in sampNames map to get the string associated with samp_id
             for (const auto& pair : sampNames) {
                 if (pair.second == samp_id[i]) {
-                    cout << pair.first << "\t";
+                    std::cout << pair.first << "\t";
                     break;
                 }
             }
 
             for(int j=0; j < samp_float.size(); j++){
-                cout << samp_float[j].name << "=" << static_cast<float>(samp_float[j].i_float[i]) << ";";
+                std::cout << samp_float[j].name << "=" << static_cast<float>(samp_float[j].i_float[i]) << ";";
             }
-            cout << "\t";
+            std::cout << "\t";
             
             for(int j=0; j < samp_int.size(); j++){
-                cout << samp_int[j].name << "=" << samp_int[j].i_int[i] << ";";
+                std::cout << samp_int[j].name << "=" << samp_int[j].i_int[i] << ";";
             }
-            cout << "\t";
+            std::cout << "\t";
             
             for(int j=0; j < samp_string.size(); j++){
-                cout << samp_string[j].name << "=" << samp_string[j].i_string[i] << ";";
+                std::cout << samp_string[j].name << "=" << samp_string[j].i_string[i] << ";";
             }
-            cout << "\t";
+            std::cout << "\t";
 
             for(size_t j=0; j < sample_GT.size(); j++){ // empty without a Number=1 GT column
-                if (i < static_cast<int>(sample_GT[j].GT.size())) cout << "GT"<< j << "=" << getGTStringFromChar(sample_GT[j].GT[i]) << ";";
+                if (i < static_cast<int>(sample_GT[j].GT.size())) std::cout << "GT"<< j << "=" << getGTStringFromChar(sample_GT[j].GT[i]) << ";";
             }
 
-            cout << endl;
+            std::cout << std::endl;
         }
     }
 };
@@ -500,25 +499,25 @@ class alt_format_df //aka df4 in progress
 {
     public:
     /// Vector of variant IDs.
-    vector<unsigned int> var_id;
+    std::vector<unsigned int> var_id;
     /// Vector of sample IDs.
-    vector<unsigned short> samp_id;
+    std::vector<unsigned short> samp_id;
     /// Vector of alternative allele IDs.
-    vector<char> alt_id;
+    std::vector<char> alt_id;
     /// Vector of sample float data.
-    vector<samp_Float> samp_float;
+    std::vector<samp_Float> samp_float;
     /// Vector of sample flag data.
-    vector<samp_Flag> samp_flag;
+    std::vector<samp_Flag> samp_flag;
     /// Vector of sample string data.
-    vector<samp_String> samp_string;
+    std::vector<samp_String> samp_string;
     /// Vector of sample integer data.
-    vector<samp_Int> samp_int;
+    std::vector<samp_Int> samp_int;
     /// Map from sample name to sample ID.
     std::map<std::string, unsigned short> sampNames;
     /// Sample genotype data.
     samp_GT sample_GT;
     /// Map from genotype string to a char code.
-    map<string, char> GTMap;
+    std::map<std::string, char> GTMap;
     /// Number of samples.
     int numSample; 
 
@@ -682,40 +681,40 @@ class alt_format_df //aka df4 in progress
      */
     void print(int n){
         // Print header row with column names
-        cout << "VarID\tSampID\talt_id\tFloat\t\tInt\t\tStr\t\tGT" << endl;
+        std::cout << "VarID\tSampID\talt_id\tFloat\t\tInt\t\tStr\t\tGT" << std::endl;
         int iter = (n>samp_id.size()) ? samp_id.size() : n;
 
         for(int i=0; i<iter; i++){
 
-            cout << var_id[i] << "\t";
+            std::cout << var_id[i] << "\t";
 
             // Reverse lookup in sampNames map to get the string associated with samp_id
             for (const auto& pair : sampNames) {
                 if (pair.second == samp_id[i]) {
-                    cout << pair.first << "\t";
+                    std::cout << pair.first << "\t";
                     break;
                 }
             }
 
-            cout << (int)alt_id[i] << "\t";
+            std::cout << (int)alt_id[i] << "\t";
 
             for(int j=0; j < samp_float.size(); j++){
-                cout << samp_float[j].name << "=" << static_cast<float>(samp_float[j].i_float[i]) << ";";
+                std::cout << samp_float[j].name << "=" << static_cast<float>(samp_float[j].i_float[i]) << ";";
             }
-            cout << "\t";
+            std::cout << "\t";
 
             for(int j=0; j < samp_int.size(); j++){
-                cout << samp_int[j].name << "=" << samp_int[j].i_int[i] << ";";
+                std::cout << samp_int[j].name << "=" << samp_int[j].i_int[i] << ";";
             }
 
-            cout << "\t";
+            std::cout << "\t";
             for(int j=0; j < samp_string.size(); j++){
-                cout << samp_string[j].name << "=" << samp_string[j].i_string[i] << ";";
+                std::cout << samp_string[j].name << "=" << samp_string[j].i_string[i] << ";";
             }
 
-            cout << "\t";
-            if (i < static_cast<int>(sample_GT.GT.size())) cout << getGTStringFromChar(sample_GT.GT[i]) << ";"; // only with GT Number=A
-            cout << endl;
+            std::cout << "\t";
+            if (i < static_cast<int>(sample_GT.GT.size())) std::cout << getGTStringFromChar(sample_GT.GT[i]) << ";"; // only with GT Number=A
+            std::cout << std::endl;
         }
     }
 };

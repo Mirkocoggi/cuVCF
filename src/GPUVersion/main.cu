@@ -1,7 +1,6 @@
 /**
  * @file main.cu
  * @brief Entry point for the GPU-accelerated VCF parser
- * @author Your Name
  * @date 2025-07-16
  *
  * @details Main application that:
@@ -20,7 +19,7 @@
  * @note CUDA device 0 is used by default
  */
 
-#include "Parser.cu"        
+#include "Parser.h"
 
 #include <cuda_runtime.h>   
 #include <cuda_fp16.h>      
@@ -28,7 +27,6 @@
 #include <chrono>           
 #include <fstream>          
 #include <filesystem>       
-#include <sys/wait.h>       
 #include <unistd.h>         
 #include <map>              
 #include <omp.h>            

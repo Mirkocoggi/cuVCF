@@ -71,7 +71,7 @@ const int INT_FORMAT_ALT = 12;
 const int FLOAT_FORMAT_ALT = 13;
 const int FLAG_FORMAT = 17; // was 11, which collided with STRING_FORMAT_ALT
 
-// Mappa per PolyPhen
+// PolyPhen map
 const std::unordered_map<std::string, char> polyphenCharMap = {
     {"", 0},
     {"benign", 1},
@@ -79,7 +79,7 @@ const std::unordered_map<std::string, char> polyphenCharMap = {
     {"probably_damaging", 3}
 };
 
-// Mappa per CSQ
+// CSQ map
 const std::unordered_map<std::string, char> csqCharMap = {
     {"synonymous_variant", 0},
     {"missense_variant", 1},
@@ -117,7 +117,7 @@ const std::unordered_map<std::string, char> csqCharMap = {
  * @param vcf_filename [in,out] Pointer to filename, .gz extension removed on success
  * @warning Modifies the input filename string on successful decompression
  */
-void unzip_gz_file(char* vcf_filename) {
+inline void unzip_gz_file(char* vcf_filename) {
     // Decompress in process with zlib (no external gzip binary, no fork),
     // with the same effect as "gzip -df": the .gz is replaced by the plain file.
     const size_t len = strlen(vcf_filename);
@@ -159,7 +159,7 @@ void unzip_gz_file(char* vcf_filename) {
  * @param path_to_filename Reference to a string that will be assigned the full file path.
  * @return The extracted filename.
  */
-string get_filename(string path_filename, string &path_to_filename){
+inline std::string get_filename(std::string path_filename, std::string &path_to_filename){
     path_to_filename = path_filename;
     return path_filename.substr(path_filename.rfind('/') + 1); // the whole string when there is no '/'
 }
@@ -172,7 +172,7 @@ string get_filename(string path_filename, string &path_to_filename){
  * @throw std::filesystem::filesystem_error If file doesn't exist or is inaccessible
  * @note Uses std::filesystem::file_size
  */
-long get_file_size(string filename){
+inline long get_file_size(std::string filename){
     return std::filesystem::file_size(filename);
 }
 
