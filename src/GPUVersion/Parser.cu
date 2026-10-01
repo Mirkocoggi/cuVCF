@@ -35,7 +35,6 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include <boost/algorithm/string.hpp>
 #include <chrono>
 #include <fstream>
 #include <iostream>  
@@ -582,7 +581,7 @@ void vcf_parsed::get_and_parse_header(ifstream *file){
     }
 
     vector<string> tmp_split;
-    boost::split(tmp_split, line, boost::is_any_of("\t")); // tab only: sample names may contain spaces
+    split_on(tmp_split, line, '\t'); // tab only: sample names may contain spaces
     if(tmp_split.size() > 9){
         samplesON = true;
         samp_columns.numSample = tmp_split.size() - 9;
@@ -1447,7 +1446,7 @@ static void ensure_alt_format_capacity(alt_format_df* tmp_alt_format, int needed
 // ---- Host line parsing -------------------------------------------------------------------------
 // The host side parses what the kernel does not: CHROM, ID, REF, ALT, FILTER, INFO String Number=1,
 // INFO Number=A, FORMAT String, FORMAT Number=A and GT Number=A. Fields are walked with pointers
-// (no std::string/boost::split per field) and keys are resolved once, in build_host_lookup.
+// (no std::string or split per field) and keys are resolved once, in build_host_lookup.
 
 // Calls f(token_begin, token_end, index) for every sep-separated token of [b, e) (one token if none)
 template <class F>

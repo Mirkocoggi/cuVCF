@@ -20,7 +20,6 @@
 #ifndef VCF_PARSED_H
 #define VCF_PARSED_H
 #include <chrono>
-#include <boost/algorithm/string.hpp>
 #include <Imath/half.h>
 #include <omp.h>
 #include <fstream>
@@ -256,10 +255,8 @@ public:
     }
 
     void get_filename(string path_filename){
-        vector<string> line_el;
         path_to_filename = path_filename;
-        boost::split(line_el, path_filename, boost::is_any_of("/"));
-        filename = line_el[line_el.size()-1];
+        filename = path_filename.substr(path_filename.rfind('/') + 1); // the whole string when there is no '/'
     }
     
     void get_file_size(string filename){
@@ -323,7 +320,7 @@ public:
         }
 
         vector<string> tmp_split;
-        boost::split(tmp_split, line, boost::is_any_of("\t")); // tab only: sample names may contain spaces
+        split_on(tmp_split, line, '\t'); // tab only: sample names may contain spaces
         if(tmp_split.size() > 9){
             samplesON = true;
             samp_columns.numSample = tmp_split.size() - 9;

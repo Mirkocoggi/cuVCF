@@ -1,8 +1,20 @@
 #ifndef VCF_STRUCTS_H
 #define VCF_STRUCTS_H
 #include <chrono>
-#include <boost/algorithm/string.hpp>
+#include <cstring>
+#include <string>
+#include <string_view>
+#include <vector>
 #include <Imath/half.h>
+
+// Splits s at every sep into out: empty tokens are kept ("a,,b" gives 3) and an empty s gives one
+// empty token
+inline void split_on(std::vector<std::string>& out, std::string_view s, char sep){
+    out.clear();
+    size_t b = 0;
+    for(size_t e; (e = s.find(sep, b)) != std::string_view::npos; b = e + 1) out.emplace_back(s.substr(b, e - b));
+    out.emplace_back(s.substr(b));
+}
 
 using namespace std;
 

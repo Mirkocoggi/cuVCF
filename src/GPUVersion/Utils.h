@@ -29,8 +29,19 @@
 #include <fstream>
 #include <iostream>
 #include <cstring>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
-#include <boost/algorithm/string.hpp>
+
+// Splits s at every sep into out: empty tokens are kept ("a,,b" gives 3) and an empty s gives one
+// empty token
+inline void split_on(std::vector<std::string>& out, std::string_view s, char sep){
+    out.clear();
+    size_t b = 0;
+    for(size_t e; (e = s.find(sep, b)) != std::string_view::npos; b = e + 1) out.emplace_back(s.substr(b, e - b));
+    out.emplace_back(s.substr(b));
+}
 
 /// Constant representing a flag type.
 const int FLAG = 0;
@@ -149,10 +160,8 @@ void unzip_gz_file(char* vcf_filename) {
  * @return The extracted filename.
  */
 string get_filename(string path_filename, string &path_to_filename){
-    vector<string> line_el;
     path_to_filename = path_filename;
-    boost::split(line_el, path_filename, boost::is_any_of("/"));
-    return line_el[line_el.size()-1];
+    return path_filename.substr(path_filename.rfind('/') + 1); // the whole string when there is no '/'
 }
 
 /**

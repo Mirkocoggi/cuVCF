@@ -15,7 +15,6 @@
 #include "VCF_parsed.h"
 #include "VCF_var.h"
 #include <chrono>
-#include <boost/algorithm/string.hpp>
 #include <Imath/half.h>
 
 // FORMAT columns are named <ID> (Number=1) or <ID>0, <ID>1, ... (Number>1): match the first column
@@ -272,7 +271,7 @@ public:
             if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
-                boost::split(tmp_split, tmp, boost::is_any_of(","));
+                split_on(tmp_split, tmp, ',');
                 local_alt = tmp_split.size();
                 ensure_alt_capacity(tmp_alt, (*tmp_num_alt) + local_alt);
                 for(int y = 0; y<local_alt; y++){
@@ -332,10 +331,10 @@ public:
                 find1 = true;
                 iter++;
                 vector<string> tmp_el;
-                boost::split(tmp_el, tmp, boost::is_any_of(";")); // Split INFO field into individual key-value pairs
+                split_on(tmp_el, tmp, ';'); // Split INFO field into individual key-value pairs
                 vector<string> tmp_elems;
                 for(int ii=0; ii<tmp_el.size(); ii++){
-                    boost::split(tmp_elems, tmp_el[ii], boost::is_any_of("=")); // Separate INFO field identifier from its value content
+                    split_on(tmp_elems, tmp_el[ii], '='); // Separate INFO field identifier from its value content
                     bool find_info_type = false;
                     bool find_info_elem = false;
                     if(tmp_elems.size()==2){
@@ -383,7 +382,7 @@ public:
                                 int el=0;
                                 while(!find_info_elem){
                                     if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
-                                        boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                        split_on(tmp_split, tmp_elems[1], ',');
                                         for(int y = 0; y<local_alt; y++){
                                             (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? safe_stoi(tmp_split[y]) : 0; // "." has a single token
                                         }
@@ -397,7 +396,7 @@ public:
                                 int el=0;
                                 while(!find_info_elem){
                                     if((*tmp_alt).alt_float[el].name == tmp_elems[0]){
-                                        boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                        split_on(tmp_split, tmp_elems[1], ',');
                                         
                                         for(int y = 0; y<local_alt; y++){
                                             try{
@@ -416,7 +415,7 @@ public:
                                 int el=0;
                                 while(!find_info_elem){
                                     if((*tmp_alt).alt_string[el].name == tmp_elems[0]){
-                                        boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                        split_on(tmp_split, tmp_elems[1], ',');
                                         for(int y = 0; y<local_alt; y++){
                                             (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? tmp_split[y] : ""; // "." has a single token
                                         }
@@ -560,7 +559,7 @@ public:
             if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
-                boost::split(tmp_split, tmp, boost::is_any_of(","));
+                split_on(tmp_split, tmp, ',');
                 local_alt = tmp_split.size();
                 ensure_alt_capacity(tmp_alt, (*tmp_num_alt) + local_alt);
                 for(int y = 0; y<local_alt; y++){
@@ -620,10 +619,10 @@ public:
                 find1 = true;
                 iter++;
                 vector<string> tmp_el;
-                boost::split(tmp_el, tmp, boost::is_any_of(";")); // Split INFO field into individual key-value pairs
+                split_on(tmp_el, tmp, ';'); // Split INFO field into individual key-value pairs
                 vector<string> tmp_elems;
                 for(int ii=0; ii<tmp_el.size(); ii++){
-                    boost::split(tmp_elems, tmp_el[ii], boost::is_any_of("=")); // Separate INFO field identifier from its value content
+                    split_on(tmp_elems, tmp_el[ii], '='); // Separate INFO field identifier from its value content
                     bool find_info_type = false;
                     bool find_info_elem = false;
                     if(tmp_elems.size()==2){
@@ -671,7 +670,7 @@ public:
                                 int el=0;
                                 while(!find_info_elem){
                                     if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
-                                        boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                        split_on(tmp_split, tmp_elems[1], ',');
                                         for(int y = 0; y<local_alt; y++){
                                             (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? safe_stoi(tmp_split[y]) : 0; // "." has a single token
                                         }
@@ -685,7 +684,7 @@ public:
                                 int el=0;
                                 while(!find_info_elem){
                                     if((*tmp_alt).alt_float[el].name == tmp_elems[0]){
-                                        boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                        split_on(tmp_split, tmp_elems[1], ',');
                                         for(int y = 0; y<local_alt; y++){
                                             try{
                                                 (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? (half)safe_stof(tmp_split[y]) : (half)0.0f; // "." has a single token
@@ -703,7 +702,7 @@ public:
                                 int el=0;
                                 while(!find_info_elem){
                                     if((*tmp_alt).alt_string[el].name == tmp_elems[0]){
-                                        boost::split(tmp_split, tmp_elems[1], boost::is_any_of(","));
+                                        split_on(tmp_split, tmp_elems[1], ',');
                                         for(int y = 0; y<local_alt; y++){
                                             (*tmp_alt).alt_string[el].i_string[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? tmp_split[y] : ""; // "." has a single token
                                         }
@@ -747,7 +746,7 @@ public:
             if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
-                boost::split(tmp_format_split, tmp, boost::is_any_of(":"));
+                split_on(tmp_format_split, tmp, ':');
             }else{
                 tmp += at(iter);
                 iter++;
@@ -764,7 +763,7 @@ public:
                 if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                     find1 = true;
                     iter++;
-                    boost::split(tmp_split, tmp, boost::is_any_of(":"));
+                    split_on(tmp_split, tmp, ':');
                     vector<string> tmp_sub;
                     for(int j = 0; j < tmp_split.size() && j < tmp_format_split.size(); j++){ // extra values have no FORMAT key
                         bool find_type = false;
@@ -776,14 +775,14 @@ public:
                                 (*sample).samp_id[i*(*sample).numSample + samp] =  static_cast<unsigned short>(samp);
                                 if((*sample).sample_GT.size() > 1){ //sample_columns_df* sample, alt_format_df* tmp_alt_format
                                     tmp_sub;
-                                    boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
+                                    split_on(tmp_sub, tmp_split[j], ',');
                                     for(int k=0; k < (*sample).sample_GT[0].numb; k++){ 
                                         (*sample).sample_GT[k].GT[i*(*sample).numSample + samp] = (*sample).gt_code(tmp_sub[k]);
                                     }
                                 }else if((*sample).sample_GT.size() == 1){
                                     (*sample).sample_GT[0].GT[i*(*sample).numSample + samp] = (*sample).gt_code(tmp_split[j]);
                                 }else{
-                                    boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
+                                    split_on(tmp_sub, tmp_split[j], ',');
                                     local_alt = tmp_sub.size();
                                     ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
                                     for(int y = 0; y<local_alt; y++){
@@ -812,7 +811,7 @@ public:
                                             //Iterate over the alternatives (lists with the same name + ascending number, e.g., el1, el2, ...)
                                             //referred with 'el + number'
                                             vector<string> tmp_sub;
-                                            boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
+                                            split_on(tmp_sub, tmp_split[j], ',');
                                             for(int k = 0; k<(*sample).samp_string[el].numb; k++){
                                                 // A '.' value has a single token
                                                 (*sample).samp_string[el+k].i_string[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? tmp_sub[k] : "";
@@ -836,7 +835,7 @@ public:
                                         }else{
                                             //Integer with numb > 1
                                             vector<string> tmp_sub;
-                                            boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
+                                            split_on(tmp_sub, tmp_split[j], ',');
                                             // k, not i: i is the record index. A '.' value has a single token.
                                             for(int k = 0; k<(*sample).samp_int[el].numb; k++){
                                                 (*sample).samp_int[el+k].i_int[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? safe_stoi(tmp_sub[k]) : 0;
@@ -864,7 +863,7 @@ public:
                                         }else{
                                             //Float with numb > 1
                                             vector<string> tmp_sub;
-                                            boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
+                                            split_on(tmp_sub, tmp_split[j], ',');
                                             // k, not i: i is the record index. A '.' value has a single token.
                                             for(int k = 0; k<(*sample).samp_float[el].numb; k++){
                                                 (*sample).samp_float[el+k].i_float[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? (half)safe_stof(tmp_sub[k]) : (half)0.0f;
@@ -877,7 +876,7 @@ public:
                                 find_type = true;
                             }else if(info_code(tmp_format_split[j]) == STRING_FORMAT_ALT){
                                 //String alternatives
-                                boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
+                                split_on(tmp_sub, tmp_split[j], ',');
                                 local_alt = tmp_sub.size();
                                 ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
                                 int el = 0;
@@ -899,7 +898,7 @@ public:
                                 find_type = true;
                             }else if(info_code(tmp_format_split[j]) == INT_FORMAT_ALT){
                                 //Integer alternatives
-                                boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
+                                split_on(tmp_sub, tmp_split[j], ',');
                                 local_alt = tmp_sub.size();
                                 ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
                                 int el = 0;
@@ -921,7 +920,7 @@ public:
                                 find_type = true;
                             }else if(info_code(tmp_format_split[j]) == FLOAT_FORMAT_ALT){
                                 //Float alternatives
-                                boost::split(tmp_sub, tmp_split[j], boost::is_any_of(","));
+                                split_on(tmp_sub, tmp_split[j], ',');
                                 local_alt = tmp_sub.size();
                                 ensure_alt_format_capacity(tmp_alt_format, (*tmp_num_alt_format) + local_alt);
                                 int el = 0;

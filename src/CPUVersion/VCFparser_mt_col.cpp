@@ -19,8 +19,6 @@
 #include <zlib.h>
 #include <queue>
 #include <chrono>
-#include <boost/algorithm/string.hpp>
-#include <boost/algorithm/string/predicate.hpp>
 #include <filesystem>
 #include <Imath/half.h>
 #include <omp.h>

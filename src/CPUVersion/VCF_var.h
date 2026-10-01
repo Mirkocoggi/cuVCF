@@ -15,7 +15,6 @@
 #include "VCF_parsed.h"
 #include "VCF_var_columns_df.h"
 #include <chrono>
-#include <boost/algorithm/string.hpp>
 #include <Imath/half.h>
 
 /**
