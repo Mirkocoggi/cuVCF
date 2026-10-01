@@ -120,15 +120,6 @@ static inline bool format_name_matches(const std::string& name, const std::strin
     return name == key || (name.size() == key.size() + 1 && name.back() == '0' && name.compare(0, key.size(), key) == 0);
 }
 
-// Numeric conversions for VCF values: a missing value ('.') or a malformed token yields 0
-// instead of throwing and aborting the whole parse.
-static inline int safe_stoi(const string& s){
-    try{ return std::stoi(s); }catch(const std::exception&){ return 0; }
-}
-static inline float safe_stof(const string& s){
-    try{ return std::stof(s); }catch(const std::exception&){ return 0.0f; }
-}
-
 /**
     * @brief Runs the VCF parsing process.
     *
@@ -146,18 +137,7 @@ static inline float safe_stof(const string& s){
     */
 void vcf_parsed::run(char* vcf_filename, int num_threadss){
     string filename = vcf_filename; 
-    string line;
-    vcf_parsed vcf;
-
-    // Variables to hold device information
-    size_t globalMemory = 0;       // Total global memory
-    size_t sharedMemory = 0;       // Shared memory per block
-    size_t constantMemory = 0;     // Constant memory
-    size_t textureAlignment = 0;   // Texture alignment
-    int maxThreadsPerBlock = 0;    // Maximum threads per block
     int cudaCores;                 // Total number of CUDA cores
-    int threadsDim[3] = {0};       // Maximum threads per block dimensions
-    int gridDim[3] = {0};          // Maximum grid dimensions
 
     // Query device properties
     int deviceCount = 0;
@@ -173,21 +153,6 @@ void vcf_parsed::run(char* vcf_filename, int num_threadss){
     cudaError_t err = cudaGetDeviceProperties(&prop, 0); // Query the first (and only) device
 
     if (err == cudaSuccess) {
-        globalMemory = prop.totalGlobalMem;
-        sharedMemory = prop.sharedMemPerBlock;
-        constantMemory = prop.totalConstMem;
-        textureAlignment = prop.textureAlignment;
-        maxThreadsPerBlock = prop.maxThreadsPerBlock;
-
-        // Threads and grid dimensions
-        threadsDim[0] = prop.maxThreadsDim[0];
-        threadsDim[1] = prop.maxThreadsDim[1];
-        threadsDim[2] = prop.maxThreadsDim[2];
-
-        gridDim[0] = prop.maxGridSize[0];
-        gridDim[1] = prop.maxGridSize[1];
-        gridDim[2] = prop.maxGridSize[2];
-
         // Determine number of CUDA cores per SM based on compute capability
         int coresPerSM = 0;
         if (prop.major == 1) {
@@ -460,10 +425,10 @@ void vcf_parsed::device_free() {
 }
 
 /**
-    * @brief Finds newline indices in the VCF file.
+    * @brief Reads the variant body and indexes its records.
     *
-    * Reads the VCF file in parallel using OpenMP to determine the starting index of each line.
-    * The indices are stored in an array and copied to device memory for use by CUDA kernels.
+    * Reads the body into filestring with parallel pread() calls, then builds new_lines_index on the host
+    * (one entry per record end, blank lines skipped) and copies both to the device for the kernel.
     *
     * @param w_filename The path to the VCF file.
     * @param num_threads Number of threads to use for parallel processing.
@@ -1150,9 +1115,10 @@ void vcf_parsed::prebuild_chrom_filter_maps(){
     const int n_chunks = std::max(1, omp_get_max_threads());
     const long lines_per_chunk = (num_lines + n_chunks - 1)/n_chunks;
     std::vector<std::vector<std::string_view>> chunk_chroms(n_chunks), chunk_filters(n_chunks);
+    std::exception_ptr chunk_error; // an exception may not leave an OpenMP region: kept, rethrown after it
 
     #pragma omp parallel for schedule(static)
-    for(int c = 0; c < n_chunks; c++){
+    for(int c = 0; c < n_chunks; c++) try {
         std::unordered_set<std::string_view> seen_chrom, seen_filter;
         const long first = c*lines_per_chunk, last = std::min(num_lines, first + lines_per_chunk);
         for(long i = first; i < last; i++){
@@ -1171,7 +1137,11 @@ void vcf_parsed::prebuild_chrom_filter_maps(){
             const std::string_view filter(p, q - p);
             if(seen_filter.insert(filter).second) chunk_filters[c].push_back(filter);
         }
+    } catch(...) {
+        #pragma omp critical(prebuild_chrom_filter_error)
+        if(!chunk_error) chunk_error = std::current_exception();
     }
+    if(chunk_error) std::rethrow_exception(chunk_error);
     for(int c = 0; c < n_chunks; c++){
         for(auto name : chunk_chroms[c]) var_columns.chrom_map.emplace(std::string(name), static_cast<unsigned char>(var_columns.chrom_map.size()));
         for(auto name : chunk_filters[c]) var_columns.filter_map.emplace(std::string(name), static_cast<char>(var_columns.filter_map.size()));
@@ -1498,7 +1468,7 @@ static inline int count_tokens(const char* b, const char* e, char sep){
     return n;
 }
 
-// Same result as safe_stoi (std::stoi): leading spaces and an optional sign, 0 if nothing parses or out of range
+// Same result as std::stoi, without throwing: leading spaces and an optional sign, 0 if nothing parses or out of range
 static inline int parse_int_token(const char* b, const char* e){
     while(b < e && isspace(static_cast<unsigned char>(*b))) ++b;
     if(e - b > 1 && *b == '+' && isdigit(static_cast<unsigned char>(b[1]))) ++b;
@@ -1506,7 +1476,7 @@ static inline int parse_int_token(const char* b, const char* e){
     return std::from_chars(b, e, v).ec == std::errc() ? v : 0;
 }
 
-// Same result as safe_stof (std::stof is strtof: 0 if nothing parses or on ERANGE)
+// Same result as std::stof, without throwing (stof is strtof: 0 if nothing parses or on ERANGE)
 static inline float parse_float_token(const char* b, const char* e){
     char buf[64];
     std::string big;
