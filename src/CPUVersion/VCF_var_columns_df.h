@@ -190,6 +190,9 @@ public:
      */
     void get_vcf_line_in_var_columns(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt)
     { 
+        // Reads stop at the end of the record: past it every char is '\n', so a short record ends its
+        // fields there instead of reading into the next record (or past the body on the last one)
+        auto at = [&](long k) -> char { return start + k < end ? line[start + k] : '\n'; };
         bool find1 = false;
         long iter=0;
         int local_alt = 1;
@@ -197,20 +200,20 @@ public:
         vector<string> tmp_split;
         vector<string> tmp_format_split;
         
-        if(line[start+iter]=='\n'){
+        if(at(iter)=='\n'){
             iter++;
         } 
 
         //Chromosome
         while(!find1){
-            if(line[start+iter]=='\t'||line[start+iter]==' '){
+            if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
                 // chrom_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
                 auto chrom_it = chrom_map.find(tmp);
                 chrom[i] = (chrom_it != chrom_map.end()) ? chrom_it->second : static_cast<char>(0);
             }else{
-                tmp += line[start+iter];
+                tmp += at(iter);
                 iter++;
             }
         }
@@ -219,7 +222,7 @@ public:
         tmp="";
         find1=false;
         while(!find1){
-            if(line[start+iter]=='\t'||line[start+iter]==' '){
+            if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
                 try{
@@ -229,7 +232,7 @@ public:
                 }
                 
             }else{
-                tmp += line[start+iter];
+                tmp += at(iter);
                 iter++;
             }
         }
@@ -238,12 +241,12 @@ public:
         tmp="";
         find1=false;
         while(!find1){
-            if(line[start+iter]=='\t'||line[start+iter]==' '){
+            if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
                 id[i] = tmp;
             }else{
-                tmp += line[start+iter];
+                tmp += at(iter);
                 iter++;
             }
         }
@@ -252,12 +255,12 @@ public:
         tmp="";
         find1=false;
         while(!find1){
-            if(line[start+iter]=='\t'||line[start+iter]==' '){
+            if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
                 ref[i] = tmp;
             }else{
-                tmp += line[start+iter];
+                tmp += at(iter);
                 iter++;
             }
         }
@@ -266,7 +269,7 @@ public:
         tmp="";
         find1=false;
         while(!find1){
-            if(line[start+iter]=='\t'||line[start+iter]==' '){
+            if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
                 boost::split(tmp_split, tmp, boost::is_any_of(","));
@@ -278,7 +281,7 @@ public:
                     (*tmp_alt).var_id[(*tmp_num_alt)+y] = var_number[i];
                 }
             }else{
-                tmp += line[start+iter];
+                tmp += at(iter);
                 iter++;
             }
         }
@@ -287,7 +290,7 @@ public:
         tmp="";
         find1=false;
         while(!find1){
-            if(line[start+iter]=='\t'||line[start+iter]==' '){
+            if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
                 if(strcmp(&tmp[0], ".")==0){
@@ -300,7 +303,7 @@ public:
                     }
                 }
             }else{
-                tmp += line[start+iter];
+                tmp += at(iter);
                 iter++;
             }
         }
@@ -309,14 +312,14 @@ public:
         tmp="";
         find1=false;
         while(!find1){
-            if(line[start+iter]=='\t'||line[start+iter]==' '){
+            if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
                 // filter_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
                 auto filter_it = filter_map.find(tmp);
                 filter[i] = (filter_it != filter_map.end()) ? filter_it->second : static_cast<char>(0);
             }else{
-                tmp += line[start+iter];
+                tmp += at(iter);
                 iter++;
             }
         }
@@ -325,7 +328,7 @@ public:
         tmp="";
         find1=false;
         while(!find1){
-            if(line[start+iter]=='\t'||line[start+iter]==' '||line[start+iter]=='\n'){
+            if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
                 vector<string> tmp_el;
@@ -447,7 +450,7 @@ public:
                     }
                 }
             }else{
-                tmp += line[start+iter];
+                tmp += at(iter);
                 iter++;
             }
         }
@@ -479,6 +482,9 @@ public:
      */
     void get_vcf_line_in_var_columns_format(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt, sample_columns_df* sample, header_element* FORMAT, int *tmp_num_alt_format, alt_format_df* tmp_alt_format)
     {
+        // Reads stop at the end of the record: past it every char is '\n', so a short record ends its
+        // fields there instead of reading into the next record (or past the body on the last one)
+        auto at = [&](long k) -> char { return start + k < end ? line[start + k] : '\n'; };
         bool find1 = false;
         long iter=0;
         int local_alt = 1;
@@ -489,14 +495,14 @@ public:
 
         //Chromosome
         while(!find1){
-            if(line[start+iter]=='\t'||line[start+iter]==' '){
+            if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
                 // chrom_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
                 auto chrom_it = chrom_map.find(tmp);
                 chrom[i] = (chrom_it != chrom_map.end()) ? chrom_it->second : static_cast<char>(0);
             }else{
-                tmp += line[start+iter];
+                tmp += at(iter);
                 iter++;
             }
         }
@@ -505,12 +511,12 @@ public:
         tmp="";
         find1=false;
         while(!find1){
-            if(line[start+iter]=='\t'||line[start+iter]==' '){
+            if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
                 pos[i] = stoul(tmp);
             }else{
-                tmp += line[start+iter];
+                tmp += at(iter);
                 iter++;
             }
         }
@@ -519,12 +525,12 @@ public:
         tmp="";
         find1=false;
         while(!find1){
-            if(line[start+iter]=='\t'||line[start+iter]==' '){
+            if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
                 id[i] = tmp;
             }else{
-                tmp += line[start+iter];
+                tmp += at(iter);
                 iter++;
             }
         }
@@ -533,12 +539,12 @@ public:
         tmp="";
         find1=false;
         while(!find1){
-            if(line[start+iter]=='\t'||line[start+iter]==' '){
+            if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
                 ref[i] = tmp;
             }else{
-                tmp += line[start+iter];
+                tmp += at(iter);
                 iter++;
             }
         }
@@ -547,7 +553,7 @@ public:
         tmp="";
         find1=false;
         while(!find1){
-            if(line[start+iter]=='\t'||line[start+iter]==' '){
+            if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
                 boost::split(tmp_split, tmp, boost::is_any_of(","));
@@ -559,7 +565,7 @@ public:
                     (*tmp_alt).var_id[(*tmp_num_alt)+y] = var_number[i];
                 }
             }else{
-                tmp += line[start+iter];
+                tmp += at(iter);
                 iter++;
             }
         }
@@ -568,7 +574,7 @@ public:
         tmp="";
         find1=false;
         while(!find1){
-            if(line[start+iter]=='\t'||line[start+iter]==' '){
+            if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
                 if(strcmp(&tmp[0], ".")==0){
@@ -581,7 +587,7 @@ public:
                     }
                 }
             }else{
-                tmp += line[start+iter];
+                tmp += at(iter);
                 iter++;
             }
         }
@@ -590,14 +596,14 @@ public:
         tmp="";
         find1=false;
         while(!find1){
-            if(line[start+iter]=='\t'||line[start+iter]==' '){
+            if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
                 // filter_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
                 auto filter_it = filter_map.find(tmp);
                 filter[i] = (filter_it != filter_map.end()) ? filter_it->second : static_cast<char>(0);
             }else{
-                tmp += line[start+iter];
+                tmp += at(iter);
                 iter++;
             }
         }
@@ -606,7 +612,7 @@ public:
         tmp="";
         find1=false;
         while(!find1){
-            if(line[start+iter]=='\t'||line[start+iter]==' '||line[start+iter]=='\n'){
+            if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
                 vector<string> tmp_el;
@@ -722,7 +728,7 @@ public:
                     }
                 }
             }else{
-                tmp += line[start+iter];
+                tmp += at(iter);
                 iter++;
             }
         }
@@ -734,28 +740,29 @@ public:
 
         //Format's template
         while(!find1){
-            if(line[start+iter]=='\t'||line[start+iter]==' '){
+            if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                 find1 = true;
                 iter++;
                 boost::split(tmp_format_split, tmp, boost::is_any_of(":"));
             }else{
-                tmp += line[start+iter];
+                tmp += at(iter);
                 iter++;
             }
         }
         
         //Format's data
         int samp;
+        // Sample columns missing at the end of the record read as empty samples (at() gives '\n' there)
         for(samp = 0; samp < (*sample).numSample; samp++){
             tmp="";
             find1=false;
             while(!find1){
-                if(line[start+iter]=='\t'||line[start+iter]==' '||line[start+iter]=='\n'){
+                if(at(iter)=='\t'||at(iter)==' '||at(iter)=='\n'){
                     find1 = true;
                     iter++;
                     boost::split(tmp_split, tmp, boost::is_any_of(":"));
                     vector<string> tmp_sub;
-                    for(int j = 0; j < tmp_split.size(); j++){
+                    for(int j = 0; j < tmp_split.size() && j < tmp_format_split.size(); j++){ // extra values have no FORMAT key
                         bool find_type = false;
                         bool find_elem = false;
                         while(!find_type){
@@ -941,7 +948,7 @@ public:
                         }
                     }
                 }else{
-                    tmp += line[start+iter];
+                    tmp += at(iter);
                     iter++;
                 }
             }
