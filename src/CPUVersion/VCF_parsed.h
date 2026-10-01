@@ -275,7 +275,7 @@ public:
         }
         header_size += line.length() + 1;
         //cout << "\nheader char: " << to_string(header_size) << endl;
-        variants_size = filesize - header_size; // New size without the header
+        variants_size = std::max(0L, filesize - header_size); // New size without the header (0 when the header has no final '\n')
         //cout<<"filesize: "<<filesize<<" variants_size: "<<variants_size<<endl;
     }
     
@@ -343,88 +343,52 @@ public:
 
         header_size += line.length() + 1;
 
-        variants_size = filesize - header_size; // New size without the header
+        variants_size = std::max(0L, filesize - header_size); // New size without the header (0 when the header has no final '\n')
     }   
     
     void allocate_filestring(){
-        filestring = (char*)malloc(variants_size+1);
+        filestring = (char*)malloc(variants_size+2); // + the '\n' terminator and a NUL
+        if(!filestring) throw std::runtime_error("cannot allocate " + std::to_string(variants_size + 2) + " bytes for the VCF body");
     }
   
-    // This function identifies the indices of new line characters in the file and populates the `new_lines_index` array.
-    // It also fills the 'filestring' variable (if applicable).
+    // Reads the body into filestring and indexes its records: new_lines_index[k] is the start of record k
+    // and new_lines_index[num_lines-1] the end of the last one (num_lines = records + 1).
+    // Records are counted on the normalised body (trailing newlines dropped, one '\n' terminator), with
+    // the same rule the index uses, so the count and the index always agree.
     void find_new_lines_index(string w_filename, int num_threads){
-        // Allocate memory for the `new_lines_index` array. The size is exaggerated (assuming every character is a new line).
-        // The first element is set to 0, indicating the start of the first line.
-        num_lines++; // Increment the line counter to account for the first line.
-        long tmp_num_lines[num_threads]; // Temporary array to store the number of lines found by each thread.
-        
-        auto before = chrono::system_clock::now();
-        long batch_infile = (variants_size - 1 + num_threads)/num_threads; // Number of characters each thread will process        
-#pragma omp parallel
-        {
-            int thr_ID = omp_get_thread_num();
-            ifstream infile(w_filename); // Open the same file with an ifstream in each thread
-            infile.seekg((header_size + thr_ID*batch_infile), ios::cur); // Move each thread's file pointer to its starting position
-            long start, end;
-            start = thr_ID*batch_infile; // Starting position of the current thread’s batch
-            end = start + batch_infile; // Ending position of the batch for the current thread
-            
-            tmp_num_lines[thr_ID] = 0;
-            if(thr_ID==0){
-                tmp_num_lines[0] = 1;
-            } 
-
-            for(long i=start; i<end && i<variants_size; i++){
-                filestring[i] = infile.get();
-                if(filestring[i]=='\n'){
-                    tmp_num_lines[thr_ID] = tmp_num_lines[thr_ID] + 1;
-                }
-            }
+        const long batch_infile = (variants_size - 1 + num_threads)/num_threads; // Number of characters each thread will process
+        // One chunk per index (not per OpenMP thread): every chunk is read even with fewer threads
+#pragma omp parallel for schedule(static)
+        for(int thr_ID = 0; thr_ID < num_threads; thr_ID++){
+            ifstream infile(w_filename);
+            const long start = std::min(thr_ID*batch_infile, variants_size);
+            const long end = std::min(start + batch_infile, variants_size);
+            infile.seekg(header_size + start);
+            infile.read(filestring + start, end - start);
         }
-        while(filestring[variants_size-1]=='\n'){
-            variants_size--;
-        }
+        while(variants_size > 0 && filestring[variants_size-1]=='\n') variants_size--;
+        if(variants_size > 0) filestring[variants_size++] = '\n'; // closes the last record, final newline or not
+        filestring[variants_size] = '\0'; // ends_record reads one char past each '\n'
 
-        if (variants_size == 0 || filestring[variants_size-1] != '\n')
-            {
-                filestring[variants_size] = '\n';
-                ++variants_size;
-            }
+        // A '\n' ends a record unless a blank line follows it; the terminator always does
+        auto ends_record = [&](long i){ return filestring[i]=='\n' && filestring[i+1]!='\n'; };
+        const long batch = (variants_size + num_threads - 1)/num_threads;
+        auto chunk_begin = [&](int c){ return std::min(c*batch, variants_size); };
+        std::vector<long> chunk_count(num_threads + 1, 0);
+#pragma omp parallel for schedule(static)
+        for(int c = 0; c < num_threads; c++)
+            for(long i = chunk_begin(c); i < chunk_begin(c + 1); i++) chunk_count[c + 1] += ends_record(i);
+        for(int c = 0; c < num_threads; c++) chunk_count[c + 1] += chunk_count[c]; // prefix offsets
 
-        auto after = chrono::system_clock::now();
-        auto filestring_time = std::chrono::duration<double>(after - before).count();
-        
-        before = chrono::system_clock::now();
-        num_lines = tmp_num_lines[0];
-        for(int i=1; i<num_threads; i++){
-            num_lines= num_lines + tmp_num_lines[i];
-        }
+        num_lines = chunk_count[num_threads] + 1;
         new_lines_index = (unsigned long long*)malloc(sizeof(unsigned long long)*(num_lines+1));
+        if(!new_lines_index) throw std::runtime_error("cannot allocate the line index (" + std::to_string(num_lines + 1) + " entries)");
         new_lines_index[0] = 0;
-        #pragma omp parallel
-        {
-            int thr_ID = omp_get_thread_num();
-            long start, end;
-            start = thr_ID*batch_infile; // Starting position of the current thread’s batch
-            end = std::min(start + batch_infile, variants_size);  // Ending position of the batch for the current thread
-            long startNLI = 1;
-            if(thr_ID!=0){
-                for(int i=0; i<thr_ID; i++){
-                    startNLI = startNLI + tmp_num_lines[i];
-                }
-                startNLI--;
-            }
-            long lineCount = 0;
-            for(long i=start; i<end && i<variants_size; i++){
-                if(filestring[i]=='\n'&& filestring[i+1]!='\n'){
-                    new_lines_index[startNLI+lineCount] = i+1;
-                    lineCount++;
-                }
-            }
+#pragma omp parallel for schedule(static)
+        for(int c = 0; c < num_threads; c++){
+            long k = 1 + chunk_count[c];
+            for(long i = chunk_begin(c); i < chunk_begin(c + 1); i++) if(ends_record(i)) new_lines_index[k++] = i + 1;
         }
-        
-        after = chrono::system_clock::now();
-        auto f_new_lines = std::chrono::duration<double>(after - before).count(); 
     }
     
     void create_sample_vectors(int num_threads){
