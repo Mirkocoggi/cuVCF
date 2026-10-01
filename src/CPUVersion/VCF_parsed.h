@@ -24,7 +24,6 @@
 #include <omp.h>
 #include <fstream>
 #include <filesystem>
-#include <sys/wait.h>
 #include <unistd.h>
 #include "VCFparser_mt_col_struct.h"
 #include "VCF_var.h"

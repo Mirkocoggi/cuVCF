@@ -28,7 +28,6 @@
 #include <chrono>
 #include <fstream>
 #include <filesystem>
-#include <sys/wait.h>
 #include <unistd.h>
 #include <map>
 #include <omp.h> 
