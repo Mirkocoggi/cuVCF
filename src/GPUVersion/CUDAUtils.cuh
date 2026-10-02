@@ -282,7 +282,7 @@ __device__ half safeStof(const char* tmp) {
     if (is_valid) {
         value = cuda_atof(tmp); //like stof but for device
     } else {
-        value = 0.0f; // Valore predefinito in caso di errore
+        value = 0.0f; // default value on error
     }
 
     return __float2half(value);

@@ -1281,11 +1281,11 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
         std::ref(tmp_alt), std::ref(alt_columns.alt_string), num_threads, INFO.strings_alt, &alt_columns_df::alt_string, &info_string::i_string);
 
     std::thread t_sum([&]() {
-        int somma = 0;
+        int total = 0;
         for (int i = 0; i < num_threads; i++) {
-            somma += tmp_num_alt[i];
+            total += tmp_num_alt[i];
         }
-        totAlt = somma;
+        totAlt = total;
     });
 
     if (samplesON) {
@@ -1311,11 +1311,11 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
                 &samp_Float::i_float);
 
         std::thread t_sum_samp([&]() {
-            int somma = 0;
+            int total = 0;
             for (int i = 0; i < num_threads; i++) {
-                somma += tmp_num_alt_format[i];
+                total += tmp_num_alt_format[i];
             }
-            totSampAlt = somma;
+            totSampAlt = total;
         });
 
         t7.join();
