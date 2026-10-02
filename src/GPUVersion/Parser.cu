@@ -132,7 +132,6 @@ static inline bool format_name_matches(const std::string& name, const std::strin
     */
 void vcf_parsed::run(char* vcf_filename, int num_threadss){
     string filename = vcf_filename; 
-    int cudaCores;                 // Total number of CUDA cores
 
     // Query device properties
     int deviceCount = 0;
@@ -145,42 +144,22 @@ void vcf_parsed::run(char* vcf_filename, int num_threadss){
     CUDA_CHECK_ERROR(cudaSetDevice(deviceID));
 
     cudaDeviceProp prop;
-    cudaError_t err = cudaGetDeviceProperties(&prop, 0); // Query the first (and only) device
+    CUDA_CHECK_ERROR(cudaGetDeviceProperties(&prop, deviceID)); // cudaCores sizes the launch: no default to fall back on
 
-    if (err == cudaSuccess) {
-        // Determine number of CUDA cores per SM based on compute capability
-        int coresPerSM = 0;
-        if (prop.major == 1) {
-            // Tesla architecture
-            coresPerSM = 8;
-        } else if (prop.major == 2) {
-            // Fermi architecture
-            coresPerSM = (prop.minor == 0 || prop.minor == 1) ? 32 : 48;
-        } else if (prop.major == 3) {
-            // Kepler architecture
-            coresPerSM = 192;
-        } else if (prop.major == 5) {
-            // Maxwell architecture
-            coresPerSM = 128;
-        } else if (prop.major == 6) {
-            // Pascal architecture
-            coresPerSM = (prop.minor == 1 || prop.minor == 2) ? 128 : 64;
-        } else if (prop.major == 7) {
-            // Volta or Turing architecture
-            coresPerSM = (prop.minor == 0) ? 64 : 64;  // Adjust if needed
-        } else if (prop.major == 8) {
-            // Ampere architecture
-            coresPerSM = (prop.minor == 0) ? 64 : (prop.minor == 6 ? 128 : 64);
-        } else {
-            // Fallback assumption
-            coresPerSM = 128;
-        }
-
-        cudaCores = coresPerSM * prop.multiProcessorCount;
-
-    } else {
-        std::cerr << "Failed to query device properties: " << cudaGetErrorString(err) << std::endl;
+    // FP32 cores per SM by compute capability
+    int coresPerSM;
+    switch (prop.major) {
+        case 1: coresPerSM = 8; break;                                              // Tesla
+        case 2: coresPerSM = (prop.minor == 0 || prop.minor == 1) ? 32 : 48; break; // Fermi
+        case 3: coresPerSM = 192; break;                                            // Kepler
+        case 5: coresPerSM = 128; break;                                            // Maxwell
+        case 6: coresPerSM = (prop.minor == 1 || prop.minor == 2) ? 128 : 64; break; // Pascal
+        case 7: coresPerSM = 64; break;                                             // Volta, Turing
+        case 8: coresPerSM = (prop.minor == 0) ? 64 : 128; break;                   // Ampere A100 (8.0) vs 8.6/8.7, Ada (8.9)
+        case 9: coresPerSM = 128; break;                                            // Hopper
+        default: coresPerSM = 128; break;                                           // newer: assume 128
     }
+    const int cudaCores = coresPerSM * prop.multiProcessorCount;
 
     omp_set_num_threads(num_threadss);
 
