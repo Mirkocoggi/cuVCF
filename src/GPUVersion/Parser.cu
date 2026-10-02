@@ -132,6 +132,7 @@ static inline bool format_name_matches(const std::string& name, const std::strin
     */
 void vcf_parsed::run(char* vcf_filename, int num_threadss){
     string filename = vcf_filename; 
+    free_host_buffers(); // a previous run() that threw may have left them allocated
 
     // Query device properties
     int deviceCount = 0;
@@ -186,11 +187,12 @@ void vcf_parsed::run(char* vcf_filename, int num_threadss){
     create_info_vectors(num_threadss);
     reserve_var_columns();
     create_sample_vectors(num_threadss);
-    if(num_lines == 0) return; // header-only file: the columns exist and are empty
+    if(num_lines == 0){ free_host_buffers(); return; } // header-only file: the columns exist and are empty
     // Allocate and initialize device memory
     device_allocation();
     populate_var_columns(num_threadss, cudaCores);
     device_free();
+    free_host_buffers();
 
 }
     
@@ -365,6 +367,13 @@ void vcf_parsed::device_allocation(){
     *
     * Releases device memory allocated during the parsing process.
     */
+void vcf_parsed::free_host_buffers() {
+    free(filestring);
+    filestring = nullptr;
+    free(new_lines_index);
+    new_lines_index = nullptr;
+}
+
 void vcf_parsed::device_free() {
     CUDA_CHECK_ERROR(cudaFree(d_VC_var_number));
     CUDA_CHECK_ERROR(cudaFree(d_VC_pos));
