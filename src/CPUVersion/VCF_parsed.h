@@ -26,7 +26,6 @@
 #include <filesystem>
 #include <unistd.h>
 #include "VCFparser_mt_col_struct.h"
-#include "VCF_var.h"
 #include "VCF_var_columns_df.h"
 #include <thread>
 #include <functional>
@@ -195,9 +194,6 @@ public:
 
     void run(char* vcf_filename, int num_threadss){
         string filename = vcf_filename; 
-        int cont=0;
-        string line;
-        vcf_parsed vcf;
         // Setting number of threads
         omp_set_num_threads(num_threadss);
         // Open input file, gzip -df compressed_file1.gz
@@ -212,43 +208,18 @@ public:
         get_filename(filename);
         
         // Getting filesize (number of char in the file)
-        auto before = chrono::system_clock::now();
         get_file_size(filename);
-        auto after = chrono::system_clock::now();
-        auto get_file_size = std::chrono::duration<double>(after - before).count();
         // Getting the header (Saving the header into a string and storing the header size )
-        before = chrono::system_clock::now();
         get_and_parse_header(&inFile); // separates the header from the rest of the file
-        //vcf.print_header();
-        after = chrono::system_clock::now();
-        auto get_header = std::chrono::duration<double>(after - before).count();
         inFile.close();
         // Allocating the filestring (the variations as a big char*, the dimension is: filesize - header_size)
         allocate_filestring();
         // Populate filestring and getting the number of lines (num_lines), saving the starting char index of each lines
-        before = chrono::system_clock::now();
         find_new_lines_index(filename, num_threadss);
-        after = chrono::system_clock::now();
-        auto find_new_lines = std::chrono::duration<double>(after - before).count();
-        auto populate_var_struct = std::chrono::duration<double>(after - before).count();
-        before = chrono::system_clock::now();
         create_info_vectors(num_threadss);
         reserve_var_columns();
         create_sample_vectors(num_threadss);
-        after = chrono::system_clock::now();
-        auto reserve_var_columns = std::chrono::duration<double>(after - before).count();
-        before = chrono::system_clock::now();
         populate_var_columns(num_threadss);
-        after = chrono::system_clock::now();
-        auto populate_var_columns = std::chrono::duration<double>(after - before).count();
-        
-        // Uncomment the following lines for debugging purposes
-        //cout << "Get file size: " << get_file_size << " s" << endl;
-        //cout << "get_header: " << get_header << " s" << endl;
-        //cout << "find_new_lines: " << find_new_lines << " s" << endl;
-        //cout << "populate_var_struct: " << populate_var_struct << " s" << endl;
-        //cout << "reserve: " << reserve_var_columns << " s" << endl;
-        //cout << "populate_var_columns: " << populate_var_columns << " s" << endl;
         free(filestring);
         free(new_lines_index);
     }
@@ -262,18 +233,6 @@ public:
         filesize = filesystem::file_size(filename);
     }
     
-    void get_header(ifstream *file){
-        string line;
-        //removing the header and storing it in vcf.header
-        while (getline(*file, line) && line[0]=='#' && line[1]=='#'){
-            header.append(line + '\n');
-            header_size += line.length() + 1;
-        }
-        header_size += line.length() + 1;
-        //cout << "\nheader char: " << to_string(header_size) << endl;
-        variants_size = std::max(0L, filesize - header_size); // New size without the header (0 when the header has no final '\n')
-        //cout<<"filesize: "<<filesize<<" variants_size: "<<variants_size<<endl;
-    }
     
     void print_header(){
         cout << "VCF header:\n" << header << endl;
@@ -633,53 +592,7 @@ public:
         alt_columns.alt_string.resize(INFO.strings_alt);
     }
     
-    void print_info_map(){
-        for(const auto& element : info_map){
-            cout<<element.first<<": "<<element.second<<endl;
-        }
-    }
     
-    void print_info(){
-        cout<<"Flags size: "<<var_columns.in_flag.size()<<endl;
-        for(int i=0; i<var_columns.in_flag.size(); i++){
-            cout<<var_columns.in_flag[i].name<<": ";
-            for(int j=0; j<10; j++){
-                cout<<(int)var_columns.in_flag[i].i_flag[j]<<" ";
-            }
-            cout<<" size: "<<var_columns.in_flag[i].i_flag.size();
-            cout<<endl;
-        }
-        cout<<endl;
-        cout<<"Floats size: "<<var_columns.in_float.size()<<endl;
-        for(int i=0; i<var_columns.in_float.size(); i++){
-            cout<<var_columns.in_float[i].name<<": ";
-            for(int j=0; j<10; j++){
-                cout<<var_columns.in_float[i].i_float[j]<<" ";
-            }
-            cout<<" size: "<<var_columns.in_float[i].i_float.size();
-            cout<<endl;
-        }
-        cout<<endl;
-        cout<<"Strings size: "<<var_columns.in_string.size()<<endl;
-        for(int i=0; i<var_columns.in_string.size(); i++){
-            cout<<var_columns.in_string[i].name<<": ";
-            for(int j=0; j<10; j++){
-                cout<<var_columns.in_string[i].i_string[j]<<" ";
-            }
-            cout<<" size: "<<var_columns.in_string[i].i_string.size();
-            cout<<endl;
-        }
-        cout<<endl;
-        cout<<"Ints size: "<<var_columns.in_int.size()<<endl;
-        for(int i=0; i<var_columns.in_int.size(); i++){
-            cout<<var_columns.in_int[i].name<<": ";
-            for(int j=0; j<10; j++){
-                cout<<var_columns.in_int[i].i_int[j]<<" ";
-            }
-            cout<<" size: "<<var_columns.in_int[i].i_int.size();
-            cout<<endl;
-        }
-    }
     
     void reserve_var_columns(){
         var_columns.var_number.resize(num_lines-1);
@@ -852,11 +765,11 @@ public:
             std::ref(tmp_alt), std::ref(alt_columns.alt_string), num_threads, INFO.strings_alt, &alt_columns_df::alt_string, &info_string::i_string);
 
         std::thread t_sum([&]() {
-            int somma = 0;
+            int total = 0;
             for (int i = 0; i < num_threads; i++) {
-                somma += tmp_num_alt[i];
+                total += tmp_num_alt[i];
             }
-            totAlt = somma;
+            totAlt = total;
         });
 
         if (samplesON) {
@@ -882,11 +795,11 @@ public:
                     &samp_Float::i_float);
 
             std::thread t_sum_samp([&]() {
-                int somma = 0;
+                int total = 0;
                 for (int i = 0; i < num_threads; i++) {
-                    somma += tmp_num_alt_format[i];
+                    total += tmp_num_alt_format[i];
                 } 
-                totSampAlt = somma;
+                totSampAlt = total;
             });
 
             t7.join();

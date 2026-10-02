@@ -256,7 +256,7 @@ static py::dict get_alt_format_data(const alt_format_df& df){
  * switch between CPU and GPU back‑ends by importing the appropriate module.
  */
 PYBIND11_MODULE(CPUParser, m) {
-    m.doc() = "CPU-only bindings – API compatibile con GPUParser";
+    m.doc() = "CPU-only bindings – same API as GPUParser";
 
     /*  basic types  */
     py::class_<half_wrapper>(m, "half", py::module_local())

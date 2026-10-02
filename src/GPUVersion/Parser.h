@@ -17,6 +17,7 @@
 #include <string>
 #include <map>
 #include <string_view>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 #include "DataStructures.h"
@@ -80,7 +81,7 @@ public:
     /// Parsed header information for FORMAT fields.
     header_element FORMAT;
     /// Host-side storage for variant data as a large character array.
-    char *filestring;
+    char *filestring = nullptr;
     /// Device-side storage for variant data.
     char *d_filestring;
     /// Size of the VCF header (in bytes).
@@ -92,7 +93,7 @@ public:
     /// Number of variant lines (excluding the header).
     long num_lines = 0;
     /// Host-side array storing the starting index of each variant line.
-    unsigned long long *new_lines_index; // 64-bit: byte offsets exceed 4 GiB on large files
+    unsigned long long *new_lines_index = nullptr; // 64-bit: byte offsets exceed 4 GiB on large files
     /// Device-side array storing the starting index of each variant line.
     unsigned long long *d_new_lines_index;
     /// Flag indicating whether sample data is present.
@@ -118,23 +119,23 @@ public:
     /// Device memory for storing quality scores (in half precision).
     __half *d_VC_qual;
     /// Device-side structure for float INFO field values.
-    info_float_d *d_VC_in_float = (info_float_d*)malloc(sizeof(info_float_d));
+    std::unique_ptr<info_float_d> d_VC_in_float = std::make_unique<info_float_d>(); // zeroed, freed with the object
     /// Device-side structure for flag INFO field values.
-    info_flag_d *d_VC_in_flag = (info_flag_d*)malloc(sizeof(info_flag_d));
+    std::unique_ptr<info_flag_d> d_VC_in_flag = std::make_unique<info_flag_d>(); // zeroed, freed with the object
     /// Device-side structure for integer INFO field values.
-    info_int_d *d_VC_in_int = (info_int_d*)malloc(sizeof(info_int_d));
+    std::unique_ptr<info_int_d> d_VC_in_int = std::make_unique<info_int_d>(); // zeroed, freed with the object
     /// Device memory for storing sample variant IDs.
     unsigned int *d_SC_var_id;
     /// Device memory for storing sample IDs.
     unsigned short *d_SC_samp_id;
     /// Device-side structure for sample float values.
-    samp_Float_d *d_SC_samp_float = (samp_Float_d*)malloc(sizeof(samp_Float_d));
+    std::unique_ptr<samp_Float_d> d_SC_samp_float = std::make_unique<samp_Float_d>(); // zeroed, freed with the object
     /// Device-side structure for sample flag values.
-    samp_Flag_d *d_SC_samp_flag = (samp_Flag_d*)malloc(sizeof(samp_Flag_d));
+    std::unique_ptr<samp_Flag_d> d_SC_samp_flag = std::make_unique<samp_Flag_d>(); // zeroed, freed with the object
     /// Device-side structure for sample integer values.
-    samp_Int_d *d_SC_samp_int = (samp_Int_d*)malloc(sizeof(samp_Int_d));
+    std::unique_ptr<samp_Int_d> d_SC_samp_int = std::make_unique<samp_Int_d>(); // zeroed, freed with the object
     /// Device-side structure for sample genotype values.
-    samp_GT_d *d_SC_sample_GT = (samp_GT_d*)malloc(sizeof(samp_GT_d));
+    std::unique_ptr<samp_GT_d> d_SC_sample_GT = std::make_unique<samp_GT_d>(); // zeroed, freed with the object
 
     /**
     * @brief Runs the VCF parsing process.
@@ -161,7 +162,7 @@ public:
     *
     * @param map Host map with genotype keys and corresponding char values.
     */
-    void copyMapToConstantMemory(const std::map<std::string, char>& map);
+    void copyMapToConstantMemory(const std::map<std::string, char, std::less<>>& map);
 
     /**
     * @brief Initializes the INFO field lookup map (Map1) in device constant memory.
@@ -188,6 +189,15 @@ public:
     */
     void device_free();
 
+    /// Frees the host copy of the body and its line index (not needed once the columns are filled)
+    void free_host_buffers();
+
+    vcf_parsed() = default;
+    // owns filestring and new_lines_index: a copy would free them twice
+    vcf_parsed(const vcf_parsed&) = delete;
+    vcf_parsed& operator=(const vcf_parsed&) = delete;
+    ~vcf_parsed(){ free_host_buffers(); } // also on the exception paths of run()
+
     /**
     * @brief Reads the variant body and indexes its records.
     *
@@ -199,15 +209,6 @@ public:
     */
     void find_new_lines_index(std::string w_filename, int num_threads);
     
-    /**
-    * @brief Reads the VCF header from the input file.
-    *
-    * Extracts header lines (starting with "##") from the VCF file,
-    * storing them in the header string and updating the header size.
-    *
-    * @param file Pointer to the input file stream.
-    */
-    void get_header(std::ifstream *file);
     
     /**
     * @brief Prints the VCF header to standard output.
@@ -251,19 +252,7 @@ public:
     */
     void create_info_vectors(int num_threads);
     
-    /**
-    * @brief Prints the INFO field mapping.
-    *
-    * Outputs the mapping from INFO field names to their corresponding type codes.
-    */
-    void print_info_map();
     
-    /**
-    * @brief Prints a summary of INFO field data.
-    *
-    * Displays a brief summary of the sizes and first few entries for each INFO field type.
-    */
-    void print_info();
     
     /**
     * @brief Reserves space in the variant columns structure.

@@ -132,7 +132,7 @@ static inline bool format_name_matches(const std::string& name, const std::strin
     */
 void vcf_parsed::run(char* vcf_filename, int num_threadss){
     string filename = vcf_filename; 
-    int cudaCores;                 // Total number of CUDA cores
+    free_host_buffers(); // a previous run() that threw may have left them allocated
 
     // Query device properties
     int deviceCount = 0;
@@ -145,42 +145,22 @@ void vcf_parsed::run(char* vcf_filename, int num_threadss){
     CUDA_CHECK_ERROR(cudaSetDevice(deviceID));
 
     cudaDeviceProp prop;
-    cudaError_t err = cudaGetDeviceProperties(&prop, 0); // Query the first (and only) device
+    CUDA_CHECK_ERROR(cudaGetDeviceProperties(&prop, deviceID)); // cudaCores sizes the launch: no default to fall back on
 
-    if (err == cudaSuccess) {
-        // Determine number of CUDA cores per SM based on compute capability
-        int coresPerSM = 0;
-        if (prop.major == 1) {
-            // Tesla architecture
-            coresPerSM = 8;
-        } else if (prop.major == 2) {
-            // Fermi architecture
-            coresPerSM = (prop.minor == 0 || prop.minor == 1) ? 32 : 48;
-        } else if (prop.major == 3) {
-            // Kepler architecture
-            coresPerSM = 192;
-        } else if (prop.major == 5) {
-            // Maxwell architecture
-            coresPerSM = 128;
-        } else if (prop.major == 6) {
-            // Pascal architecture
-            coresPerSM = (prop.minor == 1 || prop.minor == 2) ? 128 : 64;
-        } else if (prop.major == 7) {
-            // Volta or Turing architecture
-            coresPerSM = (prop.minor == 0) ? 64 : 64;  // Adjust if needed
-        } else if (prop.major == 8) {
-            // Ampere architecture
-            coresPerSM = (prop.minor == 0) ? 64 : (prop.minor == 6 ? 128 : 64);
-        } else {
-            // Fallback assumption
-            coresPerSM = 128;
-        }
-
-        cudaCores = coresPerSM * prop.multiProcessorCount;
-
-    } else {
-        std::cerr << "Failed to query device properties: " << cudaGetErrorString(err) << std::endl;
+    // FP32 cores per SM by compute capability
+    int coresPerSM;
+    switch (prop.major) {
+        case 1: coresPerSM = 8; break;                                              // Tesla
+        case 2: coresPerSM = (prop.minor == 0 || prop.minor == 1) ? 32 : 48; break; // Fermi
+        case 3: coresPerSM = 192; break;                                            // Kepler
+        case 5: coresPerSM = 128; break;                                            // Maxwell
+        case 6: coresPerSM = (prop.minor == 1 || prop.minor == 2) ? 128 : 64; break; // Pascal
+        case 7: coresPerSM = 64; break;                                             // Volta, Turing
+        case 8: coresPerSM = (prop.minor == 0) ? 64 : 128; break;                   // Ampere A100 (8.0) vs 8.6/8.7, Ada (8.9)
+        case 9: coresPerSM = 128; break;                                            // Hopper
+        default: coresPerSM = 128; break;                                           // newer: assume 128
     }
+    const int cudaCores = coresPerSM * prop.multiProcessorCount;
 
     omp_set_num_threads(num_threadss);
 
@@ -207,11 +187,12 @@ void vcf_parsed::run(char* vcf_filename, int num_threadss){
     create_info_vectors(num_threadss);
     reserve_var_columns();
     create_sample_vectors(num_threadss);
-    if(num_lines == 0) return; // header-only file: the columns exist and are empty
+    if(num_lines == 0){ free_host_buffers(); return; } // header-only file: the columns exist and are empty
     // Allocate and initialize device memory
     device_allocation();
     populate_var_columns(num_threadss, cudaCores);
     device_free();
+    free_host_buffers();
 
 }
     
@@ -223,7 +204,7 @@ void vcf_parsed::run(char* vcf_filename, int num_threadss){
     *
     * @param map Host map with genotype keys and corresponding char values.
     */
-void vcf_parsed::copyMapToConstantMemory(const std::map<std::string, char>& map) {
+void vcf_parsed::copyMapToConstantMemory(const std::map<std::string, char, std::less<>>& map) {
     char h_keys[NUM_KEYS_GT][MAX_KEY_LENGTH_GT] = {0};
     char h_values[NUM_KEYS_GT] = {0};
 
@@ -381,6 +362,13 @@ void vcf_parsed::device_allocation(){
 
 }
 
+void vcf_parsed::free_host_buffers() {
+    free(filestring);
+    filestring = nullptr;
+    free(new_lines_index);
+    new_lines_index = nullptr;
+}
+
 /**
     * @brief Frees all allocated device memory.
     *
@@ -501,24 +489,6 @@ void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
     CUDA_CHECK_ERROR(cudaMemcpy(d_new_lines_index, new_lines_index, sizeof(unsigned long long)*(num_lines+1), cudaMemcpyHostToDevice));
 }
     
-/**
-    * @brief Reads the VCF header from the input file.
-    *
-    * Extracts header lines (starting with "##") from the VCF file,
-    * storing them in the header string and updating the header size.
-    *
-    * @param file Pointer to the input file stream.
-    */
-void vcf_parsed::get_header(ifstream *file){
-    string line;
-    //removing the header and storing it in vcf.header
-    while (getline(*file, line) && line[0]=='#' && line[1]=='#'){
-        header.append(line + '\n');
-        header_size += line.length() + 1;
-    }
-    header_size += line.length() + 1;
-    variants_size = std::max(0L, filesize - header_size); // New size without the header (0 when the header has no final '\n')
-}
     
 /**
     * @brief Prints the VCF header to standard output.
@@ -879,63 +849,7 @@ void vcf_parsed::create_info_vectors(int num_threads){
     alt_columns.alt_string.resize(INFO.strings_alt);
 }
     
-/**
-    * @brief Prints the INFO field mapping.
-    *
-    * Outputs the mapping from INFO field names to their corresponding type codes.
-    */
-void vcf_parsed::print_info_map(){
-    for(const auto& element : info_map){
-        cout<<element.first<<": "<<element.second<<endl;
-    }
-}
     
-/**
-    * @brief Prints a summary of INFO field data.
-    *
-    * Displays a brief summary of the sizes and first few entries for each INFO field type.
-    */
-void vcf_parsed::print_info(){
-    cout<<"Flags size: "<<var_columns.in_flag.size()<<endl;
-    for(int i=0; i<var_columns.in_flag.size(); i++){
-        cout<<var_columns.in_flag[i].name<<": ";
-        for(int j=0; j<10; j++){
-            cout<<var_columns.in_flag[i].i_flag[j]<<" ";
-        }
-        cout<<" size: "<<var_columns.in_flag[i].i_flag.size();
-        cout<<endl;
-    }
-    cout<<endl;
-    cout<<"Floats size: "<<var_columns.in_float.size()<<endl;
-    for(int i=0; i<var_columns.in_float.size(); i++){
-        cout<<var_columns.in_float[i].name<<": ";
-        for(int j=0; j<10; j++){
-            cout << static_cast<float>(var_columns.in_float[i].i_float[j]) << " ";
-        }
-        cout<<" size: "<<var_columns.in_float[i].i_float.size();
-        cout<<endl;
-    }
-    cout<<endl;
-    cout<<"Strings size: "<<var_columns.in_string.size()<<endl;
-    for(int i=0; i<var_columns.in_string.size(); i++){
-        cout<<var_columns.in_string[i].name<<": ";
-        for(int j=0; j<10; j++){
-            cout<<var_columns.in_string[i].i_string[j]<<" ";
-        }
-        cout<<" size: "<<var_columns.in_string[i].i_string.size();
-        cout<<endl;
-    }
-    cout<<endl;
-    cout<<"Ints size: "<<var_columns.in_int.size()<<endl;
-    for(int i=0; i<var_columns.in_int.size(); i++){
-        cout<<var_columns.in_int[i].name<<": ";
-        for(int j=0; j<10; j++){
-            cout<<var_columns.in_int[i].i_int[j]<<" ";
-        }
-        cout<<" size: "<<var_columns.in_int[i].i_int.size();
-        cout<<endl;
-    }
-}
     
 /**
     * @brief Reserves space in the variant columns structure.
@@ -1281,11 +1195,11 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
         std::ref(tmp_alt), std::ref(alt_columns.alt_string), num_threads, INFO.strings_alt, &alt_columns_df::alt_string, &info_string::i_string);
 
     std::thread t_sum([&]() {
-        int somma = 0;
+        int total = 0;
         for (int i = 0; i < num_threads; i++) {
-            somma += tmp_num_alt[i];
+            total += tmp_num_alt[i];
         }
-        totAlt = somma;
+        totAlt = total;
     });
 
     if (samplesON) {
@@ -1311,11 +1225,11 @@ void vcf_parsed::populate_var_columns(int num_threads, int numb_cores){
                 &samp_Float::i_float);
 
         std::thread t_sum_samp([&]() {
-            int somma = 0;
+            int total = 0;
             for (int i = 0; i < num_threads; i++) {
-                somma += tmp_num_alt_format[i];
+                total += tmp_num_alt_format[i];
             }
-            totSampAlt = somma;
+            totSampAlt = total;
         });
 
         t7.join();
@@ -1720,7 +1634,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                         tmp_alt_format->alt_id[base + y] = (char)y;
                         switch(step.kind){
                             case format_step::GT_ALT: {
-                                auto gt = tmp_alt_format->GTMap.find(std::string(vb, ve - vb));
+                                auto gt = tmp_alt_format->GTMap.find(std::string_view(vb, ve - vb)); // no std::string per value
                                 tmp_alt_format->sample_GT.GT[base + y] = (gt != tmp_alt_format->GTMap.end()) ? gt->second : (char)0;
                                 break;
                             }
