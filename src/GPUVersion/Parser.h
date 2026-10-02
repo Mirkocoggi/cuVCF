@@ -205,15 +205,6 @@ public:
     */
     void find_new_lines_index(std::string w_filename, int num_threads);
     
-    /**
-    * @brief Reads the VCF header from the input file.
-    *
-    * Extracts header lines (starting with "##") from the VCF file,
-    * storing them in the header string and updating the header size.
-    *
-    * @param file Pointer to the input file stream.
-    */
-    void get_header(std::ifstream *file);
     
     /**
     * @brief Prints the VCF header to standard output.
@@ -257,19 +248,7 @@ public:
     */
     void create_info_vectors(int num_threads);
     
-    /**
-    * @brief Prints the INFO field mapping.
-    *
-    * Outputs the mapping from INFO field names to their corresponding type codes.
-    */
-    void print_info_map();
     
-    /**
-    * @brief Prints a summary of INFO field data.
-    *
-    * Displays a brief summary of the sizes and first few entries for each INFO field type.
-    */
-    void print_info();
     
     /**
     * @brief Reserves space in the variant columns structure.

@@ -13,7 +13,6 @@
 #define VCF_VARCOLUMNS_H
 #include "VCFparser_mt_col_struct.h"
 #include "VCF_parsed.h"
-#include "VCF_var.h"
 #include <chrono>
 #include <Imath/half.h>
 

@@ -489,24 +489,6 @@ void vcf_parsed::find_new_lines_index(string w_filename, int num_threads){
     CUDA_CHECK_ERROR(cudaMemcpy(d_new_lines_index, new_lines_index, sizeof(unsigned long long)*(num_lines+1), cudaMemcpyHostToDevice));
 }
     
-/**
-    * @brief Reads the VCF header from the input file.
-    *
-    * Extracts header lines (starting with "##") from the VCF file,
-    * storing them in the header string and updating the header size.
-    *
-    * @param file Pointer to the input file stream.
-    */
-void vcf_parsed::get_header(ifstream *file){
-    string line;
-    //removing the header and storing it in vcf.header
-    while (getline(*file, line) && line[0]=='#' && line[1]=='#'){
-        header.append(line + '\n');
-        header_size += line.length() + 1;
-    }
-    header_size += line.length() + 1;
-    variants_size = std::max(0L, filesize - header_size); // New size without the header (0 when the header has no final '\n')
-}
     
 /**
     * @brief Prints the VCF header to standard output.
@@ -867,63 +849,7 @@ void vcf_parsed::create_info_vectors(int num_threads){
     alt_columns.alt_string.resize(INFO.strings_alt);
 }
     
-/**
-    * @brief Prints the INFO field mapping.
-    *
-    * Outputs the mapping from INFO field names to their corresponding type codes.
-    */
-void vcf_parsed::print_info_map(){
-    for(const auto& element : info_map){
-        cout<<element.first<<": "<<element.second<<endl;
-    }
-}
     
-/**
-    * @brief Prints a summary of INFO field data.
-    *
-    * Displays a brief summary of the sizes and first few entries for each INFO field type.
-    */
-void vcf_parsed::print_info(){
-    cout<<"Flags size: "<<var_columns.in_flag.size()<<endl;
-    for(int i=0; i<var_columns.in_flag.size(); i++){
-        cout<<var_columns.in_flag[i].name<<": ";
-        for(int j=0; j<10; j++){
-            cout<<var_columns.in_flag[i].i_flag[j]<<" ";
-        }
-        cout<<" size: "<<var_columns.in_flag[i].i_flag.size();
-        cout<<endl;
-    }
-    cout<<endl;
-    cout<<"Floats size: "<<var_columns.in_float.size()<<endl;
-    for(int i=0; i<var_columns.in_float.size(); i++){
-        cout<<var_columns.in_float[i].name<<": ";
-        for(int j=0; j<10; j++){
-            cout << static_cast<float>(var_columns.in_float[i].i_float[j]) << " ";
-        }
-        cout<<" size: "<<var_columns.in_float[i].i_float.size();
-        cout<<endl;
-    }
-    cout<<endl;
-    cout<<"Strings size: "<<var_columns.in_string.size()<<endl;
-    for(int i=0; i<var_columns.in_string.size(); i++){
-        cout<<var_columns.in_string[i].name<<": ";
-        for(int j=0; j<10; j++){
-            cout<<var_columns.in_string[i].i_string[j]<<" ";
-        }
-        cout<<" size: "<<var_columns.in_string[i].i_string.size();
-        cout<<endl;
-    }
-    cout<<endl;
-    cout<<"Ints size: "<<var_columns.in_int.size()<<endl;
-    for(int i=0; i<var_columns.in_int.size(); i++){
-        cout<<var_columns.in_int[i].name<<": ";
-        for(int j=0; j<10; j++){
-            cout<<var_columns.in_int[i].i_int[j]<<" ";
-        }
-        cout<<" size: "<<var_columns.in_int[i].i_int.size();
-        cout<<endl;
-    }
-}
     
 /**
     * @brief Reserves space in the variant columns structure.

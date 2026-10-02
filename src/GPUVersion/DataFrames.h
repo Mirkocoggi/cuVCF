@@ -272,56 +272,6 @@ class alt_columns_df //DF2
         }       
     }
 
-    /**
-     * @brief Clones the alternative columns data frame from a reference.
-     *
-     * The function clones the data frame by resizing the vectors based on the
-     * number of alternative values specified in the header.
-     *
-     * @param ref Reference alt_columns_df to clone from.
-     * @param INFO Header element containing alternative info counts.
-     * @param batch_size The batch size used for processing.
-     */
-    void clone(const alt_columns_df& ref, const header_element& INFO, long batch_size){
-        int numAlt = INFO.alt_values;
-        var_id.resize(numAlt, 0);
-        alt.resize(numAlt, "\0");
-        alt_id.resize(numAlt, (char)0);
-        int tmp = INFO.floats_alt;
-        if(tmp>0){
-            info_float tmpInfoFloat;
-            for(int i = 0; i<tmp; i++){
-                tmpInfoFloat.name = ref.alt_float[i].name;
-                tmpInfoFloat.i_float.resize(ref.alt_float[i].i_float.size(), 0.0f);
-                alt_float.push_back(tmpInfoFloat);
-            }
-            alt_float.resize(tmp);
-        }
-    
-        tmp = INFO.ints_alt;
-
-        if(tmp>0){
-            info_int tmpInfoInt;
-            for(int i = 0; i<tmp; i++){
-                tmpInfoInt.name = ref.alt_int[i].name;
-                tmpInfoInt.i_int.resize(ref.alt_int[i].i_int.size(), 0);
-                alt_int.push_back(tmpInfoInt);
-
-            }
-            alt_int.resize(tmp);
-        }
-        tmp = INFO.strings_alt;
-        if(tmp>0){
-            info_string tmpInfoString;
-            for(int i = 0; i<tmp; i++){
-                tmpInfoString.name = ref.alt_string[i].name;
-                tmpInfoString.i_string.resize(ref.alt_string[i].i_string.size(), "\0");
-                alt_string.push_back(tmpInfoString);
-
-            }
-            alt_string.resize(tmp);
-        }       
-    }
     
     /**
      * @brief Prints the alternative columns data frame.
@@ -618,58 +568,6 @@ class alt_format_df //aka df4 in progress
         return "Not found";
     }
 
-    /**
-     * @brief Clones the formatted alternative allele data frame from a reference.
-     *
-     * This method is not currently used and needs to be updated.
-     *
-     * @param ref Reference alt_format_df to clone from.
-     * @param FORMAT Header element containing format information.
-     */
-    void clone(const alt_format_df& ref, const header_element& FORMAT){
-        int numAlt = FORMAT.alt_values;
-        var_id.resize(numAlt, 0);
-        samp_id.resize(numAlt, 0);
-        alt_id.resize(numAlt, (char)0);
-        numSample = ref.numSample;
-        sampNames = ref.sampNames;
-
-        int tmp = FORMAT.floats_alt;
-        if(tmp>0){
-            samp_Float tmpFloat;
-            for(int i = 0; i<tmp; i++){
-                tmpFloat.name = ref.samp_float[i].name;
-                tmpFloat.numb = ref.samp_float[i].numb;
-                tmpFloat.i_float.resize(ref.samp_float[i].i_float.size(), 0);
-                samp_float.push_back(tmpFloat);
-            }
-            samp_float.resize(tmp);
-        }
-    
-        tmp = FORMAT.ints_alt;
-
-        if(tmp>0){
-            samp_Int tmpInt;
-            for(int i = 0; i<tmp; i++){
-                tmpInt.name = ref.samp_int[i].name;
-                tmpInt.numb = ref.samp_int[i].numb;
-                tmpInt.i_int.resize(ref.samp_int[i].i_int.size(), 0);
-                samp_int.push_back(tmpInt);
-            }
-            samp_int.resize(tmp);
-        }
-        tmp = FORMAT.strings_alt;
-        if(tmp>0){
-            samp_String tmpString;
-            for(int i = 0; i<tmp; i++){
-                tmpString.name = ref.samp_string[i].name;
-                tmpString.numb = ref.samp_string[i].numb;
-                tmpString.i_string.resize(ref.samp_string[i].i_string.size(), "\0");
-                samp_string.push_back(tmpString);
-            }
-            samp_string.resize(tmp);
-        }       
-    }   
  
     /**
      * @brief Prints the formatted alternative allele data frame.
