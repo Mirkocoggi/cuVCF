@@ -223,7 +223,7 @@ void vcf_parsed::run(char* vcf_filename, int num_threadss){
     *
     * @param map Host map with genotype keys and corresponding char values.
     */
-void vcf_parsed::copyMapToConstantMemory(const std::map<std::string, char>& map) {
+void vcf_parsed::copyMapToConstantMemory(const std::map<std::string, char, std::less<>>& map) {
     char h_keys[NUM_KEYS_GT][MAX_KEY_LENGTH_GT] = {0};
     char h_values[NUM_KEYS_GT] = {0};
 
@@ -1720,7 +1720,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                         tmp_alt_format->alt_id[base + y] = (char)y;
                         switch(step.kind){
                             case format_step::GT_ALT: {
-                                auto gt = tmp_alt_format->GTMap.find(std::string(vb, ve - vb));
+                                auto gt = tmp_alt_format->GTMap.find(std::string_view(vb, ve - vb)); // no std::string per value
                                 tmp_alt_format->sample_GT.GT[base + y] = (gt != tmp_alt_format->GTMap.end()) ? gt->second : (char)0;
                                 break;
                             }

@@ -385,7 +385,7 @@ class sample_columns_df //aka df3
     /// Map from sample name to sample ID.
     std::map<std::string, unsigned short> sampNames;
     /// Map from genotype string to a char code.
-    std::map<std::string, char> GTMap;
+    std::map<std::string, char, std::less<>> GTMap; // transparent: find() takes a string_view
     /// Vector of sample genotype data.
     std::vector<samp_GT> sample_GT;
     /// Number of samples per row.
@@ -517,7 +517,7 @@ class alt_format_df //aka df4 in progress
     /// Sample genotype data.
     samp_GT sample_GT;
     /// Map from genotype string to a char code.
-    std::map<std::string, char> GTMap;
+    std::map<std::string, char, std::less<>> GTMap; // transparent: find() takes a string_view
     /// Number of samples.
     int numSample; 
 

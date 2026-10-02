@@ -161,7 +161,7 @@ public:
     *
     * @param map Host map with genotype keys and corresponding char values.
     */
-    void copyMapToConstantMemory(const std::map<std::string, char>& map);
+    void copyMapToConstantMemory(const std::map<std::string, char, std::less<>>& map);
 
     /**
     * @brief Initializes the INFO field lookup map (Map1) in device constant memory.
