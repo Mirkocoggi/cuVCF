@@ -192,6 +192,10 @@ public:
     /// Frees the host copy of the body and its line index (not needed once the columns are filled)
     void free_host_buffers();
 
+    vcf_parsed() = default;
+    // owns filestring and new_lines_index: a copy would free them twice
+    vcf_parsed(const vcf_parsed&) = delete;
+    vcf_parsed& operator=(const vcf_parsed&) = delete;
     ~vcf_parsed(){ free_host_buffers(); } // also on the exception paths of run()
 
     /**

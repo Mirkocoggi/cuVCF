@@ -362,11 +362,6 @@ void vcf_parsed::device_allocation(){
 
 }
 
-/**
-    * @brief Frees all allocated device memory.
-    *
-    * Releases device memory allocated during the parsing process.
-    */
 void vcf_parsed::free_host_buffers() {
     free(filestring);
     filestring = nullptr;
@@ -374,6 +369,11 @@ void vcf_parsed::free_host_buffers() {
     new_lines_index = nullptr;
 }
 
+/**
+    * @brief Frees all allocated device memory.
+    *
+    * Releases device memory allocated during the parsing process.
+    */
 void vcf_parsed::device_free() {
     CUDA_CHECK_ERROR(cudaFree(d_VC_var_number));
     CUDA_CHECK_ERROR(cudaFree(d_VC_pos));
