@@ -1,0 +1,190 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700" width="1000" height="700" role="img" aria-label="How cuVCF decomposes a VCF record into four DataFrames" xmlns:c2pa="http://c2pa.org/manifest"><metadata><c2pa:manifest>AAAWgmp1bWIAAAAeanVtZGMycGEAEQAQgAAAqgA4m3EDYzJwYQAAABZcanVtYgAAAEdqdW1kYzJtYQARABCAAACqADibcQN1cm46YzJwYTo0MjBmZjIyNC0yOTcxLTRhMTAtODliNS0zNzU0MmQ5NGJmNjQAAAADl2p1bWIAAAApanVtZGMyYXMAEQAQgAAAqgA4m3EDYzJwYS5hc3NlcnRpb25zAAAAALxqdW1iAAAARGp1bWRjYm9yABEAEIAAAKoAOJtxE2MycGEuaW5ncmVkaWVudC52MwAAAAAYYzJzaKKTrpvhJFLjop9PUTEiWsUAAABwY2JvcqNpZGM6Zm9ybWF0bWltYWdlL3N2Zyt4bWxqaW5zdGFuY2VJRHgseG1wOmlpZDoyYjYzNzZkYi1jOTFmLTQ2OTEtYWRmMy0wYmQyZDk1NGNmOTZscmVsYXRpb25zaGlwaHBhcmVudE9mAAAB4mp1bWIAAABBanVtZGNib3IAEQAQgAAAqgA4m3ETYzJwYS5hY3Rpb25zLnYyAAAAABhjMnNobLNd+lvY70F1jXx0wxkRVgAAAZljYm9yomdhY3Rpb25zgqJmYWN0aW9ua2MycGEub3BlbmVkanBhcmFtZXRlcnOha2luZ3JlZGllbnRzgaJjdXJseC1zZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmluZ3JlZGllbnQudjNkaGFzaFggxOJIkawXx+09zHf5Lhp+yWz7kAUOXEhMPcDchnjKUs6kZmFjdGlvbngdY29tLmFudGhyb3BpYy5jbGF1ZGUucHJvdmlkZWRqcGFyYW1ldGVyc6F4H2NvbS5hbnRocm9waWMub3JpZ2luLWNvbmZpZGVuY2VndW5rbm93bmtkZXNjcmlwdGlvbnhmQ2xhdWRlIHByb3ZpZGVkIHRoaXMgZmlsZSBhdCB0aGUgcmVxdWVzdCBvZiBhIHVzZXIgYW5kIG1heSBoYXZlIGNyZWF0ZWQgb3IgbW9kaWZpZWQgdGhlIGZpbGUgY29udGVudHMubXNvZnR3YXJlQWdlbnShZG5hbWVmQ2xhdWRlcmFsbEFjdGlvbnNJbmNsdWRlZPUAAADIanVtYgAAAEBqdW1kY2JvcgARABCAAACqADibcRNjMnBhLmhhc2guZGF0YQAAAAAYYzJzaByHlWAKfofX6A+H/yuuqoAAAACAY2JvcqVjYWxnZnNoYTI1NmNwYWRNAAAAAAAAAAAAAAAAAGRoYXNoWCB+EQxUX5SLdrf/onNlAa02x/hre72/qD1KI6gcPILHMmRuYW1lbmp1bWJmIG1hbmlmZXN0amV4Y2x1c2lvbnOBomVzdGFydBjnZmxlbmd0aBkeBAAAAj5qdW1iAAAAJ2p1bWRjMmNsABEAEIAAAKoAOJtxA2MycGEuY2xhaW0udjIAAAACD2Nib3KlY2FsZ2ZzaGEyNTZpc2lnbmF0dXJleE1zZWxmI2p1bWJmPS9jMnBhL3VybjpjMnBhOjQyMGZmMjI0LTI5NzEtNGExMC04OWI1LTM3NTQyZDk0YmY2NC9jMnBhLnNpZ25hdHVyZWppbnN0YW5jZUlEeCx4bXA6aWlkOjYyZWM5MDQxLTQ1ODctNDE3Zi05OTBlLTU4N2U4MjFmZmVjM3JjcmVhdGVkX2Fzc2VydGlvbnODomN1cmx4LXNlbGYjanVtYmY9YzJwYS5hc3NlcnRpb25zL2MycGEuaW5ncmVkaWVudC52M2RoYXNoWCDE4kiRrBfH7T3Md/kuGn7JbPuQBQ5cSEw9wNyGeMpSzqJjdXJseCpzZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmFjdGlvbnMudjJkaGFzaFgg4ndHgXFuxQOiauHeHNMoWz78lrFxrQZc4JzeiG9a0ISiY3VybHgpc2VsZiNqdW1iZj1jMnBhLmFzc2VydGlvbnMvYzJwYS5oYXNoLmRhdGFkaGFzaFgg5Ry3Cbbze4sEW6XZVv7G+IQhrBNwNPYLEtHOnZv7Xm50Y2xhaW1fZ2VuZXJhdG9yX2luZm+jZG5hbWVvQW50aHJvcGljIEZpbGVzZ3ZlcnNpb25lMS4wLjBrc3BlY1ZlcnNpb25lMi40LjAAABA4anVtYgAAAChqdW1kYzJjcwARABCAAACqADibcQNjMnBhLnNpZ25hdHVyZQAAABAIY2JvctKEWQISogEmGCFZAgowggIGMIIBjaADAgECAhRA5aAK7sI50L64g/oGQgU9Z1UTADAKBggqhkjOPQQDAzBJMRcwFQYDVQQKEw5BbnRocm9waWMsIFBCQzEuMCwGA1UEAxMlQW50aHJvcGljIENvbnRlbnQgQ3JlZGVudGlhbHMgUm9vdCBDQTAeFw0yNjA4MDcxODQzNTZaFw0yODA4MDYxOTQzNTZaMEQxFzAVBgNVBAoTDkFudGhyb3BpYywgUEJDMSkwJwYDVQQDEyBBbnRocm9waWMgQ2xhdWRlIENvbnRlbnQgU2lnbmluZzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABJh6CmvLUBgFFNU0vUKlOVtE6djd17L5SuwX0LemFisBM3dkd/3cyjxFA3Qo5S46fX0/ihY0VZ7mfb9KF703t5OjWDBWMA4GA1UdDwEB/wQEAwIHgDAVBgNVHSUEDjAMBgorBgEEAYPoXgIBMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAUzlHiBIFOZFsj+OPEz5o+nMHXXMIwCgYIKoZIzj0EAwMDZwAwZAIwMXMdFJ4BetLLVY7ORuE9noqbbAZOZn/aArXyTwFAZfKrPzxF2vPoJNf1+UCdg1XGAjBwX1zd9WGqYkqmL5SFqw1QySjr1zJfpJM9+1rdDwSPLMOPOjKuiXjoU/pUUeG9RwmhY3BhZFkNngAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPZYQDQ4nDQBB/qnxinDhMjupR5o9snrhq6TNysnvSdITt6bE25vbBm+GqsE24ZU02HIY0fp5TT1fjBBQFggmUaKz60=</c2pa:manifest></metadata>
+<rect x="1" y="1" width="998" height="698" rx="12" fill="#ffffff" stroke="#d0d7de" stroke-width="1"/>
+<circle cx="41" cy="37" r="11" fill="#1f2328"/>
+<text x="41" y="41" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">1</text>
+<text x="60" y="42" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="bold" fill="#1f2328" text-anchor="start">A VCF record</text>
+<rect x="30" y="58" width="940" height="92" rx="8" fill="#f6f8fa" stroke="#d0d7de" stroke-width="1"/>
+<rect x="42" y="68" width="4" height="15" rx="2" fill="#d9701f"/>
+<text x="54" y="80" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="normal" fill="#57606a" text-anchor="start">##INFO=&lt;ID=DP,Number=1,Type=Integer,Description="Total depth"&gt;</text>
+<rect x="42" y="87" width="4" height="15" rx="2" fill="#2f6fa8"/>
+<text x="54" y="99" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="normal" fill="#57606a" text-anchor="start">##INFO=&lt;ID=AF,Number=A,Type=Float,Description="Allele frequency"&gt;</text>
+<rect x="42" y="106" width="4" height="15" rx="2" fill="#b8890a"/>
+<text x="54" y="118" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="normal" fill="#57606a" text-anchor="start">##FORMAT=&lt;ID=GT,Number=1,Type=String,Description="Genotype"&gt;</text>
+<rect x="42" y="125" width="4" height="15" rx="2" fill="#3f8a33"/>
+<text x="54" y="137" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="normal" fill="#57606a" text-anchor="start">##FORMAT=&lt;ID=AO,Number=A,Type=Integer,Description="Alt allele observations"&gt;</text>
+<rect x="30" y="166" width="940" height="74" rx="8" fill="#ffffff" stroke="#d0d7de" stroke-width="1"/>
+<line x1="30" y1="194" x2="970" y2="194" stroke="#d0d7de"/>
+<text x="65.0" y="185" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="bold" fill="#1f2328" text-anchor="middle">#CHROM</text>
+<rect x="51.4" y="204" width="27.2" height="26" rx="6" fill="#fde2c8" stroke="#d9701f" stroke-width="1.2"/>
+<text x="65.0" y="221.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="normal" fill="#1f2328" text-anchor="middle">20</text>
+<line x1="100" y1="166" x2="100" y2="240" stroke="#d0d7de"/>
+<text x="139.0" y="185" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="bold" fill="#1f2328" text-anchor="middle">POS</text>
+<rect x="114.0" y="204" width="50.0" height="26" rx="6" fill="#fde2c8" stroke="#d9701f" stroke-width="1.2"/>
+<text x="139.0" y="221.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="normal" fill="#1f2328" text-anchor="middle">55767</text>
+<line x1="178" y1="166" x2="178" y2="240" stroke="#d0d7de"/>
+<text x="220.0" y="185" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="bold" fill="#1f2328" text-anchor="middle">ID</text>
+<rect x="191.2" y="204" width="57.599999999999994" height="26" rx="6" fill="#fde2c8" stroke="#d9701f" stroke-width="1.2"/>
+<text x="220.0" y="221.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="normal" fill="#1f2328" text-anchor="middle">MS5567</text>
+<line x1="262" y1="166" x2="262" y2="240" stroke="#d0d7de"/>
+<text x="287.0" y="185" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="bold" fill="#1f2328" text-anchor="middle">REF</text>
+<rect x="277.2" y="204" width="19.6" height="26" rx="6" fill="#fde2c8" stroke="#d9701f" stroke-width="1.2"/>
+<text x="287.0" y="221.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="normal" fill="#1f2328" text-anchor="middle">T</text>
+<line x1="312" y1="166" x2="312" y2="240" stroke="#d0d7de"/>
+<text x="343.0" y="185" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="bold" fill="#1f2328" text-anchor="middle">ALT</text>
+<rect x="325.6" y="204" width="34.8" height="26" rx="6" fill="#cfe0ef" stroke="#2f6fa8" stroke-width="1.2"/>
+<text x="343.0" y="221.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="normal" fill="#1f2328" text-anchor="middle">A,G</text>
+<line x1="374" y1="166" x2="374" y2="240" stroke="#d0d7de"/>
+<text x="404.0" y="185" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="bold" fill="#1f2328" text-anchor="middle">QUAL</text>
+<rect x="382.8" y="204" width="42.4" height="26" rx="6" fill="#fde2c8" stroke="#d9701f" stroke-width="1.2"/>
+<text x="404.0" y="221.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="normal" fill="#1f2328" text-anchor="middle">83.4</text>
+<line x1="434" y1="166" x2="434" y2="240" stroke="#d0d7de"/>
+<text x="469.0" y="185" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="bold" fill="#1f2328" text-anchor="middle">FILTER</text>
+<rect x="447.8" y="204" width="42.4" height="26" rx="6" fill="#fde2c8" stroke="#d9701f" stroke-width="1.2"/>
+<text x="469.0" y="221.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="normal" fill="#1f2328" text-anchor="middle">PASS</text>
+<line x1="504" y1="166" x2="504" y2="240" stroke="#d0d7de"/>
+<text x="593.0" y="185" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="bold" fill="#1f2328" text-anchor="middle">INFO</text>
+<rect x="514.4" y="204" width="50.0" height="26" rx="6" fill="#fde2c8" stroke="#d9701f" stroke-width="1.2"/>
+<text x="539.4" y="221.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="normal" fill="#1f2328" text-anchor="middle">DP=21</text>
+<rect x="568.4" y="204" width="103.19999999999999" height="26" rx="6" fill="#cfe0ef" stroke="#2f6fa8" stroke-width="1.2"/>
+<text x="620.0" y="221.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="normal" fill="#1f2328" text-anchor="middle">AF=0.33,0.67</text>
+<line x1="682" y1="166" x2="682" y2="240" stroke="#d0d7de"/>
+<text x="723.0" y="185" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="bold" fill="#1f2328" text-anchor="middle">FORMAT</text>
+<rect x="698.0" y="204" width="50.0" height="26" rx="6" fill="#fde2c8" stroke="#d9701f" stroke-width="1.2"/>
+<text x="723.0" y="221.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="normal" fill="#1f2328" text-anchor="middle">GT:AO</text>
+<line x1="764" y1="166" x2="764" y2="240" stroke="#d0d7de"/>
+<text x="815.5" y="185" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="bold" fill="#1f2328" text-anchor="middle">SAMPLE1</text>
+<rect x="774.9" y="204" width="34.8" height="26" rx="6" fill="#fcecb3" stroke="#b8890a" stroke-width="1.2"/>
+<text x="792.3" y="221.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="normal" fill="#1f2328" text-anchor="middle">0|1</text>
+<rect x="813.6999999999999" y="204" width="42.4" height="26" rx="6" fill="#d6efcf" stroke="#3f8a33" stroke-width="1.2"/>
+<text x="834.9" y="221.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="normal" fill="#1f2328" text-anchor="middle">20,1</text>
+<line x1="867" y1="166" x2="867" y2="240" stroke="#d0d7de"/>
+<text x="918.5" y="185" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="bold" fill="#1f2328" text-anchor="middle">SAMPLE2</text>
+<rect x="877.9" y="204" width="34.8" height="26" rx="6" fill="#fcecb3" stroke="#b8890a" stroke-width="1.2"/>
+<text x="895.3" y="221.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="normal" fill="#1f2328" text-anchor="middle">0|2</text>
+<rect x="916.6999999999999" y="204" width="42.4" height="26" rx="6" fill="#d6efcf" stroke="#3f8a33" stroke-width="1.2"/>
+<text x="937.9" y="221.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.5" font-weight="normal" fill="#1f2328" text-anchor="middle">17,4</text>
+<line x1="500" y1="262" x2="500" y2="306" stroke="#1f2328" stroke-width="2"/>
+<path d="M492,300 L500,312 L508,300 Z" fill="#1f2328"/>
+<rect x="530" y="272" width="330" height="26" rx="13" fill="#f6f8fa" stroke="#d0d7de" stroke-width="1"/>
+<text x="545" y="290" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="normal" fill="#57606a" text-anchor="start">cuVCF splits each field by its granularity</text>
+<circle cx="41" cy="337" r="11" fill="#1f2328"/>
+<text x="41" y="341" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">2</text>
+<text x="60" y="342" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="bold" fill="#1f2328" text-anchor="start">The four DataFrames</text>
+<rect x="30" y="362" width="940" height="34" rx="8" fill="#fde2c8" stroke="none" stroke-width="1"/>
+<rect x="30" y="362" width="5" height="34" rx="2" fill="#d9701f"/>
+<text x="44" y="377" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="bold" fill="#1f2328" text-anchor="start">DF1 · Variant-level</text>
+<text x="44" y="391" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="normal" fill="#57606a" text-anchor="start">one row per variant  ·  site fields + INFO with one value per variant</text>
+<rect x="130" y="406" width="105" height="52" rx="0" fill="#fde2c8" stroke="none" stroke-width="1"/>
+<rect x="235" y="406" width="105" height="52" rx="0" fill="#fde2c8" stroke="none" stroke-width="1"/>
+<rect x="340" y="406" width="110" height="52" rx="0" fill="#fde2c8" stroke="none" stroke-width="1"/>
+<rect x="450" y="406" width="90" height="52" rx="0" fill="#fde2c8" stroke="none" stroke-width="1"/>
+<rect x="540" y="406" width="95" height="52" rx="0" fill="#fde2c8" stroke="none" stroke-width="1"/>
+<rect x="635" y="406" width="105" height="52" rx="0" fill="#fde2c8" stroke="none" stroke-width="1"/>
+<rect x="740" y="406" width="90" height="52" rx="0" fill="#fde2c8" stroke="none" stroke-width="1"/>
+<rect x="830" y="406" width="140" height="52" rx="0" fill="#fde2c8" stroke="none" stroke-width="1"/>
+<rect x="30" y="406" width="940" height="52" rx="6" fill="none" stroke="#8c959f" stroke-width="1"/>
+<line x1="30" y1="432" x2="970" y2="432" stroke="#8c959f"/>
+<text x="80.0" y="423" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#57606a" text-anchor="middle">ID_VAR</text>
+<text x="80.0" y="449" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">0</text>
+<line x1="130" y1="406" x2="130" y2="458" stroke="#d0d7de"/>
+<text x="182.5" y="423" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#d9701f" text-anchor="middle">CHROM</text>
+<text x="182.5" y="449" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#1f2328" text-anchor="middle">20</text>
+<line x1="235" y1="406" x2="235" y2="458" stroke="#d0d7de"/>
+<text x="287.5" y="423" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#d9701f" text-anchor="middle">POS</text>
+<text x="287.5" y="449" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#1f2328" text-anchor="middle">55767</text>
+<line x1="340" y1="406" x2="340" y2="458" stroke="#d0d7de"/>
+<text x="395.0" y="423" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#d9701f" text-anchor="middle">ID</text>
+<text x="395.0" y="449" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#1f2328" text-anchor="middle">MS5567</text>
+<line x1="450" y1="406" x2="450" y2="458" stroke="#d0d7de"/>
+<text x="495.0" y="423" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#d9701f" text-anchor="middle">REF</text>
+<text x="495.0" y="449" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#1f2328" text-anchor="middle">T</text>
+<line x1="540" y1="406" x2="540" y2="458" stroke="#d0d7de"/>
+<text x="587.5" y="423" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#d9701f" text-anchor="middle">QUAL</text>
+<text x="587.5" y="449" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#1f2328" text-anchor="middle">83.4</text>
+<line x1="635" y1="406" x2="635" y2="458" stroke="#d0d7de"/>
+<text x="687.5" y="423" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#d9701f" text-anchor="middle">FILTER</text>
+<text x="687.5" y="449" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#1f2328" text-anchor="middle">PASS</text>
+<line x1="740" y1="406" x2="740" y2="458" stroke="#d0d7de"/>
+<text x="785.0" y="423" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#d9701f" text-anchor="middle">DP</text>
+<text x="785.0" y="449" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#1f2328" text-anchor="middle">21</text>
+<line x1="830" y1="406" x2="830" y2="458" stroke="#d0d7de"/>
+<text x="900.0" y="423" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#d9701f" text-anchor="middle">FORMAT</text>
+<text x="900.0" y="449" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#1f2328" text-anchor="middle">GT:AO</text>
+<rect x="30" y="486" width="290" height="34" rx="8" fill="#cfe0ef" stroke="none" stroke-width="1"/>
+<rect x="30" y="486" width="5" height="34" rx="2" fill="#2f6fa8"/>
+<text x="44" y="501" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="bold" fill="#1f2328" text-anchor="start">DF2 · Allele-level</text>
+<text x="44" y="515" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="normal" fill="#57606a" text-anchor="start">one row per ALT allele  ·  INFO Number=A</text>
+<rect x="174" y="530" width="70" height="78" rx="0" fill="#cfe0ef" stroke="none" stroke-width="1"/>
+<rect x="244" y="530" width="76" height="78" rx="0" fill="#cfe0ef" stroke="none" stroke-width="1"/>
+<rect x="30" y="530" width="290" height="78" rx="6" fill="none" stroke="#8c959f" stroke-width="1"/>
+<line x1="30" y1="556" x2="320" y2="556" stroke="#8c959f"/>
+<line x1="30" y1="582" x2="320" y2="582" stroke="#d0d7de"/>
+<text x="66.0" y="547" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#57606a" text-anchor="middle">ID_VAR</text>
+<text x="66.0" y="573" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">0</text>
+<text x="66.0" y="599" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">0</text>
+<line x1="102" y1="530" x2="102" y2="608" stroke="#d0d7de"/>
+<text x="138.0" y="547" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#57606a" text-anchor="middle">ID_ALT</text>
+<text x="138.0" y="573" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">0</text>
+<text x="138.0" y="599" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">1</text>
+<line x1="174" y1="530" x2="174" y2="608" stroke="#d0d7de"/>
+<text x="209.0" y="547" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#2f6fa8" text-anchor="middle">ALT</text>
+<text x="209.0" y="573" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#1f2328" text-anchor="middle">A</text>
+<text x="209.0" y="599" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#1f2328" text-anchor="middle">G</text>
+<line x1="244" y1="530" x2="244" y2="608" stroke="#d0d7de"/>
+<text x="282.0" y="547" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#2f6fa8" text-anchor="middle">AF</text>
+<text x="282.0" y="573" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#1f2328" text-anchor="middle">0.33</text>
+<text x="282.0" y="599" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#1f2328" text-anchor="middle">0.67</text>
+<rect x="350" y="486" width="260" height="34" rx="8" fill="#fcecb3" stroke="none" stroke-width="1"/>
+<rect x="350" y="486" width="5" height="34" rx="2" fill="#b8890a"/>
+<text x="364" y="501" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="bold" fill="#1f2328" text-anchor="start">DF3 · Sample-level</text>
+<text x="364" y="515" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="normal" fill="#57606a" text-anchor="start">one row per sample  ·  FORMAT</text>
+<rect x="528" y="530" width="82" height="78" rx="0" fill="#fcecb3" stroke="none" stroke-width="1"/>
+<rect x="350" y="530" width="260" height="78" rx="6" fill="none" stroke="#8c959f" stroke-width="1"/>
+<line x1="350" y1="556" x2="610" y2="556" stroke="#8c959f"/>
+<line x1="350" y1="582" x2="610" y2="582" stroke="#d0d7de"/>
+<text x="393.0" y="547" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#57606a" text-anchor="middle">ID_VAR</text>
+<text x="393.0" y="573" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">0</text>
+<text x="393.0" y="599" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">0</text>
+<line x1="436" y1="530" x2="436" y2="608" stroke="#d0d7de"/>
+<text x="482.0" y="547" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#57606a" text-anchor="middle">ID_SAMP</text>
+<text x="482.0" y="573" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">0</text>
+<text x="482.0" y="599" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">1</text>
+<line x1="528" y1="530" x2="528" y2="608" stroke="#d0d7de"/>
+<text x="569.0" y="547" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#b8890a" text-anchor="middle">GT</text>
+<text x="569.0" y="573" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#1f2328" text-anchor="middle">0|1</text>
+<text x="569.0" y="599" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#1f2328" text-anchor="middle">0|2</text>
+<rect x="640" y="486" width="330" height="34" rx="8" fill="#d6efcf" stroke="none" stroke-width="1"/>
+<rect x="640" y="486" width="5" height="34" rx="2" fill="#3f8a33"/>
+<text x="654" y="501" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13.5" font-weight="bold" fill="#1f2328" text-anchor="start">DF4 · Sample × allele</text>
+<text x="654" y="515" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="normal" fill="#57606a" text-anchor="start">one row per sample × ALT  ·  FORMAT Number=A</text>
+<rect x="888" y="530" width="82" height="130" rx="0" fill="#d6efcf" stroke="none" stroke-width="1"/>
+<rect x="640" y="530" width="330" height="130" rx="6" fill="none" stroke="#8c959f" stroke-width="1"/>
+<line x1="640" y1="556" x2="970" y2="556" stroke="#8c959f"/>
+<line x1="640" y1="582" x2="970" y2="582" stroke="#d0d7de"/>
+<line x1="640" y1="608" x2="970" y2="608" stroke="#d0d7de"/>
+<line x1="640" y1="634" x2="970" y2="634" stroke="#d0d7de"/>
+<text x="680.0" y="547" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#57606a" text-anchor="middle">ID_VAR</text>
+<text x="680.0" y="573" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">0</text>
+<text x="680.0" y="599" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">0</text>
+<text x="680.0" y="625" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">0</text>
+<text x="680.0" y="651" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">0</text>
+<line x1="720" y1="530" x2="720" y2="660" stroke="#d0d7de"/>
+<text x="764.0" y="547" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#57606a" text-anchor="middle">ID_SAMP</text>
+<text x="764.0" y="573" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">0</text>
+<text x="764.0" y="599" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">0</text>
+<text x="764.0" y="625" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">1</text>
+<text x="764.0" y="651" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">1</text>
+<line x1="808" y1="530" x2="808" y2="660" stroke="#d0d7de"/>
+<text x="848.0" y="547" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#57606a" text-anchor="middle">ID_ALT</text>
+<text x="848.0" y="573" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">0</text>
+<text x="848.0" y="599" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">1</text>
+<text x="848.0" y="625" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">0</text>
+<text x="848.0" y="651" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#57606a" text-anchor="middle">1</text>
+<line x1="888" y1="530" x2="888" y2="660" stroke="#d0d7de"/>
+<text x="929.0" y="547" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="bold" fill="#3f8a33" text-anchor="middle">AO</text>
+<text x="929.0" y="573" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#1f2328" text-anchor="middle">20</text>
+<text x="929.0" y="599" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#1f2328" text-anchor="middle">1</text>
+<text x="929.0" y="625" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#1f2328" text-anchor="middle">17</text>
+<text x="929.0" y="651" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="normal" fill="#1f2328" text-anchor="middle">4</text>
+<text x="30" y="680" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="normal" fill="#57606a" text-anchor="start">ID_VAR, ID_ALT and ID_SAMP are integer keys: join the tables on them to recombine the record.</text>
+</svg>
