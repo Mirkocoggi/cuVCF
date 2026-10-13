@@ -27,5 +27,5 @@ bcfbcftools-1.22/
 docs/
 build*/
 .venv/
-test_cuVCF.py
+/integration_test/
 /out/

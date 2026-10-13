@@ -626,7 +626,7 @@ public:
 
             key.clear();
             while(p < e && !is_sep(p)) key.push_back(filestring[p++]);
-            var_columns.chrom_map.emplace(key, static_cast<char>(var_columns.chrom_map.size()));
+            var_columns.chrom_map.emplace(key, static_cast<uint16_t>(var_columns.chrom_map.size()));
             if(p < e && filestring[p] != '\n') p++;
 
             for(int field = 2; field <= 6 && p < e; field++){ // skip POS, ID, REF, ALT, QUAL

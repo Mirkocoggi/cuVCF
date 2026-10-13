@@ -176,7 +176,7 @@ static py::array_t<uint16_t> half_vector_to_uint16(const std::vector<half>& v){
 static py::dict get_var_columns_data(const var_columns_df& df){
     py::dict d;
     d["var_number"] = py::array_t<unsigned int>(df.var_number.size(),df.var_number.data());
-    d["chrom"]      = py::array_t<char>        (df.chrom.size(),df.chrom.data());
+    d["chrom"]      = py::array_t<uint16_t>        (df.chrom.size(),df.chrom.data());
     d["pos"]        = py::array_t<unsigned int>(df.pos.size(),df.pos.data());
     d["id"]         = py::cast(df.id);
     d["ref"]        = py::cast(df.ref);

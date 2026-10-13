@@ -78,14 +78,14 @@ public:
     vector<unsigned int> var_number;
     
     /** 
-     * @brief Maps chromosome names to compact char codes
+     * @brief Maps chromosome names to compact 16-bits codes
      * @details Provides efficient storage by mapping chromosome names (e.g., "chr1") 
-     *          to single character codes
+     *          to 16-bit codes
      */
-    std::map<std::string, char> chrom_map;
+    std::map<std::string, uint16_t> chrom_map;
     
     /** @brief Vector storing chromosome codes sequentially */
-    vector<char> chrom;
+    vector<uint16_t> chrom;
     
     /** @brief Vector storing genomic positions */
     vector<unsigned int> pos;
@@ -209,7 +209,7 @@ public:
                 iter++;
                 // chrom_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
                 auto chrom_it = chrom_map.find(tmp);
-                chrom[i] = (chrom_it != chrom_map.end()) ? chrom_it->second : static_cast<char>(0);
+                chrom[i] = (chrom_it != chrom_map.end()) ? chrom_it->second : uint16_t(0);
             }else{
                 tmp += at(iter);
                 iter++;
@@ -498,7 +498,7 @@ public:
                 iter++;
                 // chrom_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
                 auto chrom_it = chrom_map.find(tmp);
-                chrom[i] = (chrom_it != chrom_map.end()) ? chrom_it->second : static_cast<char>(0);
+                chrom[i] = (chrom_it != chrom_map.end()) ? chrom_it->second : uint16_t(0);
             }else{
                 tmp += at(iter);
                 iter++;
@@ -965,7 +965,7 @@ public:
      */
     void print(long num_lines){
         // Reverse lookup of a code in chrom_map / filter_map
-        auto name_of = [](const std::map<std::string, char>& m, char code) -> std::string {
+        auto name_of = [](const auto& m, auto code) -> std::string {
             for (const auto& pair : m) if (pair.second == code) return pair.first;
             return "nan";
         };
