@@ -1,22 +1,13 @@
 CXX      = g++
 NVCC     = nvcc
 
-# Imath flag potrebbe essere necessario includerlo nei path
-# Se Imath e' installato globalmente, -lImath basta.
 CXXFLAGS = -std=c++17 -Wall -O2 -fopenmp
-# Aggiunto -arch=native per assicurare il supporto a __half sulla tua GPU
-# NVCC_CCBIN: host compiler per nvcc. Su alcune macchine (gcc/nvcc troppo recenti)
-# serve forzare una versione piu' vecchia, es: make gpu NVCC_CCBIN=g++-12
-# Lascia vuoto (make gpu NVCC_CCBIN=) per usare il default di nvcc.
 NVCC_CCBIN ?= g++-12
-# nvcc non riconosce alcune intrinsics AMX/AVX512-BF16 dichiarate dagli header di sistema
-# di gcc (bug del front-end di nvcc, non del progetto). Il progetto non usa queste intrinsics,
-# quindi si predefiniscono gli include-guard dei rispettivi header per saltarne il contenuto
-# prima che nvcc provi a parsarlo. Innocuo se la macchina non ha questo bug.
+
 NVCC_AVX512_AMX_FIX = -D_AVX512BF16INTRIN_H_INCLUDED -D_AVX512BF16VLINTRIN_H_INCLUDED \
                       -D_AMXTILEINTRIN_H_INCLUDED -D_AMXBF16INTRIN_H_INCLUDED
 NVCCFLAGS= -std=c++17 -O2 -Xcompiler -fopenmp -arch=native $(if $(NVCC_CCBIN),-ccbin $(NVCC_CCBIN)) $(NVCC_AVX512_AMX_FIX)
-# -lineinfo keeps symbol/line info for Nsight Compute source correlation without disabling opts
+
 NVCCFLAGS_PROF = $(NVCCFLAGS) -lineinfo
 INCLUDES = -Iinclude -Isrc/CPUVersion -Isrc/GPUVersion
 BUILD    = build

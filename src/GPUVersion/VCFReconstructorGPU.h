@@ -19,8 +19,8 @@
 #define MAX_NAME_LEN 16
 #define MAX_SAMPLE_STRING_LEN 64
 #define CHUNK_SIZE   10000
-#define BLOCK_SIZE   256
-#define NUM_BLOCKS   256
+#define BLOCK_SIZE   128
+#define NUM_BLOCKS   1024
 
 // Vectors backed by pinned (page-locked) host memory: every one of these is
 // used as a cudaMemcpy source in uploadToDevice(), so pinning them is what

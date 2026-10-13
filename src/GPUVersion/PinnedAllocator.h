@@ -14,10 +14,6 @@
  * convenience methods (resize/assign/push_back/clear) unchanged. Pinned
  * memory is required for cudaMemcpyAsync to actually run asynchronously —
  * with pageable memory the driver silently falls back to a synchronous copy.
- *
- * Deliberately self-contained (no dependency on CudaUtils.cuh's gpuErrchk)
- * so it can be included from a plain header without risking a duplicate
- * (unguarded) inclusion of CudaUtils.cuh in the same translation unit.
  */
 template <typename T>
 struct PinnedAllocator {

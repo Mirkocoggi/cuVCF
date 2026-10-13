@@ -5,7 +5,7 @@
 #include <sstream>
 #include <omp.h>
 #include <chrono>
-#include <cub/cub.cuh>  // also pulls in nvtx3/nvToolsExt.h → nvtxRangePushA / nvtxRangePop
+#include <cub/cub.cuh>
 
 //Constructor
 VCFReconstructorGPU::VCFReconstructorGPU(const std::string& output_vcf_path,
