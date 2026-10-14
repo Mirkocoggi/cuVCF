@@ -78,7 +78,7 @@ public:
     vector<unsigned int> var_number;
     
     /** 
-     * @brief Maps chromosome names to compact 16-bits codes
+     * @brief Maps chromosome names to compact 16-bit codes
      * @details Provides efficient storage by mapping chromosome names (e.g., "chr1") 
      *          to 16-bit codes
      */

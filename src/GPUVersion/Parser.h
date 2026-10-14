@@ -334,7 +334,7 @@ public:
     void get_vcf_line_in_var_columns_format(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt, sample_columns_df* sample, header_element* FORMAT, int *tmp_num_alt_format, alt_format_df* tmp_alt_format, format_plan_cache* plans);
 
     /// Read-only lookups for the parallel host parse (filled by build_host_lookup)
-    std::unordered_map<std::string_view, unsigned char> host_chrom;
+    std::unordered_map<std::string_view, uint16_t> host_chrom;
     std::unordered_map<std::string_view, char> host_filter;
     std::unordered_map<std::string_view, host_key> host_info;
 

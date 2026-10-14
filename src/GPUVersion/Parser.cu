@@ -1047,7 +1047,7 @@ void vcf_parsed::prebuild_chrom_filter_maps(){
     }
     if(chunk_error) std::rethrow_exception(chunk_error);
     for(int c = 0; c < n_chunks; c++){
-        for(auto name : chunk_chroms[c]) var_columns.chrom_map.emplace(std::string(name), static_cast<unsigned char>(var_columns.chrom_map.size()));
+        for(auto name : chunk_chroms[c]) var_columns.chrom_map.emplace(std::string(name), static_cast<uint16_t>(var_columns.chrom_map.size()));
         for(auto name : chunk_filters[c]) var_columns.filter_map.emplace(std::string(name), static_cast<char>(var_columns.filter_map.size()));
     }
 }
@@ -1473,7 +1473,7 @@ const char* vcf_parsed::parse_record_head(const char* p, const char* e, long i, 
     // CHROM (chrom_map is filled before the parallel parse, read only here)
     const char* q = field_end(p, e);
     auto chrom_it = host_chrom.find(std::string_view(p, q - p));
-    var_columns.chrom[i] = (chrom_it != host_chrom.end()) ? chrom_it->second : static_cast<unsigned char>(0);
+    var_columns.chrom[i] = (chrom_it != host_chrom.end()) ? chrom_it->second : uint16_t(0);
     p = next_field(q, e);
     // POS: on device
     p = next_field(field_end(p, e), e);

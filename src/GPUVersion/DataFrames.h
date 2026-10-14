@@ -35,10 +35,10 @@ class var_columns_df //DF1
 public:
     /// Vector of variant numbers.
     std::vector<unsigned int> var_number;
-    /// Map from chromosome string to a unique unsigned char code.
-    std::map<std::string, unsigned char> chrom_map;
+    /// Map from chromosome string to a unique 16-bit code.
+    std::map<std::string, uint16_t> chrom_map;
     /// Vector of chromosome codes.
-    std::vector<char> chrom;
+    std::vector<uint16_t> chrom;
     /// Vector of variant positions.
     std::vector<unsigned int> pos;
     /// Vector of variant IDs.
@@ -87,9 +87,9 @@ public:
             else
                 std::cout << "nan\t";
             
-            // Print Chrom: build key from single character
+            // Print Chrom: reverse lookup of the code in chrom_map
             if (i < static_cast<long>(chrom.size())) {
-                unsigned char code = chrom[i];
+                uint16_t code = chrom[i];
                 bool found = false;
                 for (const auto& pair : chrom_map) {
                     if (pair.second == code) {
