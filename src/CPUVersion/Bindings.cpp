@@ -31,6 +31,7 @@
 #include "VCF_parsed.h"
 #include "VCF_var_columns_df.h"
 #include "VCFparser_mt_col_struct.h"   
+#include "VCFReconstructor.h"
 
 namespace py = pybind11;
 
@@ -396,6 +397,9 @@ PYBIND11_MODULE(CPUParser, m) {
     py::class_<vcf_parsed>(m, "vcf_parsed", py::module_local())
         .def(py::init<>())
         .def("run",&vcf_parsed::run,py::arg("vcf_filename"),py::arg("num_threads"))
+        .def("reconstruct_vcf", [](const vcf_parsed& self, const std::string& path, int num_threads){
+            VCFReconstructor(path, self.header).run(self.var_columns, self.alt_columns, self.samp_columns, self.alt_sample, num_threads);
+        }, py::arg("vcf_filename"), py::arg("num_threads"))
         .def_readwrite("id",&vcf_parsed::id)
         .def_readwrite("header",&vcf_parsed::header)
         .def_readwrite("INFO",&vcf_parsed::INFO)

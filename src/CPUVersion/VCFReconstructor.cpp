@@ -451,7 +451,7 @@ std::string VCFReconstructor::formatVariant(int index,
             std::string sample_data = "";
 
             // --- GT ---
-            // Retrieve Genotype string. Fallback to ".|." if missing/unmapped (-1).
+            // Retrieve Genotype string. Fallback to "./." if the genotype is not stored.
             if (has_gt) {
                 bool found = false;
                 char gt_code = 0;
