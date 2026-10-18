@@ -31,13 +31,20 @@ static inline float safe_stof(const std::string& s){
     try{ return std::stof(s); }catch(const std::exception&){ return 0.0f; }
 }
 
-// The Ensembl TSA (variant class) String INFO is stored as an Integer code, like the GPU backend.
+// TSA names, values not in the table get TSA_UNKNOWN
+static const char* const tsa_names[] = {
+    "SNV", "insertion", "deletion", "inversion", "indel",
+    "substitution", "sequence_alteration"
+};
+static constexpr int TSA_UNKNOWN = -1;
+
 static inline int tsa_code(const std::string& v){
-    if(v == "SNV") return 0;
-    if(v == "INS" || v == "insertion") return 1;
-    if(v == "DEL" || v == "deletion") return 2;
-    if(v == "INV" || v == "inversion") return 3;
-    return 4;
+    if(v == "INS") return 1;
+    if(v == "DEL") return 2;
+    if(v == "INV") return 3;
+    for(int c = 0; c < static_cast<int>(sizeof(tsa_names) / sizeof(tsa_names[0])); c++)
+        if(v == tsa_names[c]) return c;
+    return TSA_UNKNOWN;
 }
 
 /**

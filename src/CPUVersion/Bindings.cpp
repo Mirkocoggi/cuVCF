@@ -273,6 +273,8 @@ PYBIND11_MODULE(CPUParser, m) {
         .def("__repr__",&GTWrapper::to_string);
     py::bind_map<std::map<std::string,char>>(m, "FilterMap", py::module_local());
     m.attr("GTMapGlobal") = py::cast(&GTWrapper::GTMap);
+    m.attr("TSA_NAMES") = py::make_tuple("SNV","insertion","deletion","inversion","indel","substitution",
+        "sequence_alteration");
 
     /*  helper NumPy dict  */
     m.def("get_var_columns_data",   &get_var_columns_data);
