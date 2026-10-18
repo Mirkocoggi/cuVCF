@@ -24,10 +24,10 @@ set(COMMON_DEPS ZLIB::ZLIB Imath::Imath OpenMP::OpenMP_CXX)
 
 # ── CPU backend ──────────────────────────────────────────────────
 
-add_executable(VCFparser_cpu src/CPUVersion/VCFparser_mt_col.cpp)
+add_executable(VCFparser_cpu src/CPUVersion/VCFparser_mt_col.cpp src/CPUVersion/VCFReconstructor.cpp)
 target_link_libraries(VCFparser_cpu PRIVATE ${COMMON_DEPS})
 
-pybind11_add_module(CPUParser src/CPUVersion/Bindings.cpp src/CPUVersion/VCFparser_mt_col.cpp)
+pybind11_add_module(CPUParser src/CPUVersion/Bindings.cpp src/CPUVersion/VCFparser_mt_col.cpp src/CPUVersion/VCFReconstructor.cpp)
 target_link_libraries(CPUParser PRIVATE ${COMMON_DEPS})
 
 if(CUVCF_SANITIZE)

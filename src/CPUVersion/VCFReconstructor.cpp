@@ -1,9 +1,11 @@
 #include "VCFReconstructor.h"
-#include "Utils.h"
-#include "Maps.h"
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <iterator>
+#include <cstdio>
+#include <cctype>
+#include <stdexcept>
 #include <omp.h>
 
 
@@ -13,10 +15,17 @@ VCFReconstructor::VCFReconstructor(const std::string& output_vcf_path,
       header_text(header_text) {
 }
 
+/*Strip trailing digits from a field name: cuVCF splits Number>1 into AD0, AD1,...*/
+static std::string stripTrailingDigits(const std::string& name){
+    std::string r = name;
+    while(!r.empty() && std::isdigit(static_cast<unsigned char>(r.back()))) r.pop_back();
+    return r;
+}
+
 /*
  * Recovers the original string values for CHROM and FILTER.
- * In the DataFrames, these are stored as chars to save RAM. 
- * We invert the maps (char -> string) so we can quickly print the actual text to the VCF.
+ * In the DataFrames, these are stored as compact codes to save RAM.
+ * We invert the maps (code -> string) so we can quickly print the actual text to the VCF.
  */
 void VCFReconstructor::buildInverseMaps(const var_columns_df& df1) {
     for (const auto& pair : df1.chrom_map) {
@@ -24,15 +33,6 @@ void VCFReconstructor::buildInverseMaps(const var_columns_df& df1) {
     }
     for (const auto& pair : df1.filter_map) {
         inv_filter_map[pair.second] = pair.first;
-    }
-    for (const auto& pair : polyphenCharMap) {
-        inv_polyphen_map[pair.second] = pair.first;
-    }
-    for (const auto& pair : csqCharMap) {
-        inv_csq_map[pair.second] = pair.first;
-    }
-    for (const auto& pair : tsaCharMap) {
-        inv_tsa_map[pair.second] = pair.first;
     }
 }
 
@@ -110,7 +110,8 @@ std::vector<VCFReconstructor::ChunkCursor> VCFReconstructor::computeChunkCursor(
 void VCFReconstructor::run(const var_columns_df& df1,
                             const alt_columns_df& df2,
                             const sample_columns_df& df3,
-                            const alt_format_df& df4) {
+                            const alt_format_df& df4,
+                            int num_threads) {
 
     std::ofstream vcf_file(output_vcf_path);
     if (!vcf_file.is_open()) {
@@ -212,7 +213,6 @@ void VCFReconstructor::run(const var_columns_df& df1,
     }
 
     // 5. Pre-compute chunk cursors 
-    int num_threads = omp_get_max_threads();
     std::vector<ChunkCursor> chunks = computeChunkCursor(df1, df2, df4, num_threads);
 
     // 6. Parallel processing - each thread writes to its own temp file
@@ -329,7 +329,10 @@ std::string VCFReconstructor::formatVariant(int index,
         if (val != -1) {
             if (!first_info) ss << ";";
             const std::string& name = df1.in_int[col].name;
-            ss << name << "=" << val;
+            if(name == "TSA" && val >= 0 && val < static_cast<int>(std::size(tsa_names)))
+                ss << name << "=" << tsa_names[val];
+            else
+                ss << name << "=" << val;
             first_info = false;
         }
     }
@@ -349,28 +352,7 @@ std::string VCFReconstructor::formatVariant(int index,
         const std::string& val = df1.in_string[col].i_string[index];
         if (!val.empty() && val != "." && val != "\0") {
             if (!first_info) ss << ";";
-            const std::string& name = df1.in_string[col].name;
-            if (name == "TSA") {
-                try {
-                    int code = std::stoi(val);
-                    auto it = inv_tsa_map.find(code);
-                    ss << name << "=" << (it != inv_tsa_map.end() ? it->second : val);
-                } catch (...) { ss << name << "=" << val; }
-            } else if (name == "PolyPhen") {
-                try {
-                    int code = std::stoi(val);
-                    auto it = inv_polyphen_map.find(code);
-                    ss << name << "=" << (it != inv_polyphen_map.end() ? it->second : val);
-                } catch (...) { ss << name << "=" << val; }
-            } else if (name == "CSQ") {
-                try {
-                    int code = std::stoi(val);
-                    auto it = inv_csq_map.find(code);
-                    ss << name << "=" << (it != inv_csq_map.end() ? it->second : val);
-                } catch (...) { ss << name << "=" << val; }
-            } else {
-                ss << name << "=" << val;
-            }
+            ss << df1.in_string[col].name << "=" << val;
             first_info = false;
         }
     }

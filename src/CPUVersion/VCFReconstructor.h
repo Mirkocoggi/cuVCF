@@ -16,7 +16,7 @@
 #include <string>
 #include <map>
 #include <vector>
-#include "VCFDataFrames.h"
+#include "VCF_parsed.h"
 
 /**
  * @brief Reconstructs a standard VCF (Variant Call Format) file from parsed column-oriented DataFrames.
@@ -53,7 +53,8 @@ public:
     void run(const var_columns_df& df1,
              const alt_columns_df& df2,
              const sample_columns_df& df3,
-             const alt_format_df& df4);
+             const alt_format_df& df4,
+             int num_threads);
 
 private:
     std::string output_vcf_path; ///< Path where the reconstructed VCF will be saved.
@@ -64,14 +65,10 @@ private:
     bool gt_in_df3;              ///< True if Genotype (GT) data is stored in the core sample DataFrame (DF3).
     bool gt_in_df4;              ///< True if Genotype (GT) data is stored in the per-allele DataFrame (DF4).
 
-    std::map<char, std::string> inv_chrom_map;             ///< Decodes compact chromosome char keys back to original strings.
+    std::map<uint16_t, std::string> inv_chrom_map;             ///< Decodes 16-bit chromosome codes back to original strings.
     std::map<char, std::string> inv_filter_map;            ///< Decodes compact filter char keys back to original strings.
     std::vector<std::string> ordered_samp_names;           ///< List of sample names, strictly ordered by their numerical IDs.
     std::map<std::string, std::string> format_numbers;     ///< Maps FORMAT field IDs to their Number attribute (e.g., "AD" -> "R").
-
-    std::map<char, std::string> inv_polyphen_map;          ///< Decodes compact polyphen char keys back to original strings.
-    std::map<char, std::string> inv_csq_map;               ///< Decodes compact csq char keys back to original strings.
-    std::map<char, std::string> inv_tsa_map;               ///< Decodes compact tsa char keys back to original strings.
 
     /**
      * @brief Holds the pre-computed start and end positions for a single thread's chunk.
