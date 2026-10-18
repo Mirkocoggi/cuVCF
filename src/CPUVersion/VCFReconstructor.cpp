@@ -453,28 +453,31 @@ std::string VCFReconstructor::formatVariant(int index,
             // --- GT ---
             // Retrieve Genotype string. Fallback to ".|." if missing/unmapped (-1).
             if (has_gt) {
-                char gt_code = -1;
-                if (gt_in_df3) {
+                bool found = false;
+                char gt_code = 0;
+                if(gt_in_df3) {
                     gt_code = df3.sample_GT[0].GT[df3_idx];
-                } else if (gt_in_df4 && start_df4 != -1) {
+                    found = true;
+                } else if (gt_in_df4&& start_df4 != -1) {
                     size_t k = static_cast<size_t>(start_df4);
-                    
-                    // Search for the specific sample_id within the current variant's DF4 chunk
-                    while (k < df4.var_id.size() && df4.var_id[k] == current_var_id) {
-                        if (df4.samp_id[k] == static_cast<unsigned short>(i)) {
+
+                    //Search for the specific sample_id within the current variant's DF4 chunk
+                    while(k < df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                        if(df4.samp_id[k] == static_cast<unsigned short>(i)){
                             gt_code = df4.sample_GT.GT[k];
-                            break;
+                            found = true;
+                            break; 
                         }
                         k++;
                     }
                 }
 
-                if (gt_code == -1) {
-                    ss << ".|.";
+                if(!found) {
+                    ss << "./.";
                     continue;
                 }
                 sample_data = df3.getGTStringFromChar(gt_code);
-                if (sample_data == ".|." || sample_data == "./.") {
+                if(sample_data == ".|." || sample_data == "./.") {
                     ss << sample_data;
                     continue;
                 }
