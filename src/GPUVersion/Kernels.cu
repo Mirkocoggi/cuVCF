@@ -191,20 +191,22 @@ __device__ void get_vcf_line(const KernelParams* params, char* my_mem, int currB
             while (el < params->numInfoInt && cuda_strncmp(&(params->int_name[el*MAX_NAME_SIZE]), key, MAX_NAME_SIZE) != 0) ++el;
             if (el < params->numInfoInt) {
                 if(cuda_strncmp(&(params->int_name[el*MAX_NAME_SIZE]), "TSA", MAX_NAME_SIZE)==0){
-                    if(!cuda_strncmp(value, "SNV", MAX_TOKEN_LEN)){
-                        params->in_int[el*params->numLines+thID] = 0;
-                    }else if(!cuda_strncmp(value, "INS", MAX_TOKEN_LEN) || !cuda_strncmp(value, "insertion", MAX_TOKEN_LEN)){
-                        params->in_int[el*params->numLines+thID] = 1;
-                    }else if(!cuda_strncmp(value, "DEL", MAX_TOKEN_LEN) || !cuda_strncmp(value, "deletion", MAX_TOKEN_LEN)){
-                        params->in_int[el*params->numLines+thID] = 2;
-                    }else if(!cuda_strncmp(value, "INV", MAX_TOKEN_LEN) || !cuda_strncmp(value, "inversion", MAX_TOKEN_LEN)){
-                        params->in_int[el*params->numLines+thID] = 3;
-                    }else{
-                        params->in_int[el*params->numLines+thID] = 4;
-                    }
+                    // Same codes as tsa_names in CPUVersion
+                    int code = -1; // TSA_UNKNOWN
+                    if     (!cuda_strncmp(value, "SNV", MAX_TOKEN_LEN))                 code = 0;
+                    else if(!cuda_strncmp(value, "insertion", MAX_TOKEN_LEN) ||
+                            !cuda_strncmp(value, "INS", MAX_TOKEN_LEN))                 code = 1;
+                    else if(!cuda_strncmp(value, "deletion", MAX_TOKEN_LEN) ||
+                            !cuda_strncmp(value, "DEL", MAX_TOKEN_LEN))                 code = 2;
+                    else if(!cuda_strncmp(value, "inversion", MAX_TOKEN_LEN) ||
+                            !cuda_strncmp(value, "INV", MAX_TOKEN_LEN))                 code = 3;
+                    else if(!cuda_strncmp(value, "indel", MAX_TOKEN_LEN))               code = 4;
+                    else if(!cuda_strncmp(value, "substitution", MAX_TOKEN_LEN))        code = 5;
+                    else if(!cuda_strncmp(value, "sequence_alteration", MAX_TOKEN_LEN)) code = 6;
+                    params->in_int[el*params->numLines+thID] = code;
                 }else{
-                    params->in_int[el*params->numLines+thID] = cuda_atoi(value);                   
-                }  
+                    params->in_int[el*params->numLines+thID] = cuda_atoi(value);
+                }
             }
         } else if (type == FLOAT) {
             // Process FLOAT type

@@ -304,6 +304,8 @@ PYBIND11_MODULE(GPUParser, m) {
     init_GTMap();
     bind_GTWrapper(m);
     m.attr("GTMapGlobal") = py::cast(&GTWrapper::GTMap);
+    m.attr("TSA_NAMES") = py::make_tuple("SNV","insertion","deletion","inversion","indel","substitution",
+        "sequence_alteration");
 
     py::class_<samp_GT>(m, "samp_GT", py::module_local())
         .def(py::init<>())
