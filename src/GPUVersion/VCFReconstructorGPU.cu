@@ -757,11 +757,7 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
     buildSampleNames(df3);
     format_numbers = parseFormatNumbers(header_text);
 
-    //Profiling
-    printf("=== block_size=%d | num_blocks=%d | chunk_size=%d ===\n", BLOCK_SIZE, NUM_BLOCKS, CHUNK_SIZE);
 
-    df3_int_groups   = buildGroups(df3.samp_int,   format_numbers);
-    df3_float_groups = buildGroups(df3.samp_float, format_numbers);
     df4_int_groups   = buildGroups(df4.samp_int,   format_numbers);
     df4_float_groups = buildGroups(df4.samp_float, format_numbers);
 
