@@ -16,7 +16,6 @@
 #include <queue>
 
 #define MAX_NAME_LEN 16
-#define MAX_SAMPLE_STRING_LEN 64
 #define CHUNK_SIZE   10000
 #define BLOCK_SIZE   128
 #define NUM_BLOCKS   1024
@@ -168,6 +167,8 @@ private:
     int num_threads = 1;                            ///< OpenMP threads for the host-side preparation, set by run().
     size_t line_fixed_bound = 0;                    ///< Upper bound of the part of a line that does not depend on its content, set by run().
     size_t alt_fixed_bound  = 0;                    ///< Upper bound added by each ALT allele, besides the ALT and INFO-ALT strings, set by run().
+    size_t cell_fixed_bound = 0;                    ///< Upper bound of a sample cell without its strings and DF4 rows, set by run().
+    size_t df4_row_bound    = 0;                    ///< Upper bound added by each DF4 row of a sample, besides its strings, set by run().
 
     /**
      * @brief Parses the VCF header to extract the 'Number' attribute for each FORMAT ID.
@@ -199,7 +200,7 @@ private:
     size_t cap_df2_var_id[2] = {0, 0}, cap_alt_data[2] = {0, 0}, cap_alt_offsets[2] = {0, 0};
     size_t cap_alt_int[2] = {0, 0}, cap_alt_float[2] = {0, 0}, cap_alt_string_data[2] = {0, 0}, cap_alt_string_offsets[2] = {0, 0};
     size_t cap_compacted[2] = {0, 0};
-    size_t cap_temp_storage[2] = {0, 0}, cap_output[2] = {0, 0};
+    size_t cap_temp_storage[2] = {0, 0}, cap_output[2] = {0, 0}, cap_sample_data[2] = {0, 0};
     unsigned char* d_temp_storage[2] = {nullptr, nullptr}; ///< Persistent scratch storage for cub::DeviceScan, grown on demand.
 
     // Explicit CUDA streams (created in run(), destroyed at teardown). Chunk i

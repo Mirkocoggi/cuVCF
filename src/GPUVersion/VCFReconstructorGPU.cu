@@ -25,6 +25,11 @@ static const char* const tsa_names[] = {
     "substitution", "sequence_alteration"
 };
 
+// Longest text device_itoa / device_ftoa / getGTStringFromChar can write: used to bound the output buffers
+static constexpr size_t INT_LEN   = 11; // "-2147483648"
+static constexpr size_t FLOAT_LEN = 19; // '-', 11 digits, '.', 6 decimals
+static constexpr size_t GT_LEN    = 9;  // "Not found"
+
 //Constructor
 VCFReconstructorGPU::VCFReconstructorGPU(const std::string& output_vcf_path,
                                          const std::string& header_text)
@@ -140,7 +145,7 @@ void VCFReconstructorGPU::freeDevice(){
         cap_id_data[s] = cap_ref_data[s] = cap_in_string_data[s] = 0;
         cap_df2_var_id[s] = cap_alt_data[s] = cap_alt_offsets[s] = 0;
         cap_alt_int[s] = cap_alt_float[s] = cap_alt_string_data[s] = cap_alt_string_offsets[s] = 0;
-        cap_compacted[s] = cap_temp_storage[s] = cap_output[s] = 0;
+        cap_compacted[s] = cap_temp_storage[s] = cap_output[s] = cap_sample_data[s] = 0;
     }
 }
 
@@ -236,10 +241,8 @@ void VCFReconstructorGPU::initDeviceBuffers(const var_columns_df& df1,
         gpuErrchk(cudaMalloc((void**)&d_df2[s].alt_start, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
         gpuErrchk(cudaMalloc((void**)&d_df2[s].alt_count, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
 
-        // --- DF3 (Sample strings upper bound) ---
+        // --- DF3 (sample_data depends on the chunk's strings: grown in uploadToDevice()) ---
         d_df3[s].num_samples = df3.numSample;
-        size_t max_sample_chars = (size_t)CHUNK_SIZE * df3.numSample * MAX_SAMPLE_STRING_LEN;
-        gpuErrchk( cudaMalloc(&d_df3[s].sample_data,    max_sample_chars * sizeof(char)));
         gpuErrchk( cudaMalloc(&d_df3[s].sample_offsets, (size_t)CHUNK_SIZE * df3.numSample * sizeof(unsigned int)));
     }
 }
@@ -392,6 +395,7 @@ void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
                         d_df2[slot].num_alt_string_fields * df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
 
     // --- DF3 Sample Data Copies ---
+    ensureDeviceCapacity(d_df3[slot].sample_data, cap_sample_data[slot], buffers.sample_buffer.size());
     gpuErrchk(cudaMemcpyAsync(d_df3[slot].sample_data, buffers.sample_buffer.data(),
                          buffers.sample_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, stream));
     gpuErrchk(cudaMemcpyAsync(d_df3[slot].sample_offsets, buffers.sample_offsets.data(),
@@ -992,8 +996,6 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
     // Upper bound of the line parts that do not depend on the content; prepareHostBuffers() adds
     // ID/REF/ALT/INFO strings and the sample strings to get each line's bound
     {
-        const size_t INT_LEN = 11;   // "-2147483648"
-        const size_t FLOAT_LEN = 19; // '-', 11 digits, '.', 6 decimals (device_ftoa)
         size_t max_chrom = 0, max_filter = 0, max_tsa = 0;
         for (const auto& p : inv_chrom_map)  max_chrom  = std::max(max_chrom,  p.second.size());
         for (const auto& p : inv_filter_map) max_filter = std::max(max_filter, p.second.size());
@@ -1015,6 +1017,18 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
                         + df2.alt_int.size()    * (INT_LEN + 1)   // value and ','
                         + df2.alt_float.size()  * (FLOAT_LEN + 1)
                         + df2.alt_string.size() * 2;              // '.' and ','
+
+        // Sample cells (buildSampleStrings): ':' before each field, '.' for an empty one, '\0' at the end
+        cell_fixed_bound = (1 + GT_LEN) + 1;
+        for (const auto& g : df3_int_groups)   cell_fixed_bound += 1 + (g.col_end - g.col_start) * (INT_LEN + 1);
+        for (const auto& g : df3_float_groups) cell_fixed_bound += 1 + (g.col_end - g.col_start) * (FLOAT_LEN + 1);
+        cell_fixed_bound += df3.samp_string.size() * 2;
+        cell_fixed_bound += (df4_int_groups.size() + df4_float_groups.size() + df4.samp_string.size()) * 2;
+
+        df4_row_bound = 0;  // each DF4 row of the sample adds its values and the ',' before them
+        for (const auto& g : df4_int_groups)   df4_row_bound += (g.col_end - g.col_start) * (INT_LEN + 1);
+        for (const auto& g : df4_float_groups) df4_row_bound += (g.col_end - g.col_start) * (FLOAT_LEN + 1);
+        df4_row_bound += df4.samp_string.size() * 2;
     }
 
     // Persistent device buffers: allocated once here instead of every chunk.
@@ -1399,7 +1413,7 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
     {
         int tid = omp_get_thread_num();
         int my_var_count = (chunk_size + num_threads - 1) / num_threads;
-        scratch[tid].resize((size_t)my_var_count * num_samples * MAX_SAMPLE_STRING_LEN);
+        scratch[tid].resize((size_t)my_var_count * num_samples * cell_fixed_bound);     // grown below when strings or DF4 rows need more
         cell_offsets_in_scratch[tid].reserve(my_var_count * num_samples);
         global_indices[tid].reserve(my_var_count * num_samples);
 
@@ -1415,7 +1429,21 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
             for (int s = 0; s < num_samples; s++) {
                 size_t df3_idx = (size_t)i * num_samples + s;
 
+                // Make room for this cell's longest possible text before taking a pointer into scratch
+                size_t need = cell_fixed_bound;
+                for (size_t col = 0; col < df3.samp_string.size(); col++) need += df3.samp_string[col].i_string[df3_idx].size();
+                if (start_df4 != -1) {
+                    for (long k = start_df4; k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id; k++) {
+                        if (df4.samp_id[k] != (unsigned short)s) continue;
+                        need += df4_row_bound;
+                        for (size_t col = 0; col < df4.samp_string.size(); col++) need += df4.samp_string[col].i_string[k].size();
+                    }
+                }
+                if (local_pos + need > scratch[tid].size())
+                    scratch[tid].resize(std::max(scratch[tid].size() * 2, local_pos + need));
+
                 char* w  = scratch[tid].data() + local_pos;
+
                 char* w0 = w;
                 bool first_field = true;
                 auto write_sep = [&]() { if (!first_field) *w++ = ':'; first_field = false; };
