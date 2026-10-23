@@ -15,7 +15,6 @@
 #include <condition_variable>
 #include <queue>
 
-#define MAX_NAME_LEN 16
 #define CHUNK_SIZE   10000
 #define BLOCK_SIZE   128
 #define NUM_BLOCKS   1024

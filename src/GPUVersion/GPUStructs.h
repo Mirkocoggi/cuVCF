@@ -56,6 +56,7 @@ struct DeviceVarColumns {
     int num_flag_fields = 0;            ///< Total number of Flag INFO columns
     int num_string_fields = 0;          ///< Total number of INFO columns of type String.
     int tsa_field = -1;                 ///< Index of TSA among the integer INFO columns, -1 if absent
+    int name_stride = 0;                ///< Bytes per name in the *_names tables: longest INFO key + 1
 };
 
 /**
@@ -84,6 +85,7 @@ struct DeviceAltColumns {
     int num_alt_int_fields = 0;         ///< Number of allele-specific integer fields
     int num_alt_float_fields = 0;       ///< Number of allele-specific float fields
     int num_alt_string_fields = 0;      ///< Number of allele-specific string fields.
+    int name_stride = 0;                ///< Bytes per name in the alt_*_names tables: longest INFO key + 1
 };
 
 /**

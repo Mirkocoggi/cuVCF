@@ -527,7 +527,7 @@ __global__ void reconstructKernel(
                     line[pos++] = ';';
                 }
                 first_info = false;
-                pos += device_strcpy(line + pos, df1.flag_names + f * MAX_NAME_LEN);
+                pos += device_strcpy(line + pos, df1.flag_names + f * df1.name_stride);
             }
         }
 
@@ -539,7 +539,7 @@ __global__ void reconstructKernel(
                     line[pos++] = ';';
                 }
                 first_info = false;
-                pos += device_strcpy(line + pos, df1.int_names + f * MAX_NAME_LEN);
+                pos += device_strcpy(line + pos, df1.int_names + f * df1.name_stride);
                 line[pos++] = '=';
                 if(f == df1.tsa_field && v>=0 && v < maps.tsa_count)
                     pos += device_strcpy(line + pos, maps.tsa_strings + maps.tsa_offsets[v]);
@@ -555,7 +555,7 @@ __global__ void reconstructKernel(
                     line[pos++] = ';';
                 }
                 first_info = false;
-                pos += device_strcpy(line + pos, df1.float_names + f * MAX_NAME_LEN);
+                pos += device_strcpy(line + pos, df1.float_names + f * df1.name_stride);
                 line[pos++] = '=';
                 pos += device_ftoa(__half2float(df1.in_float[f * chunk_size + i]), line + pos);
             }
@@ -572,7 +572,7 @@ __global__ void reconstructKernel(
                 if(!first_info) line[pos++] = ';';
                 first_info = false;
                 
-                pos += device_strcpy(line + pos, df1.string_names + f * MAX_NAME_LEN);
+                pos += device_strcpy(line + pos, df1.string_names + f * df1.name_stride);
                 line[pos++] = '=';
                 pos += device_strcpy(line + pos, str_val);
             }
@@ -593,7 +593,7 @@ __global__ void reconstructKernel(
             if (!first_info) line[pos++] = ';';
             first_info = false;
 
-            pos += device_strcpy(line + pos, df2.alt_int_names + f * MAX_NAME_LEN);
+            pos += device_strcpy(line + pos, df2.alt_int_names + f * df2.name_stride);
             line[pos++] = '=';
 
             bool first_val = true;
@@ -623,7 +623,7 @@ __global__ void reconstructKernel(
             if (!first_info) line[pos++] = ';';
             first_info = false;
 
-            pos += device_strcpy(line + pos, df2.alt_float_names + f * MAX_NAME_LEN);
+            pos += device_strcpy(line + pos, df2.alt_float_names + f * df2.name_stride);
             line[pos++] = '=';
 
             bool first_val = true;
@@ -657,7 +657,7 @@ __global__ void reconstructKernel(
             if (!first_info) line[pos++] = ';';
             first_info = false;
 
-            pos += device_strcpy(line + pos, df2.alt_string_names + f * MAX_NAME_LEN);
+            pos += device_strcpy(line + pos, df2.alt_string_names + f * df2.name_stride);
             line[pos++] = '=';
 
             bool first_val = true;
@@ -876,28 +876,38 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
             }
         };
 
-        // Preparazione buffer nomi (DF1)
-        std::vector<char> int_names_buf(df1.in_int.size() * MAX_NAME_LEN, '\0');
-        for (size_t f = 0; f < df1.in_int.size(); f++) strncpy(&int_names_buf[f * MAX_NAME_LEN], df1.in_int[f].name.c_str(), MAX_NAME_LEN - 1);
-        
-        std::vector<char> float_names_buf(df1.in_float.size() * MAX_NAME_LEN, '\0');
-        for (size_t f = 0; f < df1.in_float.size(); f++) strncpy(&float_names_buf[f * MAX_NAME_LEN], df1.in_float[f].name.c_str(), MAX_NAME_LEN - 1);
-        
-        std::vector<char> flag_names_buf(df1.in_flag.size() * MAX_NAME_LEN, '\0');
-        for (size_t f = 0; f < df1.in_flag.size(); f++) strncpy(&flag_names_buf[f * MAX_NAME_LEN], df1.in_flag[f].name.c_str(), MAX_NAME_LEN - 1);
+        // One slot per name, as long as the longest INFO key + '\0': no key is truncated
+        size_t name_stride = 1;
+        for (const auto& c : df1.in_int)     name_stride = std::max(name_stride, c.name.size() + 1);
+        for (const auto& c : df1.in_float)   name_stride = std::max(name_stride, c.name.size() + 1);
+        for (const auto& c : df1.in_flag)    name_stride = std::max(name_stride, c.name.size() + 1);
+        for (const auto& c : df1.in_string)  name_stride = std::max(name_stride, c.name.size() + 1);
+        for (const auto& c : df2.alt_int)    name_stride = std::max(name_stride, c.name.size() + 1);
+        for (const auto& c : df2.alt_float)  name_stride = std::max(name_stride, c.name.size() + 1);
+        for (const auto& c : df2.alt_string) name_stride = std::max(name_stride, c.name.size() + 1);
 
-        std::vector<char> string_names_buf(df1.in_string.size() * MAX_NAME_LEN, '\0');
-        for (size_t f = 0; f < df1.in_string.size(); f++) strncpy(&string_names_buf[f * MAX_NAME_LEN], df1.in_string[f].name.c_str(), MAX_NAME_LEN - 1);
+        // Preparazione buffer nomi (DF1)
+        std::vector<char> int_names_buf(df1.in_int.size() * name_stride, '\0');
+        for (size_t f = 0; f < df1.in_int.size(); f++) strncpy(&int_names_buf[f * name_stride], df1.in_int[f].name.c_str(), name_stride - 1);
+        
+        std::vector<char> float_names_buf(df1.in_float.size() * name_stride, '\0');
+        for (size_t f = 0; f < df1.in_float.size(); f++) strncpy(&float_names_buf[f * name_stride], df1.in_float[f].name.c_str(), name_stride - 1);
+        
+        std::vector<char> flag_names_buf(df1.in_flag.size() * name_stride, '\0');
+        for (size_t f = 0; f < df1.in_flag.size(); f++) strncpy(&flag_names_buf[f * name_stride], df1.in_flag[f].name.c_str(), name_stride - 1);
+
+        std::vector<char> string_names_buf(df1.in_string.size() * name_stride, '\0');
+        for (size_t f = 0; f < df1.in_string.size(); f++) strncpy(&string_names_buf[f * name_stride], df1.in_string[f].name.c_str(), name_stride - 1);
 
         // Preparazione buffer nomi (DF2)
-        std::vector<char> alt_int_names_buf(df2.alt_int.size() * MAX_NAME_LEN, '\0');
-        for (size_t f = 0; f < df2.alt_int.size(); f++) strncpy(&alt_int_names_buf[f * MAX_NAME_LEN], df2.alt_int[f].name.c_str(), MAX_NAME_LEN - 1);
+        std::vector<char> alt_int_names_buf(df2.alt_int.size() * name_stride, '\0');
+        for (size_t f = 0; f < df2.alt_int.size(); f++) strncpy(&alt_int_names_buf[f * name_stride], df2.alt_int[f].name.c_str(), name_stride - 1);
         
-        std::vector<char> alt_float_names_buf(df2.alt_float.size() * MAX_NAME_LEN, '\0');
-        for (size_t f = 0; f < df2.alt_float.size(); f++) strncpy(&alt_float_names_buf[f * MAX_NAME_LEN], df2.alt_float[f].name.c_str(), MAX_NAME_LEN - 1);
+        std::vector<char> alt_float_names_buf(df2.alt_float.size() * name_stride, '\0');
+        for (size_t f = 0; f < df2.alt_float.size(); f++) strncpy(&alt_float_names_buf[f * name_stride], df2.alt_float[f].name.c_str(), name_stride - 1);
 
-        std::vector<char> alt_string_names_buf(df2.alt_string.size() * MAX_NAME_LEN, '\0');
-        for (size_t f = 0; f < df2.alt_string.size(); f++) strncpy(&alt_string_names_buf[f * MAX_NAME_LEN], df2.alt_string[f].name.c_str(), MAX_NAME_LEN - 1);
+        std::vector<char> alt_string_names_buf(df2.alt_string.size() * name_stride, '\0');
+        for (size_t f = 0; f < df2.alt_string.size(); f++) strncpy(&alt_string_names_buf[f * name_stride], df2.alt_string[f].name.c_str(), name_stride - 1);
 
         // Esecuzione allocazioni protette (una sola volta; il puntatore
         // risultante e' condiviso da entrambi gli slot, sono buffer costanti
@@ -928,6 +938,7 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
             d_df1[s].num_float_fields  = df1.in_float.size();
             d_df1[s].num_flag_fields   = df1.in_flag.size();
             d_df1[s].num_string_fields = df1.in_string.size();
+            d_df1[s].name_stride       = (int)name_stride;
 
             d_df1[s].tsa_field = -1;
             for(size_t f = 0; f < df1.in_int.size(); f++){
@@ -937,6 +948,7 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
             d_df2[s].num_alt_int_fields    = df2.alt_int.size();
             d_df2[s].num_alt_float_fields  = df2.alt_float.size();
             d_df2[s].num_alt_string_fields = df2.alt_string.size();
+            d_df2[s].name_stride           = (int)name_stride;
         }
     }
 
