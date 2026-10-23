@@ -1,11 +1,26 @@
 #include "VCFReconstructorGPU.h"
 #include "ReconstructorUtils.cuh"
-#include "Utils.h"
-#include "Maps.h"
 #include <sstream>
+#include <cctype>
+#include <cstring>
+#include <algorithm>
 #include <omp.h>
 #include <chrono>
 #include <cub/cub.cuh>
+#include <nvtx3/nvToolsExt.h>
+
+/*Strip trailing digits from a field name: cuVCF splits Number>1 into AD0, AD1,...*/
+static std::string stripTrailingDigits(const std::string& name){
+    std::string r = name;
+    while(!r.empty() && std::isdigit(static_cast<unsigned char>(r.back()))) r.pop_back();
+    return r;
+}
+
+// TSA codes written by the parser (Kernels.cu), same table as tsa_names in CPUVersion
+static const char* const tsa_names[] = {
+    "SNV", "insertion", "deletion", "inversion", "indel",
+    "substitution", "sequence_alteration"
+};
 
 //Constructor
 VCFReconstructorGPU::VCFReconstructorGPU(const std::string& output_vcf_path,
@@ -191,7 +206,7 @@ void VCFReconstructorGPU::initDeviceBuffers(const var_columns_df& df1,
 
         // --- DF1 scalar fields ---
         gpuErrchk( cudaMalloc((void**)&d_df1[s].var_number, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
-        gpuErrchk( cudaMalloc((void**)&d_df1[s].chrom,      (size_t)CHUNK_SIZE * sizeof(char)));
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].chrom,      (size_t)CHUNK_SIZE * sizeof(uint16_t)));
         gpuErrchk( cudaMalloc((void**)&d_df1[s].pos,        (size_t)CHUNK_SIZE * sizeof(unsigned int)));
         gpuErrchk( cudaMalloc((void**)&d_df1[s].qual,       (size_t)CHUNK_SIZE * sizeof(__half)));
         gpuErrchk( cudaMalloc((void**)&d_df1[s].filter,     (size_t)CHUNK_SIZE * sizeof(char)));
@@ -303,7 +318,7 @@ void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
     gpuErrchk(cudaMemcpyAsync(d_df1[slot].var_number, df1.var_number.data() + chunk_start,
                          chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
     gpuErrchk(cudaMemcpyAsync(d_df1[slot].chrom, df1.chrom.data() + chunk_start,
-                         chunk_size * sizeof(char), cudaMemcpyHostToDevice, stream));
+                         chunk_size * sizeof(uint16_t), cudaMemcpyHostToDevice, stream));
     gpuErrchk(cudaMemcpyAsync(d_df1[slot].pos, df1.pos.data() + chunk_start,
                          chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
     gpuErrchk(cudaMemcpyAsync(d_df1[slot].qual, df1.qual.data() + chunk_start,
@@ -445,7 +460,7 @@ __global__ void reconstructKernel(
         int pos = 0;
 
         // --- 1. CHROM ---
-        unsigned char chrom_code = df1.chrom[i];
+        uint16_t chrom_code = df1.chrom[i];
         pos += device_strcpy(line + pos, maps.chrom_strings + maps.chrom_offsets[chrom_code]);
         line[pos++] = '\t';
 
@@ -499,14 +514,18 @@ __global__ void reconstructKernel(
 
         // Append variant-level Integer fields
         for (int f = 0; f < df1.num_int_fields; f++){
-            if (df1.in_int[f * chunk_size + i] != -1){
+            int v = df1.in_int[f * chunk_size+ i];
+            if (v != -1){
                 if(!first_info){
                     line[pos++] = ';';
                 }
                 first_info = false;
                 pos += device_strcpy(line + pos, df1.int_names + f * MAX_NAME_LEN);
                 line[pos++] = '=';
-                pos += device_itoa(df1.in_int[f * chunk_size + i], line + pos);
+                if(f == df1.tsa_field && v>=0 && v < maps.tsa_count)
+                    pos += device_strcpy(line + pos, maps.tsa_strings + maps.tsa_offsets[v]);
+                else
+                    pos += device_itoa(v, line + pos);
             }
         }
 
@@ -534,46 +553,9 @@ __global__ void reconstructKernel(
                 if(!first_info) line[pos++] = ';';
                 first_info = false;
                 
-                const char* field_name = df1.string_names + f * MAX_NAME_LEN;
-                pos += device_strcpy(line + pos, field_name);
+                pos += device_strcpy(line + pos, df1.string_names + f * MAX_NAME_LEN);
                 line[pos++] = '=';
-                
-                bool mapped = false;
-
-                // Decode specific mapped fields (TSA, PolyPhen, CSQ)
-                if (device_strcmp(field_name, "TSA") && device_is_numeric(str_val)) {
-                    int val = device_atoi(str_val);
-                    if (val >= 0 && val < 256) { // Bounds check matching 'it != map.end()'
-                        const char* mapped_str = maps.tsa_strings + maps.tsa_offsets[val];
-                        if (mapped_str[0] != '\0') {
-                            pos += device_strcpy(line + pos, mapped_str);
-                            mapped = true;
-                        }
-                    }
-                } else if (device_strcmp(field_name, "PolyPhen") && device_is_numeric(str_val)) {
-                    int val = device_atoi(str_val);
-                    if (val >= 0 && val < 256) {
-                        const char* mapped_str = maps.polyphen_strings + maps.polyphen_offsets[val];
-                        if (mapped_str[0] != '\0') {
-                            pos += device_strcpy(line + pos, mapped_str);
-                            mapped = true;
-                        }
-                    }
-                } else if (device_strcmp(field_name, "CSQ") && device_is_numeric(str_val)) {
-                    int val = device_atoi(str_val);
-                    if (val >= 0 && val < 256) {
-                        const char* mapped_str = maps.csq_strings + maps.csq_offsets[val];
-                        if (mapped_str[0] != '\0') {
-                            pos += device_strcpy(line + pos, mapped_str);
-                            mapped = true;
-                        }
-                    }
-                }
-                
-                // Fallback (simulating the 'catch' block or unmapped string)
-                if (!mapped) {
-                    pos += device_strcpy(line + pos, str_val);
-                }
+                pos += device_strcpy(line + pos, str_val);
             }
         }
 
@@ -926,6 +908,11 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
             d_df1[s].num_flag_fields   = df1.in_flag.size();
             d_df1[s].num_string_fields = df1.in_string.size();
 
+            d_df1[s].tsa_field = -1;
+            for(size_t f = 0; f < df1.in_int.size(); f++){
+                if(df1.in_int[f].name == "TSA") d_df1[s].tsa_field = (int)f;
+            }
+
             d_df2[s].num_alt_int_fields    = df2.alt_int.size();
             d_df2[s].num_alt_float_fields  = df2.alt_float.size();
             d_df2[s].num_alt_string_fields = df2.alt_string.size();
@@ -933,10 +920,10 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
     }
 
     // Inverse maps buffers
-    {
+{
         auto safe_map_alloc = [](void** str_ptr, void** off_ptr, const std::vector<char>& s_buf, const std::vector<unsigned int>& o_buf) {
-            gpuErrchk(cudaMalloc(off_ptr, 256 * sizeof(unsigned int)));
-            gpuErrchk(cudaMemcpy(*off_ptr, o_buf.data(), 256 * sizeof(unsigned int), cudaMemcpyHostToDevice));
+            gpuErrchk(cudaMalloc(off_ptr, o_buf.size() * sizeof(unsigned int)));
+            gpuErrchk(cudaMemcpy(*off_ptr, o_buf.data(), o_buf.size() * sizeof(unsigned int), cudaMemcpyHostToDevice));
 
             if (!s_buf.empty()) {
                 gpuErrchk(cudaMalloc(str_ptr, s_buf.size()));
@@ -946,78 +933,42 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
             }
         };
 
+        // CHROM codes are 16 bit: one offset per code up to the largest one in chrom_map
         std::vector<char> chrom_strings_buf;
-        std::vector<unsigned int> chrom_offsets_buf(256, 0);
+        std::vector<unsigned int> chrom_offsets_buf(inv_chrom_map.empty() ? 1 : inv_chrom_map.rbegin()->first + 1, 0);
         unsigned int offset = 0;
         for (const auto& pair : inv_chrom_map) {
-            int idx = static_cast<int>(pair.first);
-            if (idx >= 0 && idx < 256) {
-                chrom_offsets_buf[idx] = offset;
-                for (char c : pair.second) chrom_strings_buf.push_back(c);
-                chrom_strings_buf.push_back('\0');
-                offset += pair.second.size() + 1;
-            }
+            chrom_offsets_buf[pair.first] = offset;
+            for (char c : pair.second) chrom_strings_buf.push_back(c);
+            chrom_strings_buf.push_back('\0');
+            offset += pair.second.size() + 1;
         }
 
         std::vector<char> filter_strings_buf;
         std::vector<unsigned int> filter_offsets_buf(256, 0);
         offset = 0;
         for (const auto& pair : inv_filter_map) {
-            int idx = static_cast<int>(pair.first);
-            if (idx >= 0 && idx < 256) {
-                filter_offsets_buf[idx] = offset;
-                for (char c : pair.second) filter_strings_buf.push_back(c);
-                filter_strings_buf.push_back('\0');
-                offset += pair.second.size() + 1;
-            }
+            int idx = static_cast<unsigned char>(pair.first); // codes >= 128 are negative as char
+            filter_offsets_buf[idx] = offset;
+            for (char c : pair.second) filter_strings_buf.push_back(c);
+            filter_strings_buf.push_back('\0');
+            offset += pair.second.size() + 1;
         }
 
-        // --- PolyPhen Map ---
-        std::vector<char> polyphen_strings_buf;
-        std::vector<unsigned int> polyphen_offsets_buf(256, 0);
-        unsigned int offset_poly = 0;
-        for (const auto& pair : inv_polyphen_map) {
-            int idx = static_cast<int>(pair.first);
-            if (idx >= 0 && idx < 256) {
-                polyphen_offsets_buf[idx] = offset_poly;
-                for (char c : pair.second) polyphen_strings_buf.push_back(c);
-                polyphen_strings_buf.push_back('\0');
-                offset_poly += pair.second.size() + 1;
-            }
-        }
-
-        // --- CSQ Map ---
-        std::vector<char> csq_strings_buf;
-        std::vector<unsigned int> csq_offsets_buf(256, 0);
-        unsigned int offset_csq = 0;
-        for (const auto& pair : inv_csq_map) {
-            int idx = static_cast<int>(pair.first);
-            if (idx >= 0 && idx < 256) {
-                csq_offsets_buf[idx] = offset_csq;
-                for (char c : pair.second) csq_strings_buf.push_back(c);
-                csq_strings_buf.push_back('\0');
-                offset_csq += pair.second.size() + 1;
-            }
-        }
-
-        // --- TSA Map ---
+        // --- TSA Map (code -> name, same codes as the parser) ---
         std::vector<char> tsa_strings_buf;
-        std::vector<unsigned int> tsa_offsets_buf(256, 0);
-        unsigned int offset_tsa = 0;
-        for (const auto& pair : inv_tsa_map) {
-            int idx = static_cast<int>(pair.first);
-            if (idx >= 0 && idx < 256) {
-                tsa_offsets_buf[idx] = offset_tsa;
-                for (char c : pair.second) tsa_strings_buf.push_back(c);
-                tsa_strings_buf.push_back('\0');
-                offset_tsa += pair.second.size() + 1;
-            }
+        std::vector<unsigned int> tsa_offsets_buf;
+        offset = 0;
+        for (const char* name : tsa_names) {
+            tsa_offsets_buf.push_back(offset);
+            for (const char* c = name; *c; c++) tsa_strings_buf.push_back(*c);
+            tsa_strings_buf.push_back('\0');
+            offset += std::strlen(name) + 1;
         }
+        d_maps.tsa_count = (int)tsa_offsets_buf.size();
 
         safe_map_alloc((void**)&d_maps.chrom_strings,  (void**)&d_maps.chrom_offsets,  chrom_strings_buf,  chrom_offsets_buf);
         safe_map_alloc((void**)&d_maps.filter_strings, (void**)&d_maps.filter_offsets, filter_strings_buf, filter_offsets_buf);
-        safe_map_alloc((void**)&d_maps.polyphen_strings, (void**)&d_maps.polyphen_offsets, polyphen_strings_buf, polyphen_offsets_buf);
-        safe_map_alloc((void**)&d_maps.csq_strings,    (void**)&d_maps.csq_offsets,    csq_strings_buf,    csq_offsets_buf);
         safe_map_alloc((void**)&d_maps.tsa_strings,    (void**)&d_maps.tsa_offsets,    tsa_strings_buf,    tsa_offsets_buf);
     }
 
@@ -1154,10 +1105,6 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
     safe_cuda_free(d_maps.filter_offsets);
     safe_cuda_free(d_maps.tsa_strings);
     safe_cuda_free(d_maps.tsa_offsets);
-    safe_cuda_free(d_maps.polyphen_strings);
-    safe_cuda_free(d_maps.polyphen_offsets);
-    safe_cuda_free(d_maps.csq_strings);
-    safe_cuda_free(d_maps.csq_offsets);
 
     // Signal the writer thread, wait for it to drain the queue, then close file.
     {
@@ -1762,15 +1709,6 @@ void VCFReconstructorGPU::buildInverseMaps(const var_columns_df& df1) {
     }
     for (const auto& pair : df1.filter_map) {
         inv_filter_map[pair.second] = pair.first;
-    }
-    for (const auto& pair : polyphenCharMap) {
-        inv_polyphen_map[pair.second] = pair.first;
-    }
-    for (const auto& pair : csqCharMap) {
-        inv_csq_map[pair.second] = pair.first;
-    }
-    for (const auto& pair : tsaCharMap) {
-        inv_tsa_map[pair.second] = pair.first;
     }
 }
 

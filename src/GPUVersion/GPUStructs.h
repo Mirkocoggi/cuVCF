@@ -18,10 +18,7 @@ struct DeviceMaps {
 
     char* tsa_strings = nullptr;             ///< Buffer for TSA strings
     unsigned int* tsa_offsets = nullptr;     ///< Starting offsets for TSA
-    char* polyphen_strings = nullptr;        ///< Buffer for PolyPhen strings
-    unsigned int* polyphen_offsets = nullptr;///< Starting offsets for PolyPhen
-    char* csq_strings = nullptr;             ///< Buffer for CSQ strings
-    unsigned int* csq_offsets = nullptr;     ///< Starting offsets for CSQ
+    int tsa_count = 0;
 };
 
 
@@ -33,7 +30,7 @@ struct DeviceMaps {
  */
 struct DeviceVarColumns {
     unsigned int* var_number = nullptr; ///< Sequential variant ID
-    char*         chrom = nullptr;      ///< Raw chromosome ID
+    uint16_t*     chrom = nullptr;      ///< Chromosome code (16 bit, as chrom_map)
     unsigned int* pos = nullptr;        ///< Position (POS)
     char*         id_data = nullptr;    ///< Flat buffer for ID strings
     unsigned int* id_offsets = nullptr; ///< Offset array for id_data
@@ -58,6 +55,7 @@ struct DeviceVarColumns {
     int num_float_fields = 0;           ///< Total number of Float INFO columns
     int num_flag_fields = 0;            ///< Total number of Flag INFO columns
     int num_string_fields = 0;          ///< Total number of INFO columns of type String.
+    int tsa_field = -1;                 ///< Index of TSA among the integer INFO columns, -1 if absent
 };
 
 /**
@@ -85,7 +83,7 @@ struct DeviceAltColumns {
     int num_entries = 0;                ///< Total number of DF2 entries for the current chunk
     int num_alt_int_fields = 0;         ///< Number of allele-specific integer fields
     int num_alt_float_fields = 0;       ///< Number of allele-specific float fields
-    int num_alt_string_fields = 0;              ///< Number of allele-specific string fields.
+    int num_alt_string_fields = 0;      ///< Number of allele-specific string fields.
 };
 
 /**

@@ -75,7 +75,7 @@ if(CUVCF_WITH_CUDA)
 
   # Kernels.cu holds the kernel and the constant memory it reads; Parser.cu reaches them
   # through Kernels.h, so no relocatable device code (-rdc) is needed.
-  set(GPU_SOURCES src/GPUVersion/Parser.cu src/GPUVersion/Kernels.cu)
+  set(GPU_SOURCES src/GPUVersion/Parser.cu src/GPUVersion/Kernels.cu src/GPUVersion/VCFReconstructorGPU.cu)
   add_executable(VCFparser_gpu src/GPUVersion/main.cu ${GPU_SOURCES})
   target_compile_options(VCFparser_gpu PRIVATE ${GPU_FLAGS})
   target_link_libraries(VCFparser_gpu PRIVATE ${COMMON_DEPS})

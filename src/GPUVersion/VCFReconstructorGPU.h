@@ -7,7 +7,7 @@
 #include <fstream>
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
-#include "VCFDataFrames.h"
+#include "DataFrames.h"
 #include "GPUStructs.h"
 #include "PinnedAllocator.h"
 #include <thread>
@@ -140,12 +140,9 @@ private:
     std::string header_text;     ///< The full VCF header string to be written at the top of the file.
 
     // Inverse maps (host side)
-    std::map<char, std::string> inv_chrom_map;    ///< Maps chromosome char codes back to original strings (e.g., '1' -> "chr1").
-    std::map<char, std::string> inv_filter_map;   ///< Maps filter char codes back to original strings (e.g., '0' -> "PASS").
-    std::map<int,  std::string> inv_tsa_map;      ///< Maps TSA integer codes to original strings.
-    std::map<char, std::string> inv_polyphen_map; ///< Maps PolyPhen char codes to original strings.
-    std::map<char, std::string> inv_csq_map;      ///< Maps CSQ char codes to original strings.
-
+    std::map<uint16_t, std::string> inv_chrom_map;    ///< Decodes 16-bit chromosome codes back to original strings.
+    std::map<char, std::string> inv_filter_map;       ///< Maps filter char codes back to original strings (e.g., '0' -> "PASS").
+    
     // Device buffers, in two slots (slot = chunk index % 2) so that chunk N+1
     // can be prepared and uploaded into one slot while chunk N is still being
     // read by the GPU from the other slot. d_maps is dataset-constant and
