@@ -1,5 +1,5 @@
 #include "VCFReconstructorGPU.h"
-#include "CudaUtils.cuh"
+#include "ReconstructorUtils.cuh"
 #include "Utils.h"
 #include "Maps.h"
 #include <sstream>
