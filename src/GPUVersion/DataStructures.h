@@ -21,6 +21,7 @@
 #include <chrono>
 #include <cuda_runtime.h>     
 #include <cuda_fp16.h>  
+#include <climits>
 #include <iostream>
 #include <map>
 #include <vector>
@@ -28,6 +29,9 @@
 /// Fixed slot size (bytes, including the terminator) of each field name in the device name tables.
 #define MAX_NAME_SIZE 32
 
+/// Missing numeric values ('.' or key absent from the line), same as CPUVersion: INT_MIN as in htslib, NaN for floats
+constexpr int MISSING_INT = INT_MIN;
+__host__ __device__ inline __half missing_half(){ __half_raw r; r.x = 0x7E00; return __half(r); }
 
 /**
  * @struct KernelParams

@@ -241,7 +241,7 @@ class alt_columns_df //DF2
             info_float tmpInfoFloat;
             for(int i = 0; i<tmp; i++){
                 tmpInfoFloat.name = ref.alt_float[i].name;
-                tmpInfoFloat.i_float.resize(numAlt, 0.0f);
+                tmpInfoFloat.i_float.resize(numAlt, missing_half());
                 alt_float.push_back(tmpInfoFloat);
             }
             alt_float.resize(tmp);
@@ -253,7 +253,7 @@ class alt_columns_df //DF2
             info_int tmpInfoInt;
             for(int i = 0; i<tmp; i++){
                 tmpInfoInt.name = ref.alt_int[i].name;
-                tmpInfoInt.i_int.resize(numAlt, 0);
+                tmpInfoInt.i_int.resize(numAlt, MISSING_INT);
                 alt_int.push_back(tmpInfoInt);
 
             }
@@ -498,7 +498,7 @@ class alt_format_df //aka df4 in progress
             for(int i = 0; i<tmp; i++){
                 tmpFloat.name = ref.samp_float[i].name;
                 tmpFloat.numb = ref.samp_float[i].numb;
-                tmpFloat.i_float.resize(numAlt, 0);
+                tmpFloat.i_float.resize(numAlt, missing_half());
                 samp_float.push_back(tmpFloat);
             }
             samp_float.resize(tmp);
@@ -509,7 +509,7 @@ class alt_format_df //aka df4 in progress
             for(int i = 0; i<tmp; i++){
                 tmpInt.name = ref.samp_int[i].name;
                 tmpInt.numb = ref.samp_int[i].numb;
-                tmpInt.i_int.resize(numAlt, 0);
+                tmpInt.i_int.resize(numAlt, MISSING_INT);
                 samp_int.push_back(tmpInt);
             }
             samp_int.resize(tmp);

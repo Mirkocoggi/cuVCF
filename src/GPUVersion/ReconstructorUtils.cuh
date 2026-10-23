@@ -91,7 +91,7 @@ __device__ int device_itoa(int n, char* dst){
  * 
  * Handles floating-point formatting by writing it in fixed point with 6 decimals (like printf("%f")).
  * It uses `device_itoa` to process each part and inserts a decimal point.
- * Includes a specific check for the missing value sentinel (`-1.0f`).
+ * Includes a specific check for missing values (NaN).
  * 
  * @param f   The floating-point number to format.
  * @param dst Pointer to the destination character buffer.
@@ -99,7 +99,7 @@ __device__ int device_itoa(int n, char* dst){
  */
 __device__ int device_ftoa(float f, char* dst){
 
-    if(f == -1.0f){
+    if(isnan(f)){
         dst[0] = '.';
         return 1;
     }

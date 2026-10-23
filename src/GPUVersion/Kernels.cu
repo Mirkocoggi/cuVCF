@@ -205,7 +205,7 @@ __device__ void get_vcf_line(const KernelParams* params, char* my_mem, int currB
                     else if(!cuda_strncmp(value, "sequence_alteration", MAX_TOKEN_LEN)) code = 6;
                     params->in_int[el*params->numLines+thID] = code;
                 }else{
-                    params->in_int[el*params->numLines+thID] = cuda_atoi(value);
+                    params->in_int[el*params->numLines+thID] = safeAtoi(value);
                 }
             }
         } else if (type == FLOAT) {
@@ -290,11 +290,11 @@ __device__ void get_vcf_line(const KernelParams* params, char* my_mem, int currB
                                 if (cuda_strncmp_custom(&tmp_values[MAX_TOKEN_LEN*j], &(params->samp_int_name[el*MAX_NAME_SIZE]), MAX_TOKEN_LEN) == 0) {    
                                     //printf("el = %d\n", el);                                
                                     if (params->samp_int_numb[el] == 1) {
-                                        params->samp_int[(el * params->numLines * params->numSample) + (thID * params->numSample) + samp] = cuda_atoi(&tmp_split[MAX_TOKEN_LEN*j]);
+                                        params->samp_int[(el * params->numLines * params->numSample) + (thID * params->numSample) + samp] = safeAtoi(&tmp_split[MAX_TOKEN_LEN*j]);
                                     } else {
                                         int num_int_tokens = split(&tmp_split[MAX_TOKEN_LEN*j], ',', sub_split);
                                         for (int i = 0; i < params->samp_int_numb[el]; i++) {
-                                            params->samp_int[((el + i) * params->numLines * params->numSample) + (thID * params->numSample + samp)]= (i < num_int_tokens) ? cuda_atoi(&sub_split[MAX_TOKEN_LEN*i]) : 0; // a '.' value has a single token
+                                            params->samp_int[((el + i) * params->numLines * params->numSample) + (thID * params->numSample + samp)]= (i < num_int_tokens) ? safeAtoi(&sub_split[MAX_TOKEN_LEN*i]) : MISSING_INT; // a '.' value has a single token
                                         }
                                     }
                                     find_elem = true;
@@ -314,7 +314,7 @@ __device__ void get_vcf_line(const KernelParams* params, char* my_mem, int currB
                                     } else {
                                         int num_float_tokens = split(&tmp_split[MAX_TOKEN_LEN*j], ',', sub_split);
                                         for (int i = 0; i < params->samp_float_numb[el]; i++) {
-                                            params->samp_float[((el + i) * params->numLines * params->numSample) + (thID * params->numSample + samp)] = (i < num_float_tokens) ? safeStof(&sub_split[MAX_TOKEN_LEN*i]) : __float2half(0.0f); // a '.' value has a single token
+                                            params->samp_float[((el + i) * params->numLines * params->numSample) + (thID * params->numSample + samp)] = (i < num_float_tokens) ? safeStof(&sub_split[MAX_TOKEN_LEN*i]) : missing_half(); // a '.' value has a single token
                                         }
                                     }
                                     find_elem = true;
@@ -378,5 +378,22 @@ cudaError_t upload_map1_table(const char (&keys)[NUM_KEYS_MAP1][MAX_KEY_LENGTH_M
 
 cudaError_t launch_parse_kernel(int blocks, int threads, cudaStream_t stream, const KernelParams* params, char* my_mem, int batch_size, bool hasSamp){
     kernel<<<blocks, threads, 0, stream>>>(params, my_mem, batch_size, hasSamp);
+    return cudaGetLastError();
+}
+
+template<typename T>
+__global__ void fill_kernel(T* __restrict__ p, size_t n, T v){
+    for(size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x; i < n; i += (size_t)gridDim.x * blockDim.x) p[i] = v;
+}
+
+cudaError_t fill_missing(int* p, size_t n){
+    if(n == 0) return cudaSuccess;
+    fill_kernel<<<256, 256>>>(p, n, MISSING_INT);
+    return cudaGetLastError();
+}
+
+cudaError_t fill_missing(__half* p, size_t n){
+    if(n == 0) return cudaSuccess;
+    fill_kernel<<<256, 256>>>(p, n, missing_half());
     return cudaGetLastError();
 }

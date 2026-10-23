@@ -267,8 +267,8 @@ static void copy_fixed_name(char* dst, const string& name){
     * and INFO fields. If sample data is present, it also allocates memory for sample fields.
     */
 void vcf_parsed::device_allocation(){
-    // The kernel writes a column cell only when the record has that field: every column is zeroed here,
-    // or the cells left unwritten would be copied back with whatever the reused device memory held.
+    // The kernel writes a column cell only when the record has that field: every column is initialized here
+    // (numeric ones to MISSING_INT / NaN), or the cells left unwritten would be copied back with whatever the reused device memory held.
     CUDA_CHECK_ERROR(cudaMalloc(&d_VC_var_number, (num_lines) * sizeof(unsigned int)));
     CUDA_CHECK_ERROR(cudaMalloc(&d_VC_pos, (num_lines) * sizeof(unsigned int)));
     CUDA_CHECK_ERROR(cudaMalloc(&d_VC_qual, (num_lines) * sizeof(__half)));
@@ -276,7 +276,7 @@ void vcf_parsed::device_allocation(){
     int tmp = var_columns.in_float.size();
 
     CUDA_CHECK_ERROR(cudaMalloc(&(d_VC_in_float->i_float), tmp * (num_lines) * sizeof(__half)));
-    CUDA_CHECK_ERROR(cudaMemset(d_VC_in_float->i_float, 0, tmp * (num_lines) * sizeof(__half)));
+    CUDA_CHECK_ERROR(fill_missing(d_VC_in_float->i_float, tmp * (num_lines)));
     CUDA_CHECK_ERROR(cudaMalloc(&(d_VC_in_float->name), tmp * sizeof(char) * MAX_NAME_SIZE)); 
 
     for (int i = 0; i < tmp; i++) {
@@ -294,7 +294,7 @@ void vcf_parsed::device_allocation(){
 
     tmp = var_columns.in_int.size();
     CUDA_CHECK_ERROR(cudaMalloc(&(d_VC_in_int->i_int), tmp * (num_lines) * sizeof(int)));
-    CUDA_CHECK_ERROR(cudaMemset(d_VC_in_int->i_int, 0, tmp * (num_lines) * sizeof(int)));
+    CUDA_CHECK_ERROR(fill_missing(d_VC_in_int->i_int, tmp * (num_lines)));
     CUDA_CHECK_ERROR(cudaMalloc(&(d_VC_in_int->name), tmp * sizeof(char) * MAX_NAME_SIZE));
     for (int i = 0; i < tmp; i++) {
         copy_fixed_name(d_VC_in_int->name + i*MAX_NAME_SIZE, var_columns.in_int[i].name);
@@ -316,7 +316,7 @@ void vcf_parsed::device_allocation(){
         // Allocate and initialize samp_float
         tmp = samp_columns.samp_float.size();
         CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_float->i_float), tmp * (num_lines * samp_columns.numSample) * sizeof(__half)));
-        CUDA_CHECK_ERROR(cudaMemset(d_SC_samp_float->i_float, 0, tmp * (num_lines * samp_columns.numSample) * sizeof(__half)));
+        CUDA_CHECK_ERROR(fill_missing(d_SC_samp_float->i_float, tmp * (num_lines * samp_columns.numSample)));
         CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_float->name), tmp * sizeof(char) * MAX_NAME_SIZE));
         CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_float->numb), tmp * sizeof(int)));
 
@@ -340,7 +340,7 @@ void vcf_parsed::device_allocation(){
         // Allocate and initialize samp_int
         tmp = samp_columns.samp_int.size();
         CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_int->i_int), tmp * (num_lines * samp_columns.numSample) * sizeof(int)));
-        CUDA_CHECK_ERROR(cudaMemset(d_SC_samp_int->i_int, 0, tmp * (num_lines * samp_columns.numSample) * sizeof(int)));
+        CUDA_CHECK_ERROR(fill_missing(d_SC_samp_int->i_int, tmp * (num_lines * samp_columns.numSample)));
         CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_int->name), tmp * sizeof(char) * MAX_NAME_SIZE));
         CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_samp_int->numb), tmp * sizeof(int)));
 
@@ -1332,8 +1332,8 @@ static void ensure_alt_capacity(alt_columns_df* tmp_alt, int needed){
     tmp_alt->var_id.resize(needed, 0);
     tmp_alt->alt.resize(needed, "\0");
     tmp_alt->alt_id.resize(needed, (char)0);
-    for(auto& c : tmp_alt->alt_int) c.i_int.resize(needed, 0);
-    for(auto& c : tmp_alt->alt_float) c.i_float.resize(needed, 0.0f);
+    for(auto& c : tmp_alt->alt_int) c.i_int.resize(needed, MISSING_INT);
+    for(auto& c : tmp_alt->alt_float) c.i_float.resize(needed, missing_half());
     for(auto& c : tmp_alt->alt_string) c.i_string.resize(needed, "\0");
 }
 
@@ -1342,8 +1342,8 @@ static void ensure_alt_format_capacity(alt_format_df* tmp_alt_format, int needed
     tmp_alt_format->var_id.resize(needed, 0);
     tmp_alt_format->alt_id.resize(needed, (char)0);
     tmp_alt_format->samp_id.resize(needed, static_cast<unsigned short>(0));
-    for(auto& c : tmp_alt_format->samp_int) c.i_int.resize(needed, 0);
-    for(auto& c : tmp_alt_format->samp_float) c.i_float.resize(needed, 0.0f);
+    for(auto& c : tmp_alt_format->samp_int) c.i_int.resize(needed, MISSING_INT);
+    for(auto& c : tmp_alt_format->samp_float) c.i_float.resize(needed, missing_half());
     for(auto& c : tmp_alt_format->samp_string) c.i_string.resize(needed, "\0");
     if(!tmp_alt_format->sample_GT.GT.empty()) tmp_alt_format->sample_GT.GT.resize(needed, (char)0);
 }
@@ -1372,15 +1372,15 @@ static inline int count_tokens(const char* b, const char* e, char sep){
     return n;
 }
 
-// Same result as std::stoi, without throwing: leading spaces and an optional sign, 0 if nothing parses or out of range
+// Same result as std::stoi, without throwing: leading spaces and an optional sign, MISSING_INT if nothing parses or out of range
 static inline int parse_int_token(const char* b, const char* e){
     while(b < e && isspace(static_cast<unsigned char>(*b))) ++b;
     if(e - b > 1 && *b == '+' && isdigit(static_cast<unsigned char>(b[1]))) ++b;
     int v = 0;
-    return std::from_chars(b, e, v).ec == std::errc() ? v : 0;
+    return std::from_chars(b, e, v).ec == std::errc() ? v : MISSING_INT;
 }
 
-// Same result as std::stof, without throwing (stof is strtof: 0 if nothing parses or on ERANGE)
+// Same result as std::stof, without throwing (stof is strtof: NaN if nothing parses or on ERANGE)
 static inline float parse_float_token(const char* b, const char* e){
     char buf[64];
     std::string big;
@@ -1391,7 +1391,7 @@ static inline float parse_float_token(const char* b, const char* e){
     char* end;
     errno = 0;
     const float v = strtof(s, &end);
-    return (end == s || errno == ERANGE) ? 0.0f : v;
+    return (end == s || errno == ERANGE) ? __half2float(missing_half()) : v;
 }
 
 /**
@@ -1520,7 +1520,7 @@ const char* vcf_parsed::parse_record_head(const char* p, const char* e, long i, 
             case INT_ALT:
             case FLOAT_ALT:
             case STRING_ALT: {
-                // One value per ALT; a missing value ('.' is a single token) gives 0 / ""
+                // One value per ALT; a missing value ('.' is a single token) gives MISSING_INT / NaN / ""
                 int y = 0;
                 for_each_token(vb, te, ',', [&](const char* vtb, const char* vte, int k){
                     if(k >= local_alt) return;
@@ -1530,8 +1530,8 @@ const char* vcf_parsed::parse_record_head(const char* p, const char* e, long i, 
                     y = k + 1;
                 });
                 for(; y < local_alt; y++){
-                    if(it->second.code == INT_ALT) tmp_alt->alt_int[el].i_int[base + y] = 0;
-                    else if(it->second.code == FLOAT_ALT) tmp_alt->alt_float[el].i_float[base + y] = (__half)0.0f;
+                    if(it->second.code == INT_ALT) tmp_alt->alt_int[el].i_int[base + y] = MISSING_INT;
+                    else if(it->second.code == FLOAT_ALT) tmp_alt->alt_float[el].i_float[base + y] = missing_half();
                     else tmp_alt->alt_string[el].i_string[base + y] = "";
                 }
                 break;

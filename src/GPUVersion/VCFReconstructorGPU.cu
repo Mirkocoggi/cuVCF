@@ -10,6 +10,7 @@
 #include <nvtx3/nvToolsExt.h>
 #include <climits>
 #include <stdexcept>
+#include <cmath>
 
 /*Strip trailing digits from a field name: cuVCF splits Number>1 into AD0, AD1,...*/
 static std::string stripTrailingDigits(const std::string& name){
@@ -503,7 +504,8 @@ __global__ void reconstructKernel(
 
         // --- 6. QUAL ---
         float q = df1.qual[i];
-        pos += device_ftoa(q, line + pos);
+        if(q == -1.0f) line[pos++] = '.'; //missing QUAL stays -1, as in the parser
+        else pos += device_ftoa(q, line + pos);
         line[pos++] = '\t';
 
         // --- 7. FILTER ---
@@ -528,7 +530,7 @@ __global__ void reconstructKernel(
         // Append variant-level Integer fields
         for (int f = 0; f < df1.num_int_fields; f++){
             int v = df1.in_int[f * chunk_size + i];
-            if (v != -1){
+            if (v != MISSING_INT && !(f == df1.tsa_field && v == -1)){  //-1: unknown TSA
                 if(!first_info){
                     line[pos++] = ';';
                 }
@@ -544,7 +546,7 @@ __global__ void reconstructKernel(
 
         // Append variant-level Float fields
         for (int f = 0; f < df1.num_float_fields; f++){
-            if (__half2float(df1.in_float[f * chunk_size + i]) != -1.0f){
+            if (!isnan(__half2float(df1.in_float[f * chunk_size + i]))){
                 if(!first_info){
                     line[pos++] = ';';
                 }
@@ -577,7 +579,7 @@ __global__ void reconstructKernel(
             // Validate if the group contains any actual data
             bool any_valid = false;
             for (int j = alt_begin; j < alt_end; j++){
-                if (df2.alt_int[f * df2.num_entries + j] != -1){
+                if (df2.alt_int[f * df2.num_entries + j] != MISSING_INT){
                     any_valid = true;
                     break;
                 }
@@ -595,7 +597,7 @@ __global__ void reconstructKernel(
                 if (!first_val) line[pos++] = ',';
                 first_val = false;
                 int v = df2.alt_int[f * df2.num_entries + j];
-                if (v == -1){
+                if (v == MISSING_INT){
                     line[pos++] = '.';
                 } else {
                     pos += device_itoa(v, line + pos);
@@ -607,7 +609,7 @@ __global__ void reconstructKernel(
         for (int f = 0; f < df2.num_alt_float_fields; f++){
             bool any_valid = false;
             for (int j = alt_begin; j < alt_end; j++){
-                if (__half2float(df2.alt_float[f * df2.num_entries + j]) != -1.0f){
+                if (!isnan(__half2float(df2.alt_float[f * df2.num_entries + j]))){
                     any_valid = true;
                     break;
                 }
@@ -625,7 +627,7 @@ __global__ void reconstructKernel(
                 if (!first_val) line[pos++] = ',';
                 first_val = false;
                 float v = __half2float(df2.alt_float[f * df2.num_entries + j]);
-                if (v == -1.0f){
+                if (isnan(v)){
                     line[pos++] = '.';
                 } else {
                     pos += device_ftoa(v, line + pos);
@@ -1301,7 +1303,7 @@ static inline int fast_itoa(int n, char* dst) {
 /**
  * @brief Fast float-to-ASCII conversion (host code).
  *
- * Mirrors device_ftoa: handles the -1.0f missing sentinel as ".", otherwise
+ * Mirrors device_ftoa: handles missing values (NaN) as ".", otherwise
  * prints the integer part, a dot, and exactly 6 fractional digits (zero-padded) in fixed
  * point. Avoids snprintf's "%g" overhead at the cost of slightly different
  * formatting (always 6 fractional digits, no scientific notation).
@@ -1311,7 +1313,7 @@ static inline int fast_itoa(int n, char* dst) {
  * @return Number of bytes written.
  */
 static inline int fast_ftoa(float f, char* dst) {
-    if (f == -1.0f) { dst[0] = '.'; return 1; }
+    if (std::isnan(f)) { dst[0] = '.'; return 1; }
     // Same as device_ftoa: fixed point with 6 decimals, rounded, like printf("%f")
     int pos = 0;
     double v = f;
@@ -1460,7 +1462,7 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                         bool any = false, first_v = true;
                         for (size_t cc = g.col_start; cc < g.col_start + limit; cc++) {
                             int v = df3.samp_int[cc].i_int[df3_idx];
-                            if (v == -1) continue;
+                            if (v == MISSING_INT) continue;
                             if (!first_v) *w++ = ','; first_v = false;
                             w += fast_itoa(v, w);
                             any = true;
@@ -1477,7 +1479,7 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                         bool any = false, first_v = true;
                         for (size_t cc = g.col_start; cc < g.col_start + limit; cc++) {
                             float v = (float)df3.samp_float[cc].i_float[df3_idx];
-                            if (v == -1.0f) continue;
+                            if (std::isnan(v)) continue;
                             if (!first_v) *w++ = ','; first_v = false;
                             w += fast_ftoa(v, w);
                             any = true;
@@ -1504,7 +1506,7 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                                     for (size_t cc = g.col_start; cc < g.col_end; cc++) {
                                         if (any) *w++ = ',';
                                         int v = df4.samp_int[cc].i_int[k];
-                                        if (v == -1) *w++ = '.';
+                                        if (v == MISSING_INT) *w++ = '.';
                                         else w += fast_itoa(v, w);
                                         any = true;
                                     }
@@ -1523,7 +1525,7 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                                     for (size_t cc = g.col_start; cc < g.col_end; cc++) {
                                         if (any) *w++ = ',';
                                         float v = (float)df4.samp_float[cc].i_float[k];
-                                        if (v == -1.0f) *w++ = '.';
+                                        if (std::isnan(v)) *w++ = '.';
                                         else w += fast_ftoa(v, w);
                                         any = true;
                                     }

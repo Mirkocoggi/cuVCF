@@ -113,6 +113,12 @@ __device__ int cuda_atoi(const char *str) {
     return sign * num;
 }
 
+/// cuda_atoi for VCF values: MISSING_INT when the token has no digit ('.', empty), as safe_stoi in CPUVersion
+__device__ int safeAtoi(const char* str) {
+    const char* d = (*str == '-') ? str + 1 : str;
+    return (*d >= '0' && *d <= '9') ? cuda_atoi(str) : MISSING_INT;
+}
+
 /**
  * @brief Converts a C-string to a float (similar to atof).
  * @param str Pointer to the input string.
@@ -269,23 +275,12 @@ __device__ int split(const char *str, char delimiter, char* split_array) {
  *          compared to CPU-side conversion due to rounding differences
  */
 __device__ half safeStof(const char* tmp) {
-    float value = 0.0f;
-    bool is_valid = true;
-
+    bool has_digit = false;
     for (int i = 0; tmp[i] != '\0'; i++) {
-        if (!((tmp[i] >= '0' && tmp[i] <= '9') || tmp[i] == '.' || tmp[i] == '-')) {
-            is_valid = false;
-            break;
-        }
+        if (tmp[i] >= '0' && tmp[i] <= '9') has_digit = true;
+        else if (tmp[i] != '.' && tmp[i] != '-') return missing_half(); // malformed token
     }
-
-    if (is_valid) {
-        value = cuda_atof(tmp); //like stof but for device
-    } else {
-        value = 0.0f; // default value on error
-    }
-
-    return __float2half(value);
+    return has_digit ? __float2half(cuda_atof(tmp)) : missing_half(); // '.' or empty: missing
 }
 
 #endif
