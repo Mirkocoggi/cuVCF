@@ -7,6 +7,7 @@
 #include <cctype>
 #include <stdexcept>
 #include <omp.h>
+#include <cmath>
 
 
 VCFReconstructor::VCFReconstructor(const std::string& output_vcf_path,
@@ -331,7 +332,7 @@ std::string VCFReconstructor::formatVariant(int index,
     // 5b. Integers
     for (size_t col = 0; col < df1.in_int.size(); col++) {
         int val = df1.in_int[col].i_int[index];
-        if (val != -1) {
+        if (val != MISSING_INT && !(df1.in_int[col].name == "TSA" && val == TSA_UNKNOWN)) {
             if (!first_info) ss << ";";
             const std::string& name = df1.in_int[col].name;
             if(name == "TSA" && val >= 0 && val < static_cast<int>(std::size(tsa_names)))
@@ -345,7 +346,7 @@ std::string VCFReconstructor::formatVariant(int index,
     // 5c. Floats
     for (size_t col = 0; col < df1.in_float.size(); col++) {
         float val = (float)df1.in_float[col].i_float[index];
-        if (val != -1.0f) {
+        if (!std::isnan(val)) {
             if (!first_info) ss << ";";
             ss << df1.in_float[col].name << "=" << val;
             first_info = false;
@@ -371,7 +372,7 @@ std::string VCFReconstructor::formatVariant(int index,
         for (size_t idx = 0; idx < alt_indices.size(); idx++) {
             float v = (float)df2.alt_float[col].i_float[alt_indices[idx]];
             if (idx > 0) val_str += ",";
-            if (v != -1.0f) {
+            if (!std::isnan(v)) {
                 val_str += std::to_string(v);
                 has_data = true;
             } else {
@@ -393,7 +394,7 @@ std::string VCFReconstructor::formatVariant(int index,
         for (size_t idx = 0; idx < alt_indices.size(); idx++) {
             int v = df2.alt_int[col].i_int[alt_indices[idx]];
             if (idx > 0) val_str += ",";
-            if (v != -1) {
+            if (v != MISSING_INT) {
                 val_str += std::to_string(v);
                 has_data = true;
             } else {
@@ -521,7 +522,7 @@ std::string VCFReconstructor::formatVariant(int index,
                         stripTrailingDigits(df3.samp_int[col].name) == base) {
                         if (printed < limit) {
                             int v = df3.samp_int[col].i_int[df3_idx];
-                            if (v != -1) {
+                            if (v != MISSING_INT) {
                                 if (!group_val.empty()) group_val += ",";
                                 group_val += std::to_string(v);
                             }
@@ -564,7 +565,7 @@ std::string VCFReconstructor::formatVariant(int index,
                         stripTrailingDigits(df3.samp_float[col].name) == base) {
                         if (printed < limit) {
                             float v = (float)df3.samp_float[col].i_float[df3_idx];
-                            if (v != -1.0f) {
+                            if (!std::isnan(v)) {
                                 if (!group_val.empty()) group_val += ",";
                                 group_val += std::to_string(v);
                             }
@@ -606,7 +607,7 @@ std::string VCFReconstructor::formatVariant(int index,
                                 for (size_t c = group_start; c < col; c++) {
                                     if (!field_val.empty()) field_val += ",";
                                     int v = df4.samp_int[c].i_int[k];
-                                    field_val += (v != -1) ? std::to_string(v) : ".";
+                                    field_val += (v != MISSING_INT) ? std::to_string(v) : ".";
                                 }
                             }
                             k++;
@@ -633,7 +634,7 @@ std::string VCFReconstructor::formatVariant(int index,
                                 for (size_t c = group_start; c < col; c++) {
                                     if (!field_val.empty()) field_val += ",";
                                     float v = (float)df4.samp_float[c].i_float[k];
-                                    field_val += (v != -1.0f) ? std::to_string(v) : ".";
+                                    field_val += (!std::isnan(v)) ? std::to_string(v) : ".";
                                 }
                             }
                             k++;

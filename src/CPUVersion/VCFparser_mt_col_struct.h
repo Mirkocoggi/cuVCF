@@ -7,6 +7,8 @@
 #include <string_view>
 #include <vector>
 #include <Imath/half.h>
+#include <climits>
+#include <limits>
 
 // Splits s at every sep into out: empty tokens are kept ("a,,b" gives 3) and an empty s gives one
 // empty token
@@ -18,6 +20,10 @@ inline void split_on(std::vector<std::string>& out, std::string_view s, char sep
 }
 
 using namespace std;
+
+// Missing numeric values ('.' or key absent from the line): INT_MIN as in htslib, NaN for floats
+static constexpr int MISSING_INT = INT_MIN;
+static const half MISSING_FLOAT = half(std::numeric_limits<float>::quiet_NaN());
 
 struct info_flag
 {
@@ -119,7 +125,7 @@ class alt_columns_df
             info_float tmpInfoFloat;
             for(int i = 0; i<tmp; i++){
                 tmpInfoFloat.name = ref.alt_float[i].name;
-                tmpInfoFloat.i_float.resize(numAlt, 0.0f);
+                tmpInfoFloat.i_float.resize(numAlt, MISSING_FLOAT);
                 alt_float.push_back(tmpInfoFloat);
             }
             alt_float.resize(tmp);
@@ -131,7 +137,7 @@ class alt_columns_df
             info_int tmpInfoInt;
             for(int i = 0; i<tmp; i++){
                 tmpInfoInt.name = ref.alt_int[i].name;
-                tmpInfoInt.i_int.resize(numAlt, 0);
+                tmpInfoInt.i_int.resize(numAlt, MISSING_INT);
                 alt_int.push_back(tmpInfoInt);
 
             }
@@ -313,7 +319,7 @@ class alt_format_df //aka df4 in progress
             for(int i = 0; i<tmp; i++){
                 tmpFloat.name = ref.samp_float[i].name;
                 tmpFloat.numb = ref.samp_float[i].numb;
-                tmpFloat.i_float.resize(numAlt, 0);
+                tmpFloat.i_float.resize(numAlt, MISSING_FLOAT);
                 samp_float.push_back(tmpFloat);
             }
             samp_float.resize(tmp);
@@ -324,7 +330,7 @@ class alt_format_df //aka df4 in progress
             for(int i = 0; i<tmp; i++){
                 tmpInt.name = ref.samp_int[i].name;
                 tmpInt.numb = ref.samp_int[i].numb;
-                tmpInt.i_int.resize(numAlt, 0);
+                tmpInt.i_int.resize(numAlt, MISSING_INT);
                 samp_int.push_back(tmpInt);
             }
             samp_int.resize(tmp);

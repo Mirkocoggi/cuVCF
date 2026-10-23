@@ -22,13 +22,13 @@ static inline bool format_name_matches(const std::string& name, const std::strin
     return name == key || (name.size() == key.size() + 1 && name.back() == '0' && name.compare(0, key.size(), key) == 0);
 }
 
-// Numeric conversions for VCF values: a missing value ('.') or a malformed token yields 0
-// instead of throwing and aborting the whole parse.
+// Numeric conversions for VCF values: a missing value ('.') or a malformed token yields
+// MISSING_INT / NaN instead of throwing and aborting the whole parse.
 static inline int safe_stoi(const std::string& s){
-    try{ return std::stoi(s); }catch(const std::exception&){ return 0; }
+    try{ return std::stoi(s); }catch(const std::exception&){ return MISSING_INT; }
 }
 static inline float safe_stof(const std::string& s){
-    try{ return std::stof(s); }catch(const std::exception&){ return 0.0f; }
+    try{ return std::stof(s); }catch(const std::exception&){ return MISSING_FLOAT; }
 }
 
 // TSA names, values not in the table get TSA_UNKNOWN
@@ -145,10 +145,10 @@ public:
         (*tmp_alt).alt_id.resize(needed, static_cast<char>(0));
 
         for(size_t j = 0; j < (*tmp_alt).alt_int.size(); j++){
-            (*tmp_alt).alt_int[j].i_int.resize(needed, 0);
+            (*tmp_alt).alt_int[j].i_int.resize(needed, MISSING_INT);
         }
         for(size_t j = 0; j < (*tmp_alt).alt_float.size(); j++){
-            (*tmp_alt).alt_float[j].i_float.resize(needed, 0);
+            (*tmp_alt).alt_float[j].i_float.resize(needed, MISSING_FLOAT);
         }
         for(size_t j = 0; j < (*tmp_alt).alt_string.size(); j++){
             (*tmp_alt).alt_string[j].i_string.resize(needed, "\0");
@@ -165,10 +165,10 @@ public:
         (*tmp_alt_format).samp_id.resize(needed, static_cast<unsigned short>(0));
 
         for(size_t j = 0; j < (*tmp_alt_format).samp_int.size(); j++){
-            (*tmp_alt_format).samp_int[j].i_int.resize(needed, 0);
+            (*tmp_alt_format).samp_int[j].i_int.resize(needed, MISSING_INT);
         }
         for(size_t j = 0; j < (*tmp_alt_format).samp_float.size(); j++){
-            (*tmp_alt_format).samp_float[j].i_float.resize(needed, 0);
+            (*tmp_alt_format).samp_float[j].i_float.resize(needed, MISSING_FLOAT);
         }
         for(size_t j = 0; j < (*tmp_alt_format).samp_string.size(); j++){
             (*tmp_alt_format).samp_string[j].i_string.resize(needed, "\0");
@@ -365,7 +365,7 @@ public:
                                         try{
                                             in_float[el].i_float[i] = (half)safe_stof(tmp_elems[1]);
                                         }catch (const std::exception& e){
-                                            in_float[el].i_float[i] = 0;
+                                            in_float[el].i_float[i] = MISSING_FLOAT;
                                         }
                                         find_info_elem = true;
                                     } 
@@ -390,7 +390,7 @@ public:
                                     if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
                                         split_on(tmp_split, tmp_elems[1], ',');
                                         for(int y = 0; y<local_alt; y++){
-                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? safe_stoi(tmp_split[y]) : 0; // "." has a single token
+                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? safe_stoi(tmp_split[y]) : MISSING_INT; // "." has a single token
                                         }
                                         find_info_elem = true;
                                     }
@@ -406,9 +406,9 @@ public:
                                         
                                         for(int y = 0; y<local_alt; y++){
                                             try{
-                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? (half)safe_stof(tmp_split[y]) : (half)0.0f; // "." has a single token
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? (half)safe_stof(tmp_split[y]) : MISSING_FLOAT; // "." has a single token
                                             }catch (const std::exception& e){
-                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = MISSING_FLOAT;
                                             }
                                         }
                                         find_info_elem = true;
@@ -653,7 +653,7 @@ public:
                                         try{
                                             in_float[el].i_float[i] = (half)safe_stof(tmp_elems[1]);
                                         }catch (const std::exception& e){
-                                            in_float[el].i_float[i] = 0;
+                                            in_float[el].i_float[i] = MISSING_FLOAT;
                                         }
                                         find_info_elem = true;
                                     } 
@@ -678,7 +678,7 @@ public:
                                     if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
                                         split_on(tmp_split, tmp_elems[1], ',');
                                         for(int y = 0; y<local_alt; y++){
-                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? safe_stoi(tmp_split[y]) : 0; // "." has a single token
+                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? safe_stoi(tmp_split[y]) : MISSING_INT; // "." has a single token
                                         }
                                         find_info_elem = true;
                                     }
@@ -693,9 +693,9 @@ public:
                                         split_on(tmp_split, tmp_elems[1], ',');
                                         for(int y = 0; y<local_alt; y++){
                                             try{
-                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? (half)safe_stof(tmp_split[y]) : (half)0.0f; // "." has a single token
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? (half)safe_stof(tmp_split[y]) : MISSING_FLOAT; // "." has a single token
                                             }catch (const std::exception& e){
-                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = MISSING_FLOAT;
                                             }
                                         }
                                         find_info_elem = true;
@@ -844,7 +844,7 @@ public:
                                             split_on(tmp_sub, tmp_split[j], ',');
                                             // k, not i: i is the record index. A '.' value has a single token.
                                             for(int k = 0; k<(*sample).samp_int[el].numb; k++){
-                                                (*sample).samp_int[el+k].i_int[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? safe_stoi(tmp_sub[k]) : 0;
+                                                (*sample).samp_int[el+k].i_int[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? safe_stoi(tmp_sub[k]) : MISSING_INT;
                                             }
                                         }
                                         find_elem = true;
@@ -864,7 +864,7 @@ public:
                                             try{ //Check if format is 10E-40 to crop to 0
                                                 (*sample).samp_float[el].i_float[i*(*sample).numSample + samp] = (half)safe_stof(tmp_split[j]);
                                             }catch (const std::exception& e){
-                                                (*sample).samp_float[el].i_float[i*(*sample).numSample + samp] = 0;
+                                                (*sample).samp_float[el].i_float[i*(*sample).numSample + samp] = MISSING_FLOAT;
                                             }
                                         }else{
                                             //Float with numb > 1
@@ -872,7 +872,7 @@ public:
                                             split_on(tmp_sub, tmp_split[j], ',');
                                             // k, not i: i is the record index. A '.' value has a single token.
                                             for(int k = 0; k<(*sample).samp_float[el].numb; k++){
-                                                (*sample).samp_float[el+k].i_float[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? (half)safe_stof(tmp_sub[k]) : (half)0.0f;
+                                                (*sample).samp_float[el+k].i_float[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? (half)safe_stof(tmp_sub[k]) : MISSING_FLOAT;
                                             }
                                         }
                                         find_elem = true;
@@ -941,7 +941,7 @@ public:
                                             try{
                                                 (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = (half)safe_stof(tmp_sub[y]);
                                             }catch (const std::exception& e){
-                                                (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = 0;
+                                                (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = MISSING_FLOAT;
                                             }
                                         }
                                         find_elem = true;

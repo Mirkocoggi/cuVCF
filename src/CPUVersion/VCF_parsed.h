@@ -398,7 +398,7 @@ public:
                     }else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
                         samp_int_tmp.name = FORMAT.ID[i];
                         samp_columns.samp_int.push_back(samp_int_tmp);
-                        samp_columns.samp_int.back().i_int.resize((num_lines-1)*samp_columns.numSample, 0);
+                        samp_columns.samp_int.back().i_int.resize((num_lines-1)*samp_columns.numSample, MISSING_INT);
                         samp_columns.samp_int.back().numb = std::stoi(FORMAT.Number[i]);
                         info_map[FORMAT.ID[i]] = 9;
                         var_columns.info_map1[FORMAT.ID[i]] = 9;
@@ -406,7 +406,7 @@ public:
                     }else if(!strcmp(&FORMAT.Type[i][0], "Float")){
                         samp_float_tmp.name = FORMAT.ID[i];
                         samp_columns.samp_float.push_back(samp_float_tmp);
-                        samp_columns.samp_float.back().i_float.resize((num_lines-1)*samp_columns.numSample, 0);
+                        samp_columns.samp_float.back().i_float.resize((num_lines-1)*samp_columns.numSample, MISSING_FLOAT);
                         samp_columns.samp_float.back().numb = std::stoi(FORMAT.Number[i]);
                         info_map[FORMAT.ID[i]] = 10;
                         var_columns.info_map1[FORMAT.ID[i]] = 10;
@@ -437,7 +437,7 @@ public:
                         for(int j = 0; j < std::stoi(FORMAT.Number[i]); j++){
                             samp_int_tmp.name = FORMAT.ID[i] + std::to_string(j);
                             samp_columns.samp_int.push_back(samp_int_tmp);
-                            samp_columns.samp_int.back().i_int.resize((num_lines-1)*samp_columns.numSample, 0);
+                            samp_columns.samp_int.back().i_int.resize((num_lines-1)*samp_columns.numSample, MISSING_INT);
                             samp_columns.samp_int.back().numb = std::stoi(FORMAT.Number[i]);
                             info_map[FORMAT.ID[i]+std::to_string(j)] = 9;
                             var_columns.info_map1[FORMAT.ID[i]+std::to_string(j)] = 9;
@@ -447,7 +447,7 @@ public:
                         for(int j = 0; j < std::stoi(FORMAT.Number[i]); j++){
                             samp_float_tmp.name = FORMAT.ID[i] + std::to_string(j);
                             samp_columns.samp_float.push_back(samp_float_tmp);
-                            samp_columns.samp_float.back().i_float.resize((num_lines-1)*samp_columns.numSample, 0);
+                            samp_columns.samp_float.back().i_float.resize((num_lines-1)*samp_columns.numSample, MISSING_FLOAT);
                             samp_columns.samp_float.back().numb = std::stoi(FORMAT.Number[i]);
                             info_map[FORMAT.ID[i]+std::to_string(j)] = 10;
                             var_columns.info_map1[FORMAT.ID[i]+std::to_string(j)] = 10;
@@ -542,14 +542,14 @@ public:
                 if(strcmp(&INFO.Type[i][0], "Integer")==0){
                     INFO.ints++;
                     info_int_tmp.name = INFO.ID[i];
-                    info_int_tmp.i_int.resize(num_lines-1, 0);
+                    info_int_tmp.i_int.resize(num_lines-1, MISSING_INT);
                     var_columns.in_int.push_back(info_int_tmp);
                     info_map[INFO.ID[i]] = 1;
                     var_columns.info_map1[INFO.ID[i]] = 1;
                 } else if(strcmp(&INFO.Type[i][0], "Float")==0){
                     INFO.floats++;
                     info_float_tmp.name = INFO.ID[i];
-                    info_float_tmp.i_float.resize(num_lines-1, 0);
+                    info_float_tmp.i_float.resize(num_lines-1, MISSING_FLOAT);
                     var_columns.in_float.push_back(info_float_tmp);
                     info_map[INFO.ID[i]] = 2;
                     var_columns.info_map1[INFO.ID[i]] = 2;
@@ -557,7 +557,7 @@ public:
                     // TSA values are encoded as Integer codes (see tsa_code), as on the GPU backend
                     INFO.ints++;
                     info_int_tmp.name = INFO.ID[i];
-                    info_int_tmp.i_int.resize(num_lines-1, 0);
+                    info_int_tmp.i_int.resize(num_lines-1, MISSING_INT);
                     var_columns.in_int.push_back(info_int_tmp);
                     info_map[INFO.ID[i]] = 1;
                     var_columns.info_map1[INFO.ID[i]] = 1;
