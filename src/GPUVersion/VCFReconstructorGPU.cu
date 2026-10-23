@@ -514,7 +514,7 @@ __global__ void reconstructKernel(
 
         // Append variant-level Integer fields
         for (int f = 0; f < df1.num_int_fields; f++){
-            int v = df1.in_int[f * chunk_size+ i];
+            int v = df1.in_int[f * chunk_size + i];
             if (v != -1){
                 if(!first_info){
                     line[pos++] = ';';
@@ -970,7 +970,7 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
         safe_map_alloc((void**)&d_maps.chrom_strings,  (void**)&d_maps.chrom_offsets,  chrom_strings_buf,  chrom_offsets_buf);
         safe_map_alloc((void**)&d_maps.filter_strings, (void**)&d_maps.filter_offsets, filter_strings_buf, filter_offsets_buf);
         safe_map_alloc((void**)&d_maps.tsa_strings,    (void**)&d_maps.tsa_offsets,    tsa_strings_buf,    tsa_offsets_buf);
-    }
+}
 
     // Persistent device buffers: allocated once here instead of every chunk.
     initDeviceBuffers(df1, df2, df3);
@@ -1378,19 +1378,21 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
 
                 // Handle Genotype (GT)
                 if (has_gt) {
-                    char gt_code = -1;
+                    bool found = false;
+                    char gt_code = 0;
                     if (gt_in_df3) {
                         gt_code = df3.sample_GT[0].GT[df3_idx];
+                        found = true;
                     } else if (gt_in_df4 && start_df4 != -1) {
                         long k = start_df4;
                         while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
-                            if (df4.samp_id[k] == (unsigned short)s) { gt_code = df4.sample_GT.GT[k]; break; }
+                            if (df4.samp_id[k] == (unsigned short)s) { gt_code = df4.sample_GT.GT[k]; found = true; break; }
                             k++;
                         }
                     }
                     write_sep();
-                    if (gt_code == -1) { 
-                        *w++ = '.'; *w++ = '|'; *w++ = '.'; 
+                    if (!found) { 
+                        *w++ = '.'; *w++ = '/'; *w++ = '.'; 
                         skip_rest = true; 
                     }
                     else {
