@@ -1260,7 +1260,7 @@ static inline int fast_itoa(int n, char* dst) {
  * @brief Fast float-to-ASCII conversion (host code).
  *
  * Mirrors device_ftoa: handles the -1.0f missing sentinel as ".", otherwise
- * prints the integer part, a dot, and up to 6 fractional digits in fixed
+ * prints the integer part, a dot, and exactly 6 fractional digits (zero-padded) in fixed
  * point. Avoids snprintf's "%g" overhead at the cost of slightly different
  * formatting (always 6 fractional digits, no scientific notation).
  *
@@ -1270,14 +1270,16 @@ static inline int fast_itoa(int n, char* dst) {
  */
 static inline int fast_ftoa(float f, char* dst) {
     if (f == -1.0f) { dst[0] = '.'; return 1; }
-    int int_part = (int)f;
-    int int_len = fast_itoa(int_part, dst);
-    dst[int_len] = '.';
-    float frac_part = f - int_part;
-    if (frac_part < 0) frac_part = -frac_part;
-    int frac_int = (int)(frac_part * 1000000);
-    int frac_len = fast_itoa(frac_int, dst + int_len + 1);
-    return int_len + frac_len + 1;
+    // Same as device_ftoa: fixed point with 6 decimals, rounded, like printf("%f")
+    int pos = 0;
+    double v = f;
+    if (v < 0) { dst[pos++] = '-'; v = -v; }
+    long long scaled = (long long)(v * 1000000.0 + 0.5);
+    pos += fast_itoa((int)(scaled / 1000000), dst + pos);
+    dst[pos++] = '.';
+    int frac = (int)(scaled % 1000000);
+    for (int d = 5; d >= 0; d--) { dst[pos + d] = '0' + frac % 10; frac /= 10; }
+    return pos + 6;
 }
 
 /**

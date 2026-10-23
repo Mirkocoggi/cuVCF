@@ -89,9 +89,9 @@ __device__ int device_itoa(int n, char* dst){
 /**
  * @brief Device utility to convert a float (fp32) to a string (ftoa).
  * 
- * Handles floating-point formatting by splitting the number into its integer 
- * and fractional components. It uses `device_itoa` to process each part and 
- * inserts a decimal point. Includes a specific check for the missing value sentinel (`-1.0f`).
+ * Handles floating-point formatting by writing it in fixed point with 6 decimals (like printf("%f")).
+ * It uses `device_itoa` to process each part and inserts a decimal point.
+ * Includes a specific check for the missing value sentinel (`-1.0f`).
  * 
  * @param f   The floating-point number to format.
  * @param dst Pointer to the destination character buffer.
@@ -104,18 +104,21 @@ __device__ int device_ftoa(float f, char* dst){
         return 1;
     }
 
-    int int_part = (int)f;
-    int int_len = device_itoa(int_part, dst);
-    dst[int_len] = '.';
-    float frac_part = f - int_part;
-
-    if(frac_part < 0){
-        frac_part = -frac_part;
+    int pos = 0;
+    double v = f;
+    if(v < 0){
+        dst[pos++] = '-';
+        v = -v;
     }
-
-    frac_part *= 1000000;
-    int frac_len = device_itoa((int)frac_part, dst + int_len + 1);
-    return int_len + frac_len + 1;
+    long long scaled = (long long)(v * 1000000.0 + 0.5);
+    pos += device_itoa((int)(scaled / 1000000), dst + pos);
+    dst[pos++] = '.';
+    int frac = (int)(scaled % 1000000);
+    for(int d = 5; d >= 0; d--){    //always 6 digits
+        dst[pos + d] = '0' + frac % 10;
+        frac /= 10;
+    }
+    return pos + 6;
 }   
 
 /**
