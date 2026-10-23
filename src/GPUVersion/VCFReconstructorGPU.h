@@ -15,7 +15,6 @@
 #include <condition_variable>
 #include <queue>
 
-#define MAX_LINE_LEN 756
 #define MAX_NAME_LEN 16
 #define MAX_SAMPLE_STRING_LEN 64
 #define CHUNK_SIZE   10000
@@ -63,6 +62,7 @@ struct HostBuffers {
     // DF3
     PinnedCharVec sample_buffer;      ///< Pre-calculated patient data buffer
     PinnedUintVec sample_offsets;     ///< Offsets for patient strings
+    PinnedUintVec line_start;         ///< Where each output line starts in d_output: prefix sum of the per-line upper bounds, chunk_size + 1 entries
 
     // Chunk Metadata
     int chunk_size  = 0;  ///< Size of the variant chunk
@@ -150,7 +150,8 @@ private:
     // read by the GPU from the other slot. d_maps is dataset-constant and
     // read-only after setup, so it is not duplicated: both slots' kernels can
     // safely read it concurrently.
-    char*         d_output[2]       = {nullptr, nullptr}; ///< Sparse device buffer for VCF text. Size: [CHUNK_SIZE * MAX_LINE_LEN].
+    char*         d_output[2]       = {nullptr, nullptr}; ///< Sparse device buffer for VCF text: line i starts at d_line_start[i]. Grown on demand.
+    unsigned int* d_line_start[2]   = {nullptr, nullptr}; ///< Device copy of HostBuffers::line_start.
     unsigned int* d_line_lens[2]    = {nullptr, nullptr}; ///< Device array storing the exact string length of each generated row.
 
     DeviceVarColumns d_df1[2];    ///< Shadow structure holding device pointers for DF1 (core variants).
@@ -165,6 +166,8 @@ private:
     std::string format_str;                         ///< The dynamically built FORMAT string for the current VCF (e.g., "GT:AD:DP:GQ").
     std::vector<std::string> ordered_samp_names;    ///< Sample names ordered by their internal integer ID.
     int num_threads = 1;                            ///< OpenMP threads for the host-side preparation, set by run().
+    size_t line_fixed_bound = 0;                    ///< Upper bound of the part of a line that does not depend on its content, set by run().
+    size_t alt_fixed_bound  = 0;                    ///< Upper bound added by each ALT allele, besides the ALT and INFO-ALT strings, set by run().
 
     /**
      * @brief Parses the VCF header to extract the 'Number' attribute for each FORMAT ID.
@@ -196,7 +199,7 @@ private:
     size_t cap_df2_var_id[2] = {0, 0}, cap_alt_data[2] = {0, 0}, cap_alt_offsets[2] = {0, 0};
     size_t cap_alt_int[2] = {0, 0}, cap_alt_float[2] = {0, 0}, cap_alt_string_data[2] = {0, 0}, cap_alt_string_offsets[2] = {0, 0};
     size_t cap_compacted[2] = {0, 0};
-    size_t cap_temp_storage[2] = {0, 0};
+    size_t cap_temp_storage[2] = {0, 0}, cap_output[2] = {0, 0};
     unsigned char* d_temp_storage[2] = {nullptr, nullptr}; ///< Persistent scratch storage for cub::DeviceScan, grown on demand.
 
     // Explicit CUDA streams (created in run(), destroyed at teardown). Chunk i

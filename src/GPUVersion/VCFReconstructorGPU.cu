@@ -8,6 +8,8 @@
 #include <chrono>
 #include <cub/cub.cuh>
 #include <nvtx3/nvToolsExt.h>
+#include <climits>
+#include <stdexcept>
 
 /*Strip trailing digits from a field name: cuVCF splits Number>1 into AD0, AD1,...*/
 static std::string stripTrailingDigits(const std::string& name){
@@ -97,6 +99,7 @@ void VCFReconstructorGPU::freeDevice(){
         // --- Sparse Output Buffers ---
         safe_cuda_free(d_output[s]);
         safe_cuda_free(d_line_lens[s]);
+        safe_cuda_free(d_line_start[s]);
         safe_cuda_free(d_output_offsets[s]);
 
         // --- DF1 (Core Variants & INFO) ---
@@ -136,7 +139,7 @@ void VCFReconstructorGPU::freeDevice(){
         cap_id_data[s] = cap_ref_data[s] = cap_in_string_data[s] = 0;
         cap_df2_var_id[s] = cap_alt_data[s] = cap_alt_offsets[s] = 0;
         cap_alt_int[s] = cap_alt_float[s] = cap_alt_string_data[s] = cap_alt_string_offsets[s] = 0;
-        cap_compacted[s] = cap_temp_storage[s] = 0;
+        cap_compacted[s] = cap_temp_storage[s] = cap_output[s] = 0;
     }
 }
 
@@ -200,7 +203,9 @@ void VCFReconstructorGPU::initDeviceBuffers(const var_columns_df& df1,
         // --- Output buffers ---
         // Sized to CHUNK_SIZE, the maximum number of variants any chunk can hold
         // (the final chunk of the dataset may be smaller, never larger).
-        gpuErrchk( cudaMalloc((void**)&d_output[s],    (size_t)CHUNK_SIZE * MAX_LINE_LEN * sizeof(char)));
+
+        // d_output depends on the chunk's line lengths: grown in uploadToDevice()
+        gpuErrchk( cudaMalloc((void**)&d_line_start[s], (size_t)(CHUNK_SIZE + 1) * sizeof(unsigned int)));
         gpuErrchk( cudaMalloc((void**)&d_line_lens[s], (size_t)CHUNK_SIZE * sizeof(unsigned int)));
         gpuErrchk(cudaMalloc((void**)&d_output_offsets[s], (size_t)(CHUNK_SIZE + 1) * sizeof(unsigned int)));
 
@@ -307,6 +312,12 @@ void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
     int df2_count   = buffers.df2_count;
     cudaStream_t stream = streams[slot];
 
+    // Line i is written at line_start[i] (host upper bounds, see prepareHostBuffers()).
+    // The slot's previous chunk was fully drained by writeChunk(), so growing d_output here is safe.
+    ensureDeviceCapacity(d_output[slot], cap_output[slot], (size_t)buffers.line_start[chunk_size]);
+    gpuErrchk(cudaMemcpyAsync(d_line_start[slot], buffers.line_start.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
+
     // All transfers below are issued as cudaMemcpyAsync on this slot's stream.
     // The sources are pinned host memory (HostBuffers uses PinnedAllocator;
     // the direct df1/df2 arrays are pinned via registerHostInputBuffers()),
@@ -390,7 +401,7 @@ void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
  * @brief Stream compaction kernel to consolidate sparse VCF string buffers.
  * 
  * `reconstructKernel` outputs strings into a sparse 2D buffer (`d_output`) where 
- * each row occupies a fixed, maximum length (`max_line_len`) to prevent data races. 
+ * each row starts at line_start[i], with room for its longest possible content to prevent data races. 
  * This kernel reads the actual length of each generated string (`line_lens`) and 
  * its designated starting position (`offsets`, calculated via prefix sum) to pack 
  * everything into a contiguous, dense 1D array (`dst`).
@@ -400,7 +411,7 @@ void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
  * @param offsets     Prefix-summed array indicating where each compacted row should start.
  * @param dst         Pointer to the dense destination buffer (d_compacted).
  * @param chunk_size  Total number of variants (rows) processed in this block.
- * @param max_line_len The fixed stride used in the sparse `src` buffer.
+ * @param line_start  Where each row starts in the sparse src buffer (upper-bound prefix sum from the host).
  */
 __global__ void compactKernel(
     const char* __restrict__ src,       
@@ -408,7 +419,7 @@ __global__ void compactKernel(
     const unsigned int* __restrict__ offsets, 
     char* __restrict__ dst,               
     int chunk_size,
-    int max_line_len)
+    const unsigned int* __restrict__ line_start)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = gridDim.x * blockDim.x;
@@ -417,7 +428,7 @@ __global__ void compactKernel(
     for (int i = tid; i < chunk_size; i += stride) {
         unsigned int len = line_lens[i];
         unsigned int dst_off = offsets[i];
-        const char* s = src + i * max_line_len;
+        const char* s = src + line_start[i];
         char* d = dst + dst_off;
         for (unsigned int k = 0; k < len; k++) {
             d[k] = s[k];
@@ -441,6 +452,7 @@ __global__ void compactKernel(
  * @param df3        Device memory view containing pre-packed format/sample data.
  * @param output     The sparse destination buffer for the generated text.
  * @param line_lens  Output array where the thread records the final length of each generated string.
+ * @param line_start Where each row starts in output (upper-bound prefix sum from the host).
  * @param chunk_size The total number of variants to process in this execution block.
  */
 __global__ void reconstructKernel(
@@ -449,6 +461,7 @@ __global__ void reconstructKernel(
     DeviceAltColumns df2,
     DeviceSampleColumns df3,
     char* output, unsigned int* line_lens,
+    const unsigned int* __restrict__ line_start,
     int chunk_size
 ){
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -456,7 +469,7 @@ __global__ void reconstructKernel(
 
     for (int i = tid; i < chunk_size; i += stride){
         // Pointer to the start of this thread's designated row in the sparse matrix
-        char* line = output + i * MAX_LINE_LEN;
+        char* line = output + line_start[i];
         int pos = 0;
 
         // --- 1. CHROM ---
@@ -974,6 +987,34 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
         safe_map_alloc((void**)&d_maps.tsa_strings,    (void**)&d_maps.tsa_offsets,    tsa_strings_buf,    tsa_offsets_buf);
 }
 
+    // Upper bound of the line parts that do not depend on the content; prepareHostBuffers() adds
+    // ID/REF/ALT/INFO strings and the sample strings to get each line's bound
+    {
+        const size_t INT_LEN = 11;   // "-2147483648"
+        const size_t FLOAT_LEN = 19; // '-', 11 digits, '.', 6 decimals (device_ftoa)
+        size_t max_chrom = 0, max_filter = 0, max_tsa = 0;
+        for (const auto& p : inv_chrom_map)  max_chrom  = std::max(max_chrom,  p.second.size());
+        for (const auto& p : inv_filter_map) max_filter = std::max(max_filter, p.second.size());
+        for (const char* name : tsa_names)   max_tsa    = std::max(max_tsa,    std::strlen(name));
+
+        line_fixed_bound = (max_chrom + 1) + (INT_LEN + 1) + 3   // CHROM, POS, and the ID/REF/ALT tabs
+                         + (FLOAT_LEN + 1) + (max_filter + 1)    // QUAL, FILTER
+                         + 1 + 1;                                // '.' for an empty INFO, '\n'
+        for (const auto& c : df1.in_flag)    line_fixed_bound += c.name.size() + 1;
+        for (const auto& c : df1.in_int)     line_fixed_bound += c.name.size() + 2 + (c.name == "TSA" ? max_tsa : INT_LEN);
+        for (const auto& c : df1.in_float)   line_fixed_bound += c.name.size() + 2 + FLOAT_LEN;
+        for (const auto& c : df1.in_string)  line_fixed_bound += c.name.size() + 2;
+        for (const auto& c : df2.alt_int)    line_fixed_bound += c.name.size() + 2;
+        for (const auto& c : df2.alt_float)  line_fixed_bound += c.name.size() + 2;
+        for (const auto& c : df2.alt_string) line_fixed_bound += c.name.size() + 2;
+        if (df3.numSample > 0) line_fixed_bound += 1 + format_str.size();  // '\t' FORMAT
+
+        alt_fixed_bound = 1                                       // ',' between ALT alleles
+                        + df2.alt_int.size()    * (INT_LEN + 1)   // value and ','
+                        + df2.alt_float.size()  * (FLOAT_LEN + 1)
+                        + df2.alt_string.size() * 2;              // '.' and ','
+    }
+
     // Persistent device buffers: allocated once here instead of every chunk.
     initDeviceBuffers(df1, df2, df3);
 
@@ -1034,7 +1075,7 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
         auto t1 = std::chrono::high_resolution_clock::now();
         ms_prep_total += std::chrono::duration<double, std::milli>(t1 - t0).count();
         nvtxRangePop();
-
+        
         // Upload + launch this chunk on its own stream (both async, return
         // to the host immediately).
         nvtxRangePushA("upload_H2D");
@@ -1049,6 +1090,7 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
             d_df3[slot],
             d_output[slot],
             d_line_lens[slot],
+            d_line_start[slot],
             chunk_size
         );
         gpuErrchk(cudaPeekAtLastError());
@@ -1157,7 +1199,7 @@ void VCFReconstructorGPU::writeChunk(int num_variants, int slot) {
     // ---- 4. Compaction kernel ----
     compactKernel<<<NUM_BLOCKS, BLOCK_SIZE, 0, stream>>>(
         d_output[slot], d_line_lens[slot], d_output_offsets[slot],
-        d_compacted[slot], num_variants, MAX_LINE_LEN);
+        d_compacted[slot], num_variants, d_line_start[slot]);
     gpuErrchk(cudaPeekAtLastError());
 
     // ---- 5. Pick a host buffer slot. Wait if both are still being written ----
@@ -1697,6 +1739,35 @@ void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
     buildSampleStrings(df1, df2, df3, df4,
                        chunk_size, chunk_start, chunk_end, df2_start,
                        buffers.sample_buffer, buffers.sample_offsets);
+                    
+    // --- Upper bound of each output line -> where it starts in d_output ---
+    // Each sample cell's '\0' leaves room for the '\t' before it in the line.
+    buffers.line_start.resize(chunk_size + 1);
+    {
+        const int num_samples = df3.numSample;
+        unsigned long long total = 0;
+        for (int r = 0; r < chunk_size; r++) {
+            int i = chunk_start + r;
+            unsigned long long len = line_fixed_bound + df1.id[i].size() + df1.ref[i].size();
+            for (int f = 0; f < d_df1[0].num_string_fields; f++) len += df1.in_string[f].i_string[i].size();
+            for (unsigned int a = 0; a < buffers.alt_count_buf[r]; a++) {
+                int k = df2_start + buffers.alt_start_buf[r] + a;
+                len += alt_fixed_bound + df2.alt[k].size();
+                for (int f = 0; f < d_df2[0].num_alt_string_fields; f++) len += df2.alt_string[f].i_string[k].size();
+            }
+            if (num_samples > 0) {
+                size_t first = buffers.sample_offsets[(size_t)r * num_samples];
+                size_t next  = (r + 1 < chunk_size) ? buffers.sample_offsets[(size_t)(r + 1) * num_samples]
+                                                    : buffers.sample_buffer.size();
+                len += next - first;
+            }
+            buffers.line_start[r] = (unsigned int)total;
+            total += len;
+        }
+        if (total > UINT_MAX)
+            throw std::runtime_error("VCFReconstructorGPU: a chunk of output exceeds 4 GB, lower CHUNK_SIZE");
+        buffers.line_start[chunk_size] = (unsigned int)total;
+    }
 }
 
 /**
