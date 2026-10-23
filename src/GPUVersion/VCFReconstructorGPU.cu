@@ -724,8 +724,10 @@ static std::vector<VCFReconstructorGPU::GroupInfo> buildGroups(
 TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
          const alt_columns_df& df2,
          const sample_columns_df& df3,
-         const alt_format_df& df4){
-
+         const alt_format_df& df4,
+         int num_threads)
+{
+    this->num_threads = num_threads < 1 ? 1 : num_threads;
     auto t_setup_start = std::chrono::high_resolution_clock::now();
 
     // Initialize mappings and formatting rules based on the header
@@ -1343,12 +1345,11 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
 
     // Parallel Pass 1: Each thread writes to its private scratch buffer
     std::vector<unsigned int> cell_lens(total_cells, 0);
-    int num_threads = omp_get_max_threads();
     std::vector<std::vector<char>> scratch(num_threads);
     std::vector<std::vector<unsigned int>> cell_offsets_in_scratch(num_threads);
     std::vector<std::vector<int>> global_indices(num_threads);
 
-    #pragma omp parallel
+    #pragma omp parallel num_threads(num_threads)
     {
         int tid = omp_get_thread_num();
         int my_var_count = (chunk_size + num_threads - 1) / num_threads;
@@ -1528,7 +1529,7 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
 
     // Parallel Pass 2: Copy from thread-local scratch buffers to the final contiguous buffer
     buffer.resize(total_size);
-    #pragma omp parallel for schedule(static)
+    #pragma omp parallel for schedule(static) num_threads(num_threads)
     for (int tid = 0; tid < num_threads; tid++) {
         const auto& src_buf  = scratch[tid];
         const auto& src_offs = cell_offsets_in_scratch[tid];

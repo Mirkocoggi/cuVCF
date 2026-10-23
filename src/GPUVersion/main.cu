@@ -20,6 +20,7 @@
  */
 
 #include "Parser.h"
+#include "VCFReconstructorGPU.h"
 
 #include <cuda_runtime.h>   
 #include <cuda_fp16.h>      
@@ -55,8 +56,9 @@ int main(int argc, char *argv[]){
 
     int opt, num_threadss = 4;      // -t is optional
     char *vcf_filename = nullptr;   // -v is required
+    char *out_filename = nullptr;   // -o is optional
 
-    while ((opt = getopt(argc, argv, "v:t:")) != -1)
+    while ((opt = getopt(argc, argv, "v:t:o:")) != -1)
     {
         switch (opt)
         {
@@ -66,13 +68,16 @@ int main(int argc, char *argv[]){
         case 't':
             num_threadss = atoi(optarg);
             break;
+        case 'o':
+            out_filename = optarg;
+            break;
         default: // '?': getopt already printed the error
-            cerr << "Usage: " << argv[0] << " -v <file.vcf[.gz]> [-t <threads>]" << endl;
+            cerr << "Usage: " << argv[0] << " -v <file.vcf[.gz]> [-t <threads>] [-o <out.vcf>]" << endl;
             return 1;
         }
     }
     if (vcf_filename == nullptr || num_threadss < 1) {
-        cerr << "Usage: " << argv[0] << " -v <file.vcf[.gz]> [-t <threads>]" << endl;
+        cerr << "Usage: " << argv[0] << " -v <file.vcf[.gz]> [-t <threads>] [-o <out.vcf>]" << endl;
         return 1;
     }
 
@@ -95,6 +100,19 @@ int main(int argc, char *argv[]){
     }
     auto e = std::chrono::steady_clock::now();
     cerr << "vcf_parsed::run: " << std::chrono::duration<double, std::milli>(e - s).count() << " ms" << endl;
+
+    if(out_filename) {
+        auto ws = std::chrono::steady_clock::now();
+        try{
+            VCFReconstructorGPU(out_filename, vcf.header).run(vcf.var_columns, vcf.alt_columns,
+                                                               vcf.samp_columns, vcf.alt_sample, num_threadss);
+        }catch (const std::exception& ex) {
+            cerr << "ERROR: " << ex.what() << endl;
+            return 1;
+        }
+        auto we = std::chrono::steady_clock::now();
+        cerr << "VCFReconstructorGPU::run: " << std::chrono::duration<double, std::milli>(we - ws).count() << " ms" << endl;
+    }
 
     // Preview of the four DataFrames
     cout << "------------------------------" << endl;

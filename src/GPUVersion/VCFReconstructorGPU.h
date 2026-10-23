@@ -129,11 +129,13 @@ public:
      * @param df2 DataFrame for multi-allelic variants (ALT)
      * @param df3 Base DataFrame for samples
      * @param df4 Intersected DataFrame for samples x alleles
+     * @param num_threads OpenMP threads used for the host-side preparation
      */
     TimingResult run(const var_columns_df& df1,
                      const alt_columns_df& df2,
                      const sample_columns_df& df3,
-                     const alt_format_df& df4);
+                     const alt_format_df& df4,
+                     int num_threads);
 
 private:
     std::string output_vcf_path; ///< Path to the generated output VCF file.
@@ -157,11 +159,12 @@ private:
     DeviceMaps d_maps;            ///< Shadow structure holding device pointers for encoding dictionaries. Not slotted (read-only dataset constant).
 
     // State and Format tracking
-    bool has_gt;                  ///< Flag indicating if Genotype (GT) data exists in the dataset.
-    bool gt_in_df3;               ///< Flag indicating if Genotype (GT) data is stored in DF3.
-    bool gt_in_df4;               ///< Flag indicating if Genotype (GT) data is stored in DF4.
-    std::string format_str;       ///< The dynamically built FORMAT string for the current VCF (e.g., "GT:AD:DP:GQ").
-    std::vector<std::string> ordered_samp_names; ///< Sample names ordered by their internal integer ID.
+    bool has_gt;                                    ///< Flag indicating if Genotype (GT) data exists in the dataset.
+    bool gt_in_df3;                                 ///< Flag indicating if Genotype (GT) data is stored in DF3.
+    bool gt_in_df4;                                 ///< Flag indicating if Genotype (GT) data is stored in DF4.
+    std::string format_str;                         ///< The dynamically built FORMAT string for the current VCF (e.g., "GT:AD:DP:GQ").
+    std::vector<std::string> ordered_samp_names;    ///< Sample names ordered by their internal integer ID.
+    int num_threads = 1;                            ///< OpenMP threads for the host-side preparation, set by run().
 
     /**
      * @brief Parses the VCF header to extract the 'Number' attribute for each FORMAT ID.

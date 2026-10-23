@@ -8,6 +8,7 @@
 #include "Parser.h"      // Contains vcf_parsed definition and run function (in Parser.cu)
 #include "DataFrames.h"  // Contains classes: var_columns_df, alt_columns_df, sample_columns_df, alt_format_df
 #include "DataStructures.h"
+#include "VCFReconstructorGPU.h"
 
 namespace py = pybind11;
 
@@ -443,6 +444,9 @@ PYBIND11_MODULE(GPUParser, m) {
             self.run(c_vcf_filename.data(), num_threadss);
         }, py::arg("vcf_filename"), py::arg("num_threadss"),
            "Parses the VCF file using the specified number of threads")
+        .def("reconstruct_vcf", [](const vcf_parsed& self, const std::string& path, int num_threads){
+            VCFReconstructorGPU(path, self.header).run(self.var_columns, self.alt_columns, self.samp_columns, self.alt_sample, num_threads);
+        }, py::arg("vcf_filename"), py::arg("num_threads"))
         .def_readwrite("id", &vcf_parsed::id)
         .def_readwrite("header", &vcf_parsed::header)
         .def_readwrite("INFO", &vcf_parsed::INFO)
