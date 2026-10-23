@@ -88,13 +88,15 @@ std::vector<VCFReconstructor::ChunkCursor> VCFReconstructor::computeChunkCursor(
     size_t df4_pos = 0;
 
     for(int c = 0; c < num_threads; c++){
-        size_t var_start = c * chunk_size;
+        size_t var_start = std::min(c * chunk_size, total_vars);
         size_t var_end = std::min(var_start + chunk_size, total_vars);
 
         chunks[c].var_start = var_start;
         chunks[c].var_end = var_end;
         chunks[c].df2_start = df2_pos;
         chunks[c].df4_start = df4_pos;
+
+        if(var_start == var_end) continue;       //empty chunk: nothing to write
 
         unsigned int last_var_id = df1.var_number[var_end - 1];
         while(df2_pos < df2.var_id.size() && df2.var_id[df2_pos] <= last_var_id){
@@ -111,7 +113,10 @@ void VCFReconstructor::run(const var_columns_df& df1,
                             const alt_columns_df& df2,
                             const sample_columns_df& df3,
                             const alt_format_df& df4,
-                            int num_threads) {
+                            int num_threads) 
+{
+
+    if(num_threads < 1) num_threads = 1;    
 
     std::ofstream vcf_file(output_vcf_path);
     if (!vcf_file.is_open()) {
