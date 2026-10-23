@@ -151,24 +151,27 @@ void VCFReconstructorGPU::freeDevice(){
 
 //Destructor
 VCFReconstructorGPU::~VCFReconstructorGPU() {
-    // If run() was interrupted, make sure the writer thread shuts down cleanly.
-    if (writer_thread.joinable()) {
-        {
-            std::lock_guard<std::mutex> lock(write_mutex);
-            writer_should_stop = true;
+    // A destructor must not throw (std::terminate), and after a CUDA error the frees below can fail too
+    try {
+        // If run() was interrupted, make sure the writer thread shuts down cleanly.
+        if (writer_thread.joinable()) {
+            {
+                std::lock_guard<std::mutex> lock(write_mutex);
+                writer_should_stop = true;
+            }
+            cv_job_available.notify_all();
+            writer_thread.join();
         }
-        cv_job_available.notify_all();
-        writer_thread.join();
-    }
 
-    freeDevice(); // Clean up VRAM
+        freeDevice(); // Clean up VRAM
 
-    safe_stream_destroy(streams[0]);
-    safe_stream_destroy(streams[1]);
+        safe_stream_destroy(streams[0]);
+        safe_stream_destroy(streams[1]);
 
-    for (int b = 0; b < NUM_WRITE_BUFFERS; b++) {
-        if (h_compacted_pool[b]) cudaFreeHost(h_compacted_pool[b]);
-    }
+        for (int b = 0; b < NUM_WRITE_BUFFERS; b++) {
+            if (h_compacted_pool[b]) cudaFreeHost(h_compacted_pool[b]);
+        }
+    } catch (...) {}
 }
 
 // Pins (page-locks) the DF1/DF2 arrays that uploadToDevice() copies directly
@@ -782,6 +785,28 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
     writer_should_stop = false;
     writer_thread = std::thread(&VCFReconstructorGPU::writerLoop, this);
 
+    // If anything below throws, stop the writer (it writes to vcf_file, a local of run()) and unpin
+    // df1/df2 before leaving run(); on success both are already done when the guard is destroyed.
+    struct RunGuard {
+        VCFReconstructorGPU* self;
+        const var_columns_df& df1;
+        const alt_columns_df& df2;
+        bool registered = false;
+        ~RunGuard() {
+            try {
+                if (self->writer_thread.joinable()) {
+                    {
+                        std::lock_guard<std::mutex> lock(self->write_mutex);
+                        self->writer_should_stop = true;
+                    }
+                    self->cv_job_available.notify_all();
+                    self->writer_thread.join();
+                }
+                if (registered) self->unregisterHostInputBuffers(df1, df2);
+            } catch (...) {}
+        }
+    } guard{this, df1, df2};
+
     // Construct the FORMAT string
     gt_in_df3 = !df3.sample_GT.empty();
     gt_in_df4 = !gt_in_df3 && !df4.sample_GT.GT.empty();
@@ -1048,6 +1073,7 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
 
     // Pin the DF1/DF2 arrays that get copied to the device every chunk.
     registerHostInputBuffers(df1, df2);
+    guard.registered = true;
 
     // Explicit streams (not attached to any operation yet, see run() loop).
     gpuErrchk(cudaStreamCreate(&streams[0]));
@@ -1156,6 +1182,7 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
 
     // Undo registerHostInputBuffers() now that the loop is done with df1/df2.
     unregisterHostInputBuffers(df1, df2);
+    guard.registered = false;
 
     safe_stream_destroy(streams[0]);
     safe_stream_destroy(streams[1]);
