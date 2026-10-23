@@ -1,5 +1,5 @@
 #include "VCFReconstructorGPU.h"
-#include "ReconstructorUtils.cuh"
+#include "DeviceUtils.cuh"
 #include <sstream>
 #include <cctype>
 #include <cstring>

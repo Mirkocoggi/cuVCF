@@ -1,5 +1,5 @@
-#ifndef GPU_STRUCTS_H
-#define GPU_STRUCTS_H
+#ifndef DEVICE_DATA_FRAMES_H
+#define DEVICE_DATA_FRAMES_H
 
 #include <cuda_fp16.h>
 #include <cstdint>

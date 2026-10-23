@@ -16,7 +16,7 @@
 #include <string>
 #include <map>
 #include <vector>
-#include "VCF_parsed.h"
+#include "../VCF_parsed.h"
 
 /**
  * @brief Reconstructs a standard VCF (Variant Call Format) file from parsed column-oriented DataFrames.

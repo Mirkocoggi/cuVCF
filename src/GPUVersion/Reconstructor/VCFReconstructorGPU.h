@@ -7,8 +7,8 @@
 #include <fstream>
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
-#include "DataFrames.h"
-#include "GPUStructs.h"
+#include "../DataFrames.h"
+#include "DeviceDataFrames.h"
 #include "PinnedAllocator.h"
 #include <thread>
 #include <mutex>

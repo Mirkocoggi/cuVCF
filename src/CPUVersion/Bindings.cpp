@@ -31,7 +31,7 @@
 #include "VCF_parsed.h"
 #include "VCF_var_columns_df.h"
 #include "VCFparser_mt_col_struct.h"   
-#include "VCFReconstructor.h"
+#include "Reconstructor/VCFReconstructor.h"
 
 namespace py = pybind11;
 

@@ -24,10 +24,10 @@ set(COMMON_DEPS ZLIB::ZLIB Imath::Imath OpenMP::OpenMP_CXX)
 
 # ── CPU backend ──────────────────────────────────────────────────
 
-add_executable(VCFparser_cpu src/CPUVersion/VCFparser_mt_col.cpp src/CPUVersion/VCFReconstructor.cpp)
+add_executable(VCFparser_cpu src/CPUVersion/VCFparser_mt_col.cpp src/CPUVersion/Reconstructor/VCFReconstructor.cpp)
 target_link_libraries(VCFparser_cpu PRIVATE ${COMMON_DEPS})
 
-pybind11_add_module(CPUParser src/CPUVersion/Bindings.cpp src/CPUVersion/VCFparser_mt_col.cpp src/CPUVersion/VCFReconstructor.cpp)
+pybind11_add_module(CPUParser src/CPUVersion/Bindings.cpp src/CPUVersion/VCFparser_mt_col.cpp src/CPUVersion/Reconstructor/VCFReconstructor.cpp)
 target_link_libraries(CPUParser PRIVATE ${COMMON_DEPS})
 
 if(CUVCF_SANITIZE)
@@ -75,7 +75,7 @@ if(CUVCF_WITH_CUDA)
 
   # Kernels.cu holds the kernel and the constant memory it reads; Parser.cu reaches them
   # through Kernels.h, so no relocatable device code (-rdc) is needed.
-  set(GPU_SOURCES src/GPUVersion/Parser.cu src/GPUVersion/Kernels.cu src/GPUVersion/VCFReconstructorGPU.cu)
+  set(GPU_SOURCES src/GPUVersion/Parser.cu src/GPUVersion/Kernels.cu src/GPUVersion/Reconstructor/VCFReconstructorGPU.cu)
   add_executable(VCFparser_gpu src/GPUVersion/main.cu ${GPU_SOURCES})
   target_compile_options(VCFparser_gpu PRIVATE ${GPU_FLAGS})
   target_link_libraries(VCFparser_gpu PRIVATE ${COMMON_DEPS})

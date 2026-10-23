@@ -26,7 +26,7 @@
 #include "VCFparser_mt_col_struct.h"
 #include "VCF_parsed.h"
 #include "VCF_var_columns_df.h"
-#include "VCFReconstructor.h"
+#include "Reconstructor/VCFReconstructor.h"
 
 using namespace std;
 

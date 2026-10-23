@@ -8,7 +8,7 @@
 #include "Parser.h"      // Contains vcf_parsed definition and run function (in Parser.cu)
 #include "DataFrames.h"  // Contains classes: var_columns_df, alt_columns_df, sample_columns_df, alt_format_df
 #include "DataStructures.h"
-#include "VCFReconstructorGPU.h"
+#include "Reconstructor/VCFReconstructorGPU.h"
 
 namespace py = pybind11;
 
