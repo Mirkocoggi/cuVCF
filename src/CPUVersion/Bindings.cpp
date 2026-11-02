@@ -391,6 +391,7 @@ PYBIND11_MODULE(CPUParser, m) {
         .def_readwrite("in_string",&var_columns_df::in_string)
         .def_readwrite("in_int",&var_columns_df::in_int)
         .def_readwrite("info_map1",&var_columns_df::info_map1)
+        .def_readwrite("format_map1",&var_columns_df::format_map1)
         .def("print",&var_columns_df::print);
 
     /*  parser main object  */

@@ -69,6 +69,15 @@ public:
         return it == info_map1.end() ? -1 : it->second;
     }
 
+    /// FORMAT field names and their types: separate from info_map1, the same ID can be in both.
+    std::map<std::string, int> format_map1;
+
+    // Same as info_code, for FORMAT keys
+    int format_code(const std::string& key) const {
+        auto it = format_map1.find(key);
+        return it == format_map1.end() ? -1 : it->second;
+    }
+
     /**
      * @brief Prints the variant columns data frame.
      *

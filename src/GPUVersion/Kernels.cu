@@ -14,8 +14,8 @@
  */
 
 #include "Kernels.h"
-#include "CUDAUtils.cuh"
 #include "Utils.h"
+#include "CUDAUtils.cuh"
 #include "DataStructures.h"
 #include "DataFrames.h"
 
@@ -183,7 +183,7 @@ __device__ void get_vcf_line(const KernelParams* params, char* my_mem, int currB
             value[0] = '\0';
         }
 
-        int type = getValueFromKeyMap1(key);
+        int type = getValueFromKeyMap1(key, false);
 
         if (type == INT) {
             // Process INT type
@@ -281,7 +281,7 @@ __device__ void get_vcf_line(const KernelParams* params, char* my_mem, int currB
                             }
                             find_type = true;
 
-                        } else if (getValueFromKeyMap1(&tmp_values[MAX_TOKEN_LEN*j]) == INT_FORMAT) {
+                        } else if (getValueFromKeyMap1(&tmp_values[MAX_TOKEN_LEN*j], true) == INT_FORMAT) {
                             // Process INT format
                             params->samp_var_id[thID * params->numSample + samp] = thID;
                             params->samp_id[thID * params->numSample + samp] = samp;
@@ -302,7 +302,7 @@ __device__ void get_vcf_line(const KernelParams* params, char* my_mem, int currB
                                 el++;
                             }
                             find_type = true;
-                        } else if (getValueFromKeyMap1(&tmp_values[MAX_TOKEN_LEN*j]) == FLOAT_FORMAT) {
+                        } else if (getValueFromKeyMap1(&tmp_values[MAX_TOKEN_LEN*j], true) == FLOAT_FORMAT) {
                             // Process FLOAT format
                             params->samp_var_id[thID * params->numSample + samp] = thID;
                             params->samp_id[thID * params->numSample + samp] = samp;
@@ -322,7 +322,7 @@ __device__ void get_vcf_line(const KernelParams* params, char* my_mem, int currB
                                 el++;
                             }
                             find_type = true;
-                        } else if (getValueFromKeyMap1(&tmp_values[MAX_TOKEN_LEN*j]) == STRING_FORMAT) {
+                        } else if (getValueFromKeyMap1(&tmp_values[MAX_TOKEN_LEN*j], true) == STRING_FORMAT) {
                             // Parsed on the host; the row still gets its ids, as on the CPU
                             params->samp_var_id[thID * params->numSample + samp] = thID;
                             params->samp_id[thID * params->numSample + samp] = samp;

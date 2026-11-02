@@ -222,15 +222,16 @@ void vcf_parsed::copyMapToConstantMemory(const std::map<std::string, char, std::
 }
 
 /**
-    * @brief Initializes the INFO field lookup map (Map1) in device constant memory.
-    *
-    * Copies keys and integer values from the host map to device constant memory.
-    * Prints an error if the number of keys exceeds the allowed limit.
-    *
-    * @param my_map Host map containing keys and their corresponding integer values.
-    */
-void vcf_parsed::initialize_map1(const std::map<std::string, int> &my_map){
-    if(my_map.size() > NUM_KEYS_MAP1) {
+* @brief Initializes the INFO field lookup map (Map1) in device constant memory.
+*
+* Copies keys and integer values from the host map to device constant memory.
+* Prints an error if the number of keys exceeds the allowed limit.
+*
+* @param info_keys Host map of the INFO keys and their type codes.
+* @param format_keys Host map of the FORMAT keys and their type codes.
+*/
+void vcf_parsed::initialize_map1(const std::map<std::string, int> &info_keys, const std::map<std::string, int> &format_keys){
+    if(info_keys.size() + format_keys.size() > NUM_KEYS_MAP1) {
         std::cerr << "Too many keys." << std::endl;
         return;
     }
@@ -239,12 +240,14 @@ void vcf_parsed::initialize_map1(const std::map<std::string, int> &my_map){
     char h_keys[NUM_KEYS_MAP1][MAX_KEY_LENGTH_MAP1] = {0};
     int h_values[NUM_KEYS_MAP1] = {0};
 
-    // Copy keys and values into host buffers
+    // Copy keys and values into host buffers: an ID in both INFO and FORMAT takes two slots
     int i = 0;
-    for (const auto& [key, value] : my_map) {
-        strncpy(h_keys[i], key.c_str(), MAX_KEY_LENGTH_MAP1 - 1);
-        h_values[i] = value;
-        ++i;
+    for (const auto* keys : {&info_keys, &format_keys}) {
+        for (const auto& [key, value] : *keys) {
+            strncpy(h_keys[i], key.c_str(), MAX_KEY_LENGTH_MAP1 - 1);
+            h_values[i] = value;
+            ++i;
+        }
     }
 
     // Copy to device memory
@@ -300,7 +303,7 @@ void vcf_parsed::device_allocation(){
         copy_fixed_name(d_VC_in_int->name + i*MAX_NAME_SIZE, var_columns.in_int[i].name);
     }
 
-    initialize_map1(var_columns.info_map1);
+    initialize_map1(var_columns.info_map1, var_columns.format_map1);
     
     if (hasDetSamples) {
         // Copy map to constant memory
@@ -629,7 +632,7 @@ void vcf_parsed::create_sample_vectors(int num_threads){
                     samp_columns.samp_string.back().i_string.resize((num_lines)*samp_columns.numSample, "\0");
                     samp_columns.samp_string.back().numb = std::stoi(FORMAT.Number[i]);
                     info_map[FORMAT.ID[i]] = 8;
-                    var_columns.info_map1[FORMAT.ID[i]] = 8;
+                    var_columns.format_map1[FORMAT.ID[i]] = 8;
                     FORMAT.strings++;                        
                 }else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
                     samp_int_tmp.name = FORMAT.ID[i];
@@ -637,7 +640,7 @@ void vcf_parsed::create_sample_vectors(int num_threads){
                     samp_columns.samp_int.back().i_int.resize((num_lines)*samp_columns.numSample, 0);
                     samp_columns.samp_int.back().numb = std::stoi(FORMAT.Number[i]);
                     info_map[FORMAT.ID[i]] = 9;
-                    var_columns.info_map1[FORMAT.ID[i]] = 9;
+                    var_columns.format_map1[FORMAT.ID[i]] = 9;
                     FORMAT.ints++;
                 }else if(!strcmp(&FORMAT.Type[i][0], "Float")){
                     samp_float_tmp.name = FORMAT.ID[i];
@@ -645,7 +648,7 @@ void vcf_parsed::create_sample_vectors(int num_threads){
                     samp_columns.samp_float.back().i_float.resize((num_lines)*samp_columns.numSample, 0);
                     samp_columns.samp_float.back().numb = std::stoi(FORMAT.Number[i]);
                     info_map[FORMAT.ID[i]] = 10;
-                    var_columns.info_map1[FORMAT.ID[i]] = 10;
+                    var_columns.format_map1[FORMAT.ID[i]] = 10;
                     FORMAT.floats++;
                 }
             }else if(strcmp(&FORMAT.Number[i][0], "0")==0){ 
@@ -655,7 +658,7 @@ void vcf_parsed::create_sample_vectors(int num_threads){
                 samp_columns.samp_flag.back().i_flag.resize((num_lines)*samp_columns.numSample, 0);
                 samp_columns.samp_flag.back().numb = std::stoi(FORMAT.Number[i]);
                 info_map[FORMAT.ID[i]] = FLAG_FORMAT;
-                var_columns.info_map1[FORMAT.ID[i]] = FLAG_FORMAT;
+                var_columns.format_map1[FORMAT.ID[i]] = FLAG_FORMAT;
                 FORMAT.flags++;
             }else{ 
                 //Number > 1
@@ -666,7 +669,7 @@ void vcf_parsed::create_sample_vectors(int num_threads){
                         samp_columns.samp_string.back().i_string.resize((num_lines)*samp_columns.numSample, "\0");
                         samp_columns.samp_string.back().numb = std::stoi(FORMAT.Number[i]);
                         info_map[FORMAT.ID[i]+std::to_string(j)] = 8;
-                        var_columns.info_map1[FORMAT.ID[i]+std::to_string(j)] = 8;
+                        var_columns.format_map1[FORMAT.ID[i]+std::to_string(j)] = 8;
                         FORMAT.strings++;
                     }
                 }else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
@@ -676,7 +679,7 @@ void vcf_parsed::create_sample_vectors(int num_threads){
                         samp_columns.samp_int.back().i_int.resize((num_lines)*samp_columns.numSample, 0);
                         samp_columns.samp_int.back().numb = std::stoi(FORMAT.Number[i]);
                         info_map[FORMAT.ID[i]+std::to_string(j)] = 9;
-                        var_columns.info_map1[FORMAT.ID[i]+std::to_string(j)] = 9;
+                        var_columns.format_map1[FORMAT.ID[i]+std::to_string(j)] = 9;
                         FORMAT.ints++;
                     }
                 }else if(!strcmp(&FORMAT.Type[i][0], "Float")){
@@ -686,7 +689,7 @@ void vcf_parsed::create_sample_vectors(int num_threads){
                         samp_columns.samp_float.back().i_float.resize((num_lines)*samp_columns.numSample, 0);
                         samp_columns.samp_float.back().numb = std::stoi(FORMAT.Number[i]);
                         info_map[FORMAT.ID[i]+std::to_string(j)] = 10;
-                        var_columns.info_map1[FORMAT.ID[i]+std::to_string(j)] = 10;
+                        var_columns.format_map1[FORMAT.ID[i]+std::to_string(j)] = 10;
                         FORMAT.floats++;
                     }
                 }
@@ -699,7 +702,7 @@ void vcf_parsed::create_sample_vectors(int num_threads){
                 //alt_sample.samp_string.back().i_string.resize(batch_size*samp_columns.numSample*2, "\0");
                 alt_sample.samp_string.back().numb = -1;
                 info_map[FORMAT.ID[i]] = 11;
-                var_columns.info_map1[FORMAT.ID[i]] = 11;
+                var_columns.format_map1[FORMAT.ID[i]] = 11;
                 FORMAT.strings_alt++;
             }else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
                 samp_alt_int_tmp.name = FORMAT.ID[i];
@@ -707,7 +710,7 @@ void vcf_parsed::create_sample_vectors(int num_threads){
                 //alt_sample.samp_int.back().i_int.resize(batch_size*samp_columns.numSample*2, 0);
                 alt_sample.samp_int.back().numb = -1;
                 info_map[FORMAT.ID[i]] = 12;
-                var_columns.info_map1[FORMAT.ID[i]] = 12;
+                var_columns.format_map1[FORMAT.ID[i]] = 12;
                 FORMAT.ints_alt++;
             }else if(!strcmp(&FORMAT.Type[i][0], "Float")){
                 samp_alt_float_tmp.name = FORMAT.ID[i];
@@ -715,7 +718,7 @@ void vcf_parsed::create_sample_vectors(int num_threads){
                 //alt_sample.samp_float.back().i_float.resize(batch_size*samp_columns.numSample*2, 0);
                 alt_sample.samp_float.back().numb = -1;
                 info_map[FORMAT.ID[i]] = 13;
-                var_columns.info_map1[FORMAT.ID[i]] = 13;
+                var_columns.format_map1[FORMAT.ID[i]] = 13;
                 FORMAT.floats_alt++;
             }
         }
@@ -1434,8 +1437,8 @@ format_plan vcf_parsed::make_format_plan(const char* b, const char* e){
             // GT with Number=A goes to DF4; GT Number=1 is parsed by the kernel; an undeclared GT is skipped
             if(samp_columns.sample_GT.empty() && FORMAT.hasGT) step.kind = format_step::GT_ALT;
         }else{
-            const int code = var_columns.info_code(key);
-            const int code1 = var_columns.info_code(key + "1");
+            const int code = var_columns.format_code(key);
+            const int code1 = var_columns.format_code(key + "1");
             auto index_of = [&](const auto& columns, bool exact){
                 for(size_t el = 0; el < columns.size(); el++)
                     if(exact ? columns[el].name == key : format_name_matches(columns[el].name, key)) return static_cast<int>(el);

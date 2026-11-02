@@ -134,6 +134,15 @@ public:
         return it == info_map1.end() ? -1 : it->second;
     }
 
+    /** @brief Maps FORMAT field names to their type: separate from info_map1, the same ID can be in both */
+    map<string,int> format_map1;
+
+    // Same as info_code, for FORMAT keys
+    int format_code(const string& key) const {
+        auto it = format_map1.find(key);
+        return it == format_map1.end() ? -1 : it->second;
+    }
+
     // Per-thread alternative buffers are pre-sized for ~2 ALTs per line; grow them when a chunk needs more.
     void ensure_alt_capacity(alt_columns_df* tmp_alt, int needed)
     {
@@ -801,7 +810,7 @@ public:
                                     (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
                                 }
                                 find_type = true;
-                            }else if(info_code(tmp_format_split[j]) == STRING_FORMAT || info_code(tmp_format_split[j] + std::to_string(1)) == STRING_FORMAT){
+                            }else if(format_code(tmp_format_split[j]) == STRING_FORMAT || format_code(tmp_format_split[j] + std::to_string(1)) == STRING_FORMAT){
                                 //String - deterministic
                                 (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
                                 (*sample).samp_id[i*(*sample).numSample + samp] =  static_cast<unsigned short>(samp);
@@ -828,7 +837,7 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_code(tmp_format_split[j]) == INT_FORMAT || info_code(tmp_format_split[j] + std::to_string(1)) == INT_FORMAT){
+                            }else if(format_code(tmp_format_split[j]) == INT_FORMAT || format_code(tmp_format_split[j] + std::to_string(1)) == INT_FORMAT){
                                 //Integer - deterministic
                                 (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
                                 (*sample).samp_id[i*(*sample).numSample + samp] = samp;
@@ -852,7 +861,7 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_code(tmp_format_split[j]) == FLOAT_FORMAT || info_code(tmp_format_split[j] + std::to_string(1)) == FLOAT_FORMAT){
+                            }else if(format_code(tmp_format_split[j]) == FLOAT_FORMAT || format_code(tmp_format_split[j] + std::to_string(1)) == FLOAT_FORMAT){
                                 //Float - deterministic
                                 (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
                                 (*sample).samp_id[i*(*sample).numSample + samp] = samp;
@@ -880,7 +889,7 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_code(tmp_format_split[j]) == STRING_FORMAT_ALT){
+                            }else if(format_code(tmp_format_split[j]) == STRING_FORMAT_ALT){
                                 //String alternatives
                                 split_on(tmp_sub, tmp_split[j], ',');
                                 local_alt = tmp_sub.size();
@@ -902,7 +911,7 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_code(tmp_format_split[j]) == INT_FORMAT_ALT){
+                            }else if(format_code(tmp_format_split[j]) == INT_FORMAT_ALT){
                                 //Integer alternatives
                                 split_on(tmp_sub, tmp_split[j], ',');
                                 local_alt = tmp_sub.size();
@@ -924,7 +933,7 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_code(tmp_format_split[j]) == FLOAT_FORMAT_ALT){
+                            }else if(format_code(tmp_format_split[j]) == FLOAT_FORMAT_ALT){
                                 //Float alternatives
                                 split_on(tmp_sub, tmp_split[j], ',');
                                 local_alt = tmp_sub.size();

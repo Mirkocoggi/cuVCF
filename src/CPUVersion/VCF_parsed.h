@@ -393,7 +393,7 @@ public:
                         samp_columns.samp_string.back().i_string.resize((num_lines-1)*samp_columns.numSample, "\0");
                         samp_columns.samp_string.back().numb = std::stoi(FORMAT.Number[i]);
                         info_map[FORMAT.ID[i]] = 8;
-                        var_columns.info_map1[FORMAT.ID[i]] = 8;
+                        var_columns.format_map1[FORMAT.ID[i]] = 8;
                         FORMAT.strings++;                        
                     }else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
                         samp_int_tmp.name = FORMAT.ID[i];
@@ -401,7 +401,7 @@ public:
                         samp_columns.samp_int.back().i_int.resize((num_lines-1)*samp_columns.numSample, MISSING_INT);
                         samp_columns.samp_int.back().numb = std::stoi(FORMAT.Number[i]);
                         info_map[FORMAT.ID[i]] = 9;
-                        var_columns.info_map1[FORMAT.ID[i]] = 9;
+                        var_columns.format_map1[FORMAT.ID[i]] = 9;
                         FORMAT.ints++;
                     }else if(!strcmp(&FORMAT.Type[i][0], "Float")){
                         samp_float_tmp.name = FORMAT.ID[i];
@@ -409,7 +409,7 @@ public:
                         samp_columns.samp_float.back().i_float.resize((num_lines-1)*samp_columns.numSample, MISSING_FLOAT);
                         samp_columns.samp_float.back().numb = std::stoi(FORMAT.Number[i]);
                         info_map[FORMAT.ID[i]] = 10;
-                        var_columns.info_map1[FORMAT.ID[i]] = 10;
+                        var_columns.format_map1[FORMAT.ID[i]] = 10;
                         FORMAT.floats++;
                     }
                 }else if(strcmp(&FORMAT.Number[i][0], "0")==0){ 
@@ -419,7 +419,7 @@ public:
                     samp_columns.samp_flag.back().i_flag.resize((num_lines-1)*samp_columns.numSample, 0);
                     samp_columns.samp_flag.back().numb = std::stoi(FORMAT.Number[i]);
                     info_map[FORMAT.ID[i]] = FLAG_FORMAT;
-                    var_columns.info_map1[FORMAT.ID[i]] = FLAG_FORMAT;
+                    var_columns.format_map1[FORMAT.ID[i]] = FLAG_FORMAT;
                     FORMAT.flags++;
                 }else{ 
                     //Number > 1
@@ -430,7 +430,7 @@ public:
                             samp_columns.samp_string.back().i_string.resize((num_lines-1)*samp_columns.numSample, "\0");
                             samp_columns.samp_string.back().numb = std::stoi(FORMAT.Number[i]);
                             info_map[FORMAT.ID[i]+std::to_string(j)] = 8;
-                            var_columns.info_map1[FORMAT.ID[i]+std::to_string(j)] = 8;
+                            var_columns.format_map1[FORMAT.ID[i]+std::to_string(j)] = 8;
                             FORMAT.strings++;
                         }
                     }else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
@@ -440,7 +440,7 @@ public:
                             samp_columns.samp_int.back().i_int.resize((num_lines-1)*samp_columns.numSample, MISSING_INT);
                             samp_columns.samp_int.back().numb = std::stoi(FORMAT.Number[i]);
                             info_map[FORMAT.ID[i]+std::to_string(j)] = 9;
-                            var_columns.info_map1[FORMAT.ID[i]+std::to_string(j)] = 9;
+                            var_columns.format_map1[FORMAT.ID[i]+std::to_string(j)] = 9;
                             FORMAT.ints++;
                         }
                     }else if(!strcmp(&FORMAT.Type[i][0], "Float")){
@@ -450,7 +450,7 @@ public:
                             samp_columns.samp_float.back().i_float.resize((num_lines-1)*samp_columns.numSample, MISSING_FLOAT);
                             samp_columns.samp_float.back().numb = std::stoi(FORMAT.Number[i]);
                             info_map[FORMAT.ID[i]+std::to_string(j)] = 10;
-                            var_columns.info_map1[FORMAT.ID[i]+std::to_string(j)] = 10;
+                            var_columns.format_map1[FORMAT.ID[i]+std::to_string(j)] = 10;
                             FORMAT.floats++;
                         }
                     }
@@ -462,21 +462,21 @@ public:
                     alt_sample.samp_string.push_back(samp_alt_string_tmp);
                     alt_sample.samp_string.back().numb = -1;
                     info_map[FORMAT.ID[i]] = 11;
-                    var_columns.info_map1[FORMAT.ID[i]] = 11;
+                    var_columns.format_map1[FORMAT.ID[i]] = 11;
                     FORMAT.strings_alt++;
                 }else if(!strcmp(&FORMAT.Type[i][0], "Integer")){
                     samp_alt_int_tmp.name = FORMAT.ID[i];
                     alt_sample.samp_int.push_back(samp_alt_int_tmp);
                     alt_sample.samp_int.back().numb = -1;
                     info_map[FORMAT.ID[i]] = 12;
-                    var_columns.info_map1[FORMAT.ID[i]] = 12;
+                    var_columns.format_map1[FORMAT.ID[i]] = 12;
                     FORMAT.ints_alt++;
                 }else if(!strcmp(&FORMAT.Type[i][0], "Float")){
                     samp_alt_float_tmp.name = FORMAT.ID[i];
                     alt_sample.samp_float.push_back(samp_alt_float_tmp);
                     alt_sample.samp_float.back().numb = -1;
                     info_map[FORMAT.ID[i]] = 13;
-                    var_columns.info_map1[FORMAT.ID[i]] = 13;
+                    var_columns.format_map1[FORMAT.ID[i]] = 13;
                     FORMAT.floats_alt++;
                 }
             }

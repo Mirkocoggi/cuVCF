@@ -224,13 +224,15 @@ __device__ int getValueFromKeyGT(const char* key) {
 }
 
 /**
- * @brief Retrieves the value corresponding to a key in d_keys_map1 and d_values_map1.
+ * @brief Retrieves the value of a key in d_keys_map1 and d_values_map1.
  * @param key Pointer to the key string.
+ * @param format true to look among the FORMAT keys, false among the INFO keys: the same ID can be in both.
  * @return The associated value if found, or -1 otherwise.
  */
-__device__ int getValueFromKeyMap1(const char* key) {
+__device__ int getValueFromKeyMap1(const char* key, bool format) {
     for (int i = 0; i < NUM_KEYS_MAP1; ++i) {
-        if (cuda_strncmp_custom(key, d_keys_map1[i], MAX_KEY_LENGTH_MAP1) == 0) {
+        if ((d_values_map1[i] >= STRING_FORMAT) == format &&
+            cuda_strncmp_custom(key, d_keys_map1[i], MAX_KEY_LENGTH_MAP1) == 0) {
             return d_values_map1[i];
         }
     }
