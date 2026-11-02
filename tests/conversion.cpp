@@ -1,4 +1,5 @@
 #include "fixtures.h"
+#include "expected_failures.h"
 
 int main(int argc, char** argv) {
     using namespace test;
@@ -44,5 +45,6 @@ int main(int argc, char** argv) {
     cases.push_back({"parse/extended/two_threads",[baseline] {
         TempDir tmp; vcf_parsed p{}; parse(p,tmp.write("input.vcf",baseline.input),2); check_frames(p,baseline.expected);
     },true});
+    apply_expected_failures(cases);
     return run(cases,argc,argv);
 }

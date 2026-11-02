@@ -48,6 +48,8 @@ struct Case {
     bool extended = false;
     // Only this exact assertion is eligible; exceptions/setup errors never count as xfail.
     std::string expected_failure;
+    Case(std::string name, std::function<void()> fn, bool extra=false, std::string failure={})
+        : id(std::move(name)), run(std::move(fn)), extended(extra), expected_failure(std::move(failure)) {}
 };
 enum class Result { pass, fail, xfail, xpass };
 inline Result execute(const Case& c, std::ostream& log) {

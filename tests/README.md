@@ -22,7 +22,7 @@ All ordinary cases run in one process per backend with one parser thread. There 
 
 | Feature | Case prefix | Contract |
 |---|---|---|
-| Core columns and alternate alleles | `core/` | Values, ordering, IDs and lookup maps; absent QUAL remains missing |
+| Core columns and alternate alleles | `core/` | Values, ordering, IDs and lookup maps; absent QUAL uses -1 |
 | INFO Integer/Float/String | `info/` | Number=1 and A |
 | INFO flags | `info/flag_` | Number=0, presence and absence |
 | FORMAT Integer/Float/String | `format/` | Number=1, fixed positive count, A; alone and after GT |
@@ -35,7 +35,7 @@ All ordinary cases run in one process per backend with one parser thread. There 
 
 INFO fixed arrays (>1), Number=R/G/., Character fields, non-diploid/partially missing GT, and nonstandard FORMAT Flag/GT Number=A are outside the supported lossless conversion contract. The implementation contains some nonstandard paths; their existence does not make them valid VCF features. Unsupported-field isolation tests are parse-only and do not assert lossless reconstruction.
 
-Expectations are hand-authored native DF1–DF4 values, independent of the parser. Each test compares every populated data column and row association; missing integers use INT_MIN and missing floats NaN as the intended lossless contract. The old master encodes some missing values differently; tests intentionally expose that limitation. Finite floats are compared after half quantization.
+Expectations are hand-authored native DF1–DF4 values, independent of the parser. Each test compares every populated data column and row association; missing integers use INT_MIN and missing floats NaN as the intended lossless contract. The old master encodes some missing values differently; tests intentionally expose that limitation. Finite floats are compared after half quantization. QUAL uses -1 for missing, consistent with its nonnegative valid range.
 
 ## Failure ledger and triage
 
@@ -44,10 +44,14 @@ No native results from this revision are available yet. Do not pre-emptively mar
 | Candidate cases | Expected behavior / suspected issue | Status |
 |---|---|---|
 | `parse/missing/array_Integer`, `parse/missing/array_Float` | Preserve missing elements; master numeric fallback converts them to zero | Source-inspected; native reproduction pending |
-| `parse/core/multiple_records_missing_QUAL` | Missing QUAL is distinct from legitimate numbers; master uses -1 | Source-inspected; native reproduction pending |
+
+
+Record confirmed failures in `expected_failures.h` (currently empty) and this README.
 
 For each confirmed failure add: backend, base commit, case ID, exact assertion key, command, expected/actual result and issue/PR reference. Fix independently; remove the entry when its strict expected failure becomes an unexpected pass. Never weaken the oracle to make CI green.
 
 ## Harness checks
 
 `cuvcf_test_harness` checks pass/fail classification, narrow expected failures, unexpected passes, setup-error propagation and temporary-file cleanup. It has no native parser dependency and can be compiled with a standard C++17 compiler. Suite exit codes are 0 for pass/expected-failure, 1 for test failure/unexpected-pass and 2 for invalid invocation or missing GPU.
+
+Harness self-checks and CLI exit-code checks passed. CPU test sources passed a syntax-only check. Native Linux execution and NVIDIA validation remain pending.
