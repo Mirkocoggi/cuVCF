@@ -1512,35 +1512,37 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                     // Process DF3 Integer fields
                     for (const auto& g : df3_int_groups) {
                         write_sep();
-                        size_t group_size = g.col_end - g.col_start;
-                        size_t limit = (group_size > 1)
-                            ? std::min(group_size, (g.number_kind == 1) ? num_alts : num_alts + 1) : 1;
-                        bool any = false, first_v = true;
-                        for (size_t cc = g.col_start; cc < g.col_start + limit; cc++) {
+                        
+                        char* start = w;
+                        bool any = false;
+
+                        for (size_t cc = g.col_start; cc < g.col_end; cc++) {
+                            if (cc != g.col_start) *w++ = ',';
+
                             int v = df3.samp_int[cc].i_int[df3_idx];
-                            if (v == MISSING_INT) continue;
-                            if (!first_v) *w++ = ','; first_v = false;
-                            w += fast_itoa(v, w);
-                            any = true;
+
+                            if (v == MISSING_INT) *w++ = '.';
+                            else { w += fast_itoa(v, w); any = true; }
                         }
-                        if (!any) *w++ = '.';
+                        if (!any) { w = start; *w++ = '.'; }
                     }
 
                     // Process DF3 Float fields
                     for (const auto& g : df3_float_groups) {
                         write_sep();
-                        size_t group_size = g.col_end - g.col_start;
-                        size_t limit = (group_size > 1)
-                            ? std::min(group_size, (g.number_kind == 1) ? num_alts : num_alts + 1) : 1;
-                        bool any = false, first_v = true;
-                        for (size_t cc = g.col_start; cc < g.col_start + limit; cc++) {
+                        
+                        char* start = w;
+                        bool any = false;
+
+                        for(size_t cc = g.col_start; cc < g.col_end; cc++){
+                            if(cc != g.col_start) *w++ = ',';
+
                             float v = (float)df3.samp_float[cc].i_float[df3_idx];
-                            if (std::isnan(v)) continue;
-                            if (!first_v) *w++ = ','; first_v = false;
-                            w += fast_ftoa(v, w);
-                            any = true;
+
+                            if(std::isnan(v)) *w++ = '.';
+                            else{w += fast_ftoa(v, w); any = true;}
                         }
-                        if (!any) *w++ = '.';
+                        if(!any){w = start; *w++ = '.';}
                     }
 
                     // Process DF3 String fields

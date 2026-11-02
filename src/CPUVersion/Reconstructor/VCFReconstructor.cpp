@@ -489,40 +489,22 @@ std::string VCFReconstructor::formatVariant(int index,
                     std::string base = stripTrailingDigits(df3.samp_int[col].name);
                     if (!sample_data.empty()) sample_data += ":";
 
-                    // Count how many columns belong to this group
-                    size_t group_start = col;
-                    size_t group_end = col;
-                    while (group_end < df3.samp_int.size() &&
-                        stripTrailingDigits(df3.samp_int[group_end].name) == base)
-                        group_end++;
-                    size_t group_size = group_end - group_start;
-
-                    // Compute how many values to actually print
-                    size_t limit;
-                    if (group_size > 1) {
-                        std::string number = format_numbers.count(base) ? format_numbers[base] : "R";
-                        size_t real_values = (number == "A") ? alt_indices.size()
-                                                             : alt_indices.size() + 1;
-                        limit = std::min(group_size, real_values);
-                    } else {
-                        limit = 1;
-                    }
-
+                    // Each column is one position of the array: a missing value keeps its place
                     std::string group_val = "";
-                    size_t printed = 0;
+                    bool any = false;
                     while (col < df3.samp_int.size() &&
                         stripTrailingDigits(df3.samp_int[col].name) == base) {
-                        if (printed < limit) {
-                            int v = df3.samp_int[col].i_int[df3_idx];
-                            if (v != MISSING_INT) {
-                                if (!group_val.empty()) group_val += ",";
-                                group_val += std::to_string(v);
-                            }
-                            printed++;
+                        if (!group_val.empty()) group_val += ",";
+                        int v = df3.samp_int[col].i_int[df3_idx];
+                        if (v != MISSING_INT) {
+                            group_val += std::to_string(v);
+                            any = true;
+                        } else {
+                            group_val += ".";
                         }
-                        col++; // advance to consume the entire group
+                        col++;
                     }
-                    sample_data += group_val.empty() ? "." : group_val;
+                    sample_data += any ? group_val : ".";
                 }
             }
 
@@ -534,38 +516,23 @@ std::string VCFReconstructor::formatVariant(int index,
                     std::string base = stripTrailingDigits(df3.samp_float[col].name);
                     if (!sample_data.empty()) sample_data += ":";
 
-                    size_t group_start = col;
-                    size_t group_end = col;
-                    while (group_end < df3.samp_float.size() &&
-                        stripTrailingDigits(df3.samp_float[group_end].name) == base)
-                        group_end++;
-                    size_t group_size = group_end - group_start;
-
-                    size_t limit;
-                    if (group_size > 1) {
-                        std::string number = format_numbers.count(base) ? format_numbers[base] : "R";
-                        size_t real_values = (number == "A") ? alt_indices.size()
-                                                             : alt_indices.size() + 1;
-                        limit = std::min(group_size, real_values);
-                    } else {
-                        limit = 1;
-                    }
-
+                    // Each column is one position of the array: a missing value keeps its place
                     std::string group_val = "";
-                    size_t printed = 0;
-                    while (col < df3.samp_float.size() &&
-                        stripTrailingDigits(df3.samp_float[col].name) == base) {
-                        if (printed < limit) {
-                            float v = (float)df3.samp_float[col].i_float[df3_idx];
-                            if (!std::isnan(v)) {
-                                if (!group_val.empty()) group_val += ",";
-                                group_val += std::to_string(v);
-                            }
-                            printed++;
+                    bool any = false;
+                    while(col < df3.samp_float.size() && stripTrailingDigits(df3.samp_float[col].name) == base){
+                        if(!group_val.empty()) group_val += ",";
+
+                        float v = (float)df3.samp_float[col].i_float[df3_idx];
+
+                        if(!std::isnan(v)){
+                            group_val += std::to_string(v);
+                            any = true;
+                        }else{
+                            group_val += ".";
                         }
                         col++;
                     }
-                    sample_data += group_val.empty() ? "." : group_val;
+                    sample_data+=any ? group_val : ".";
                 }
             }
 
