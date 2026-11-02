@@ -47,6 +47,8 @@ For an NVIDIA Linux machine, configure a separate build with `-DCUVCF_CUDA=ON`, 
 
 All ordinary cases run in one process per backend with one parser thread. There is no per-case shell command, Python interpreter, pandas, cuDF, dataset download or parallel test-worker pool. Temporary synthetic inputs are removed after each case, including failed assertions. The gzip test uses a disposable copy because parsing consumes the compressed file. CTest caps CPU/GPU suite time at 60/120 seconds. Runtime and memory measurements remain pending; the target is a few seconds for the default CPU suite after building.
 
+See [COVERAGE.md](COVERAGE.md) for the source audit, added interaction cases, and remaining coverage gaps. Coverage is representative, not exhaustive.
+
 ## Supported subset and case map
 
 | Feature | Case prefix | Contract |

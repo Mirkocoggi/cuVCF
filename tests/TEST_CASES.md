@@ -64,6 +64,18 @@ Each row below lists the exact executable case IDs. `parse` checks VCF → DF, `
 | `parse/core/symbolic_and_spanning_ALT` | `write/core/symbolic_and_spanning_ALT` | `roundtrip/core/symbolic_and_spanning_ALT` |
 | `parse/identifiers/INFO_FORMAT_same_ID` | `write/identifiers/INFO_FORMAT_same_ID` | `roundtrip/identifiers/INFO_FORMAT_same_ID` |
 | `parse/header/reordered_attributes` | `write/header/reordered_attributes` | `roundtrip/header/reordered_attributes` |
+| `parse/combinations/all_dataframes_no_GT` | `write/combinations/all_dataframes_no_GT` | `roundtrip/combinations/all_dataframes_no_GT` |
+| `parse/combinations/all_dataframes_with_GT` | `write/combinations/all_dataframes_with_GT` | `roundtrip/combinations/all_dataframes_with_GT` |
+| `parse/combinations/all_dataframes_missing_GT` | `write/combinations/all_dataframes_missing_GT` | `roundtrip/combinations/all_dataframes_missing_GT` |
+| `parse/missing/positions_Integer_0` | `write/missing/positions_Integer_0` | `roundtrip/missing/positions_Integer_0` |
+| `parse/missing/positions_Integer_1` | `write/missing/positions_Integer_1` | `roundtrip/missing/positions_Integer_1` |
+| `parse/missing/positions_Integer_2` | `write/missing/positions_Integer_2` | `roundtrip/missing/positions_Integer_2` |
+| `parse/missing/positions_Float_0` | `write/missing/positions_Float_0` | `roundtrip/missing/positions_Float_0` |
+| `parse/missing/positions_Float_1` | `write/missing/positions_Float_1` | `roundtrip/missing/positions_Float_1` |
+| `parse/missing/positions_Float_2` | `write/missing/positions_Float_2` | `roundtrip/missing/positions_Float_2` |
+| `parse/missing/positions_String_0` | `write/missing/positions_String_0` | `roundtrip/missing/positions_String_0` |
+| `parse/missing/positions_String_1` | `write/missing/positions_String_1` | `roundtrip/missing/positions_String_1` |
+| `parse/missing/positions_String_2` | `write/missing/positions_String_2` | `roundtrip/missing/positions_String_2` |
 
 ## Additional default cases
 
@@ -111,4 +123,4 @@ build-tests/tests/cuvcf_test_oracle --list
 
 GPU uses the same case IDs: `build-gpu/tests/cuvcf_test_gpu --list --extended`. Listing does not require a GPU device, but the executable must have been built with CUDA.
 
-Current inventory: **168 default conversion cases**, **3 extended conversion cases**, and **12 infrastructure self-checks**. Update this index when adding or renaming cases.
+Current inventory: **204 default conversion cases**, **3 extended conversion cases**, and **12 infrastructure self-checks**. Update this index when adding or renaming cases.

@@ -168,6 +168,58 @@ inline std::vector<Fixture> fixtures() {
         auto f=base(); ints(f.d1.in_int,"DP",{7});
         out.push_back({"header/reordered_attributes",header("##INFO=<Number=1,Type=Integer,ID=DP,Description=\"depth, test\">\n")+row("DP=7"),f});
     }
+
+    // Mix every supported payload type across DF1--DF4. Exercise separators both
+    // with and without GT, and keep allele data when GT itself is missing.
+    for(int gt_mode=0;gt_mode<3;++gt_mode) {
+        auto f=base({"Z"}); alleles(f);
+        std::string meta,info,sample,format;
+        auto add_info=[&](const std::string& id,const std::string& n,const std::string& type,const std::string& value) {
+            meta+=declaration("INFO",id,n,type); if(!info.empty())info+=';'; info+=id+"="+value;
+        };
+        auto add_format=[&](const std::string& id,const std::string& n,const std::string& type,const std::string& value) {
+            meta+=declaration("FORMAT",id,n,type); if(!format.empty()){format+=':';sample+=':';} format+=id;sample+=value;
+        };
+        if(gt_mode) {
+            add_format("GT","1","String",gt_mode==1?"0/1":"./.");
+            f.d3.sample_GT.push_back({{static_cast<char>(gt_mode==1?122:255)},1});
+        }
+        add_info("II","1","Integer","-1"); ints(f.d1.in_int,"II",{-1});
+        add_info("IF","1","Float","0.25"); floats(f.d1.in_float,"IF",{0.25f});
+        add_info("IS","1","String","hello"); strings(f.d1.in_string,"IS",{"hello"});
+        add_info("AI","A","Integer","0,9"); ints(f.d2.alt_int,"AI",{0,9});
+        add_info("AF","A","Float","0.5,0.75"); floats(f.d2.alt_float,"AF",{0.5f,0.75f});
+        add_info("AS","A","String","a,b"); strings(f.d2.alt_string,"AS",{"a","b"});
+        meta+=declaration("INFO","DB","0","Flag"); info+=";DB";
+        info_flag flag{};flag.name="DB";flag.i_flag={1};f.d1.in_flag.push_back(flag);
+        add_format("SI","1","Integer","0"); ints(f.d3.samp_int,"SI",{0});f.d3.samp_int.back().numb=1;
+        add_format("SF","1","Float","-0.5"); floats(f.d3.samp_float,"SF",{-0.5f});f.d3.samp_float.back().numb=1;
+        add_format("SS","1","String","text"); strings(f.d3.samp_string,"SS",{"text"});f.d3.samp_string.back().numb=1;
+        add_format("VI","2","Integer","7,9"); ints(f.d3.samp_int,"VI0",{7});ints(f.d3.samp_int,"VI1",{9});
+        f.d3.samp_int[1].numb=f.d3.samp_int[2].numb=2;
+        add_format("VF","2","Float","0.25,0.5"); floats(f.d3.samp_float,"VF0",{0.25f});floats(f.d3.samp_float,"VF1",{0.5f});
+        f.d3.samp_float[1].numb=f.d3.samp_float[2].numb=2;
+        add_format("VS","2","String","x,y"); strings(f.d3.samp_string,"VS0",{"x"});strings(f.d3.samp_string,"VS1",{"y"});
+        f.d3.samp_string[1].numb=f.d3.samp_string[2].numb=2;
+        add_format("XI","A","Integer","11,13"); ints(f.d4.samp_int,"XI",{11,13});f.d4.samp_int.back().numb=-1;
+        add_format("XF","A","Float","0.25,0.75"); floats(f.d4.samp_float,"XF",{0.25f,0.75f});f.d4.samp_float.back().numb=-1;
+        add_format("XS","A","String","p,q"); strings(f.d4.samp_string,"XS",{"p","q"});f.d4.samp_string.back().numb=-1;
+        out.push_back({"combinations/all_dataframes_"+std::string(gt_mode==0?"no_GT":gt_mode==1?"with_GT":"missing_GT"),header(meta,"Z")+row(info,format+"\t"+sample),f});
+    }
+    for(const auto& type:{std::string("Integer"),std::string("Float"),std::string("String")}) {
+        for(int missing=0;missing<3;++missing) {
+            auto f=base({"Z"}); std::string value;
+            for(int i=0;i<3;++i) {
+                if(i)value+=',';
+                value+=i==missing?".":type=="Integer"?"7":type=="Float"?"0.5":"word";
+                auto name="X"+std::to_string(i);
+                if(type=="Integer") { ints(f.d3.samp_int,name,{i==missing?missing_int():7});f.d3.samp_int.back().numb=3; }
+                else if(type=="Float") { floats(f.d3.samp_float,name,{i==missing?missing_float():0.5f});f.d3.samp_float.back().numb=3; }
+                else { strings(f.d3.samp_string,name,{i==missing?".":"word"});f.d3.samp_string.back().numb=3; }
+            }
+            out.push_back({"missing/positions_"+type+"_"+std::to_string(missing),header(declaration("FORMAT","X","3",type),"Z")+row(".","X\t"+value),f});
+        }
+    }
     return out;
 }
 }
