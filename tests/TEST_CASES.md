@@ -98,6 +98,10 @@ These require `--extended` and are excluded from the default fast suite.
 
 ## Test-infrastructure self-checks
 
+- `oracle/missing_INFO_equivalence`
+- `oracle/missing_INFO_preserves_values`
+- `oracle/missing_INFO_preserves_validation`
+
 - `harness/outcomes`
 - `harness/exit_status`
 - `harness/cleanup`
@@ -123,4 +127,4 @@ build-tests/tests/cuvcf_test_oracle --list
 
 GPU uses the same case IDs: `build-gpu/tests/cuvcf_test_gpu --list --extended`. Listing does not require a GPU device, but the executable must have been built with CUDA.
 
-Current inventory: **204 default conversion cases**, **3 extended conversion cases**, and **12 infrastructure self-checks**. Update this index when adding or renaming cases.
+Current inventory: **204 default conversion cases**, **3 extended conversion cases**, and **15 infrastructure self-checks**. Update this index when adding or renaming cases.

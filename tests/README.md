@@ -89,7 +89,7 @@ For each confirmed failure add: backend, base commit, case ID, exact assertion k
 
 Every supported fixture has three separately reported cases: `parse/`, `write/` and `roundtrip/`. Unsupported-field isolation is parse-only. Writer cases construct native frames directly; round trips parse VCF then reconstruct it. Additional writer cases cover a consistent value edit, an empty string cell, header-only output and output-open errors. No filtering/selection algorithm or arbitrary inconsistent user dataframe is tested.
 
-The standalone checker in `oracle/vcf_oracle.h` parses only the synthetic supported subset, not arbitrary VCF. It checks exact header metadata, sample/record order, declared keys, duplicate keys, cardinalities and missing positions. INFO and FORMAT ordering may differ. Trailing missing sample values may be omitted, and a dataset-wide FORMAT union is allowed only if added values are missing. Floating-point comparison allows half-precision quantization and six-decimal serialization rounding. It does not use the cuVCF parser, so matching parser/writer bugs cannot validate each other. Cases use ordinary finite half-range values; overflow/infinity serialization is outside this subset.
+The standalone checker in `oracle/vcf_oracle.h` parses only the synthetic supported subset, not arbitrary VCF. It treats omitted INFO and wholly missing non-flag INFO values as equivalent after validating keys and cardinalities. Partial arrays and flag presence remain strict. It checks exact header metadata, sample/record order, declared keys, duplicate keys, cardinalities and missing positions. INFO and FORMAT ordering may differ. Trailing missing sample values may be omitted, and a dataset-wide FORMAT union is allowed only if added values are missing. Floating-point comparison allows half-precision quantization and six-decimal serialization rounding. It does not use the cuVCF parser, so matching parser/writer bugs cannot validate each other. Cases use ordinary finite half-range values; overflow/infinity serialization is outside this subset.
 
 ### Reconstructor failure candidates — native reproduction still required
 
@@ -109,7 +109,7 @@ The `roundtrip/` counterparts exercise the same risks across the composed flow. 
 
 ## Validation performed / pending
 
-- Passed: three harness self-tests; nine independent VCF-checker self-tests.
+- Passed: three harness self-tests; twelve independent VCF-checker self-tests.
 - Passed: harness CLI selection, listing, invalid-argument and empty-selection exit-code checks.
 - Passed: CPU suite C++17 syntax-only check against the repository headers. Existing production-header unused-expression warning remains unchanged.
 - Pending: Linux CMake configure/build, actual CPU parsing/reconstruction, sanitizer execution, timing and memory measurement.

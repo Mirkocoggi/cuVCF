@@ -115,8 +115,21 @@ inline void compare_vcf(const std::string& actual_text,const std::string& expect
         for(size_t col:{0u,1u,2u,3u,4u,6u}) expect_equal(ar[col],er[col],key+"/column/"+std::to_string(col));
         value_equal(ar[5],er[5],{"1","Float"},1,key+"/QUAL");
         auto ai=info_values(ar[7],a), ei=info_values(er[7],e);
-        expect_equal(ai.size(),ei.size(),key+"/info/count");
         auto alts=tokens(er[4],',').size();
+        // Validate first, then canonicalize wholly missing non-flag values. This
+        // preserves duplicate/undeclared-key errors and partial-array positions.
+        auto normalize=[&](auto& values,const auto& fields) {
+            for(auto it=values.begin();it!=values.end();) {
+                const auto& field=fields.at(it->first);
+                value_equal(it->second,it->second,field,alts,key+"/INFO/"+it->first);
+                auto parts=tokens(it->second,',');
+                if(field.type!="Flag" && std::all_of(parts.begin(),parts.end(),[](const auto& part){return part==".";}))
+                    it=values.erase(it);
+                else ++it;
+            }
+        };
+        normalize(ai,a.info); normalize(ei,e.info);
+        expect_equal(ai.size(),ei.size(),key+"/info/count");
         for(const auto& kv:ei) {
             require(ai.count(kv.first),key+"/info/key","missing INFO "+kv.first);
             value_equal(ai.at(kv.first),kv.second,e.info.at(kv.first),alts,key+"/INFO/"+kv.first);
