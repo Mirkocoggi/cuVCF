@@ -758,6 +758,8 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
     format_numbers = parseFormatNumbers(header_text);
 
 
+    df3_int_groups   = buildGroups(df3.samp_int,   format_numbers);
+    df3_float_groups = buildGroups(df3.samp_float, format_numbers);
     df4_int_groups   = buildGroups(df4.samp_int,   format_numbers);
     df4_float_groups = buildGroups(df4.samp_float, format_numbers);
 
