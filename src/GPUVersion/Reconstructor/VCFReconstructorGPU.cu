@@ -1487,9 +1487,6 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                 bool first_field = true;
                 auto write_sep = [&]() { if (!first_field) *w++ = ':'; first_field = false; };
 
-                // FLAG PER TRONCARE I CAMPI SE GT E' MANCANTE
-                bool skip_rest = false;
-
                 // Handle Genotype (GT)
                 if (has_gt) {
                     bool found = false;
@@ -1504,22 +1501,14 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                             k++;
                         }
                     }
+
                     write_sep();
-                    if (!found) { 
-                        *w++ = '.'; *w++ = '/'; *w++ = '.'; 
-                        skip_rest = true; 
-                    }
-                    else {
-                        const std::string& gt = df3.getGTStringFromChar(gt_code);
-                        memcpy(w, gt.data(), gt.size()); w += gt.size();
-                        // Protezione extra se il mapping originario conteneva la stringa missing
-                        if (gt == ".|." || gt == "./.") {
-                            skip_rest = true;
-                        }
-                    }
+                    const std::string gt = found ? df3.getGTStringFromChar(gt_code) : "./.";
+
+                    memcpy(w, gt.data(), gt.size()); w += gt.size();
                 }
 
-                if (!skip_rest) {
+                {
                     // Process DF3 Integer fields
                     for (const auto& g : df3_int_groups) {
                         write_sep();
@@ -1619,9 +1608,13 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                             if (!any) *w++ = '.';
                         }
                     }
-                } // FINE BLOCCO if (!skip_rest)
+                }
+
+                // Trailing missing fields can be dropped (VCF spec): "./.:.:." is written as "./."
+                while(w - w0 >= 2 && w[-2] == ':' && w[-1] == '.') w -= 2;
 
                 *w++ = '\0';
+
                 size_t cell_len = w - w0;
 
                 int global_idx = i_rel * num_samples + s;

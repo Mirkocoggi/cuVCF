@@ -478,15 +478,7 @@ std::string VCFReconstructor::formatVariant(int index,
                     }
                 }
 
-                if(!found) {
-                    ss << "./.";
-                    continue;
-                }
-                sample_data = df3.getGTStringFromChar(gt_code);
-                if(sample_data == ".|." || sample_data == "./.") {
-                    ss << sample_data;
-                    continue;
-                }
+                sample_data = found ? df3.getGTStringFromChar(gt_code) : "./.";
             }
 
             // --- DF3 int fields ---
@@ -659,6 +651,11 @@ std::string VCFReconstructor::formatVariant(int index,
                     sample_data += field_val.empty() ? "." : field_val;
                 }
             }
+
+
+            // Trailing missing fields can be dropped (VCF spec): "./.:.:." is written as "./."
+            while(sample_data.size() >= 2  && sample_data.compare(sample_data.size() - 2,2,":.") == 0)
+                sample_data.resize(sample_data.size() - 2);
 
             // Append the fully constructed sample format string to the line
             ss << sample_data;
