@@ -573,7 +573,8 @@ std::string VCFReconstructor::formatVariant(int index,
             // Append single string fields
             for (size_t col = 0; col < df3.samp_string.size(); col++) {
                 if (!sample_data.empty()) sample_data += ":";
-                sample_data += df3.samp_string[col].i_string[df3_idx];
+                const std::string& s_val = df3.samp_string[col].i_string[df3_idx];
+                sample_data += s_val.empty() ? "." : s_val;
             }
 
             // --- DF4 per-allele fields ---
@@ -643,7 +644,8 @@ std::string VCFReconstructor::formatVariant(int index,
                     while (k < df4.var_id.size() && df4.var_id[k] == current_var_id) {
                         if (df4.samp_id[k] == static_cast<unsigned short>(i)) {
                             if (!field_val.empty()) field_val += ",";
-                            field_val += df4.samp_string[col].i_string[k];
+                            const std::string& s_val = df4.samp_string[col].i_string[k];
+                            field_val += s_val.empty() ? "." : s_val;
                         }
                         k++;
                     }
