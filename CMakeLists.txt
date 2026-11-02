@@ -88,3 +88,10 @@ if(CUVCF_WITH_CUDA)
 
   install(TARGETS GPUParser LIBRARY DESTINATION .)
 endif()
+
+# Small opt-in conversion regression suites. No downloads or external test framework.
+option(CUVCF_BUILD_TESTS "Build native conversion regression tests" OFF)
+if(CUVCF_BUILD_TESTS)
+  enable_testing()
+  add_subdirectory(tests)
+endif()
