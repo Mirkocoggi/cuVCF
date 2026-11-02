@@ -1,4 +1,4 @@
-#include "vcf_oracle.h"
+#include "oracle/vcf_oracle.h"
 using namespace test;
 const std::string meta="##fileformat=VCFv4.3\n##INFO=<ID=I,Number=A,Type=Integer,Description=\"test\">\n##FORMAT=<ID=X,Number=2,Type=Integer,Description=\"test\">\n##FORMAT=<ID=F,Number=1,Type=Float,Description=\"test\">\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tZ\n";
 const std::string row="1\t10\t.\tA\tC,G\t30\tPASS\tI=1,2\tX:F\t.,7:0.1\n";

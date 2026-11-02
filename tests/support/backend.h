@@ -9,7 +9,7 @@
 #else
 #include "CPUVersion/VCF_parsed.h"
 #endif
-#include "harness.h"
+#include "support/harness.h"
 #include <cmath>
 #include <limits>
 #include <zlib.h>

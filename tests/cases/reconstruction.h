@@ -1,6 +1,6 @@
 #pragma once
-#include "backend.h"
-#include "vcf_oracle.h"
+#include "support/backend.h"
+#include "oracle/vcf_oracle.h"
 #ifdef CUVCF_TEST_GPU
 #include "GPUVersion/Reconstructor/VCFReconstructorGPU.h"
 #else

@@ -2,6 +2,35 @@
 
 Parser stage: `test/parser-regressions`, based on master `6fe5a5f`. Full suite: `test/conversion-regressions`, rebased onto reconstructor `b2b04b5436ea72f819d3ffd4d1cafb5d6b2c5ee2`. Tests target the existing Linux C++17/OpenMP toolchain; no Apple Silicon build adaptations are provided. Native Linux and NVIDIA execution is pending. A test being present does **not** mean it has passed.
 
+
+## Folder structure
+
+```text
+tests/
+├── CMakeLists.txt          # Build targets and CTest registration
+├── README.md               # Build/run instructions and failure ledger
+├── TEST_CASES.md           # Complete expanded case index
+├── cases/
+│   ├── fixtures.h          # Small VCF inputs and independently specified DF expectations
+│   └── reconstruction.h    # Writer and round-trip case registration
+├── runners/
+│   ├── conversion.cpp      # CPU entry point; parser case registration and suite assembly
+│   └── conversion_gpu.cu   # Compiles the shared suite for the GPU backend
+├── support/
+│   ├── backend.h           # Backend adapter, DF builders and dataframe assertions
+│   ├── harness.h           # Assertions, selection, reporting and temporary files
+│   └── expected_failures.h # Confirmed failures, selected by backend and exact case
+├── oracle/
+│   └── vcf_oracle.h        # Independent semantic checker for reconstructed VCF
+└── selftest/
+    ├── harness_selftest.cpp
+    └── oracle_selftest.cpp
+```
+
+Start with [the complete case list](TEST_CASES.md). The same synthetic fixture normally produces three cases: `parse/` compares parser output with expected frames; `write/` passes those independently built frames directly to the writer; `roundtrip/` checks the composed conversion. The independent checker validates writer output without using the production parser. Each backend runs its selected cases in one process.
+
+Fixtures live in C++ so the literal VCF input and expected dataframe values stay together. To add coverage, add a fixture in `cases/fixtures.h`; it automatically receives all three directions unless marked parse-only. Add special writer cases in `cases/reconstruction.h`, and update `TEST_CASES.md`. The runtime `--list --extended` command is authoritative.
+
 ## Build once, run repeatedly
 
 Install the normal project prerequisites (including pybind11). From the repository root:
@@ -46,7 +75,7 @@ No native results from this revision are available yet. Do not pre-emptively mar
 | `parse/missing/array_Integer`, `parse/missing/array_Float` | Preserve missing elements; master numeric fallback converts them to zero | Source-inspected; native reproduction pending |
 
 
-Add confirmed failures in `expected_failures.h` and this ledger; the registry is currently empty. Each entry selects an exact backend, case ID and assertion key, and must include a reason. Stale case IDs and duplicate entries fail setup.
+Add confirmed failures in `support/expected_failures.h` and this ledger; the registry is currently empty. Each entry selects an exact backend, case ID and assertion key, and must include a reason. Stale case IDs and duplicate entries fail setup.
 
 For each confirmed failure add: backend, base commit, case ID, exact assertion key, command, expected/actual result and issue/PR reference. Fix independently; remove the entry when its strict expected failure becomes an unexpected pass. Never weaken the oracle to make CI green.
 
@@ -58,7 +87,7 @@ For each confirmed failure add: backend, base commit, case ID, exact assertion k
 
 Every supported fixture has three separately reported cases: `parse/`, `write/` and `roundtrip/`. Unsupported-field isolation is parse-only. Writer cases construct native frames directly; round trips parse VCF then reconstruct it. Additional writer cases cover a consistent value edit, an empty string cell, header-only output and output-open errors. No filtering/selection algorithm or arbitrary inconsistent user dataframe is tested.
 
-The standalone checker in `vcf_oracle.h` parses only the synthetic supported subset, not arbitrary VCF. It checks exact header metadata, sample/record order, declared keys, duplicate keys, cardinalities and missing positions. INFO and FORMAT ordering may differ. Trailing missing sample values may be omitted, and a dataset-wide FORMAT union is allowed only if added values are missing. Floating-point comparison allows half-precision quantization and six-decimal serialization rounding. It does not use the cuVCF parser, so matching parser/writer bugs cannot validate each other. Cases use ordinary finite half-range values; overflow/infinity serialization is outside this subset.
+The standalone checker in `oracle/vcf_oracle.h` parses only the synthetic supported subset, not arbitrary VCF. It checks exact header metadata, sample/record order, declared keys, duplicate keys, cardinalities and missing positions. INFO and FORMAT ordering may differ. Trailing missing sample values may be omitted, and a dataset-wide FORMAT union is allowed only if added values are missing. Floating-point comparison allows half-precision quantization and six-decimal serialization rounding. It does not use the cuVCF parser, so matching parser/writer bugs cannot validate each other. Cases use ordinary finite half-range values; overflow/infinity serialization is outside this subset.
 
 ### Reconstructor failure candidates — native reproduction still required
 

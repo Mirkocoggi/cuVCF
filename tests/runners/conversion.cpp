@@ -1,6 +1,6 @@
-#include "fixtures.h"
-#include "reconstruction.h"
-#include "expected_failures.h"
+#include "cases/fixtures.h"
+#include "cases/reconstruction.h"
+#include "support/expected_failures.h"
 
 int main(int argc, char** argv) {
     using namespace test;
