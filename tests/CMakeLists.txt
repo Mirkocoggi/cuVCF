@@ -2,7 +2,8 @@ add_executable(cuvcf_test_harness harness_selftest.cpp)
 add_test(NAME conversion_harness COMMAND cuvcf_test_harness)
 set_tests_properties(conversion_harness PROPERTIES LABELS "harness" TIMEOUT 10)
 
-add_executable(cuvcf_test_cpu conversion.cpp)
+add_executable(cuvcf_test_cpu conversion.cpp
+  ${PROJECT_SOURCE_DIR}/src/CPUVersion/Reconstructor/VCFReconstructor.cpp)
 target_include_directories(cuvcf_test_cpu PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(cuvcf_test_cpu PRIVATE ${COMMON_DEPS})
 if(CUVCF_SANITIZE)
@@ -21,3 +22,7 @@ if(CUVCF_WITH_CUDA)
   add_test(NAME conversion_gpu COMMAND cuvcf_test_gpu)
   set_tests_properties(conversion_gpu PROPERTIES LABELS "gpu" TIMEOUT 120 ENVIRONMENT "OMP_NUM_THREADS=1;OMP_THREAD_LIMIT=2" RUN_SERIAL TRUE)
 endif()
+
+add_executable(cuvcf_test_oracle oracle_selftest.cpp)
+add_test(NAME conversion_oracle COMMAND cuvcf_test_oracle)
+set_tests_properties(conversion_oracle PROPERTIES LABELS "harness" TIMEOUT 10)

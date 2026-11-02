@@ -115,6 +115,7 @@ inline void check_frames(const vcf_parsed& p, const Frames& f) {
     require(a.filter_map == f.d1.filter_map, "filter_map", "unexpected filter mapping");
     float_sequence(a.qual,f.d1.qual,"qual");
     SEQ(b.var_id,f.d2.var_id); SEQ(b.alt_id,f.d2.alt_id); SEQ(b.alt,f.d2.alt);
+    expect_equal(c.numSample,f.d3.numSample,"sample_count");
     SEQ(c.var_id,f.d3.var_id); SEQ(c.samp_id,f.d3.samp_id);
     SEQ(d.var_id,f.d4.var_id); SEQ(d.samp_id,f.d4.samp_id); SEQ(d.alt_id,f.d4.alt_id);
     require(c.sampNames == f.d3.sampNames && d.sampNames == f.d4.sampNames, "samples", "sample order/name mismatch");
@@ -127,6 +128,9 @@ inline void check_frames(const vcf_parsed& p, const Frames& f) {
     COL(b.alt_int,f.d2.alt_int,ci); COL(b.alt_float,f.d2.alt_float,cf); COL(b.alt_string,f.d2.alt_string,cs); COL(b.alt_flag,f.d2.alt_flag,cb);
     COL(c.samp_int,f.d3.samp_int,ci); COL(c.samp_float,f.d3.samp_float,cf); COL(c.samp_string,f.d3.samp_string,cs); COL(c.samp_flag,f.d3.samp_flag,cb);
     COL(d.samp_int,f.d4.samp_int,ci); COL(d.samp_float,f.d4.samp_float,cf); COL(d.samp_string,f.d4.samp_string,cs); COL(d.samp_flag,f.d4.samp_flag,cb);
+    auto cn = [](const auto& x,const auto& y,const auto& k){ expect_equal(x.numb,y.numb,k+"/numb"); };
+    COL(c.samp_int,f.d3.samp_int,cn); COL(c.samp_float,f.d3.samp_float,cn); COL(c.samp_string,f.d3.samp_string,cn);
+    COL(d.samp_int,f.d4.samp_int,cn); COL(d.samp_float,f.d4.samp_float,cn); COL(d.samp_string,f.d4.samp_string,cn);
     expect_equal(c.sample_GT.size(),f.d3.sample_GT.size(),"GT/columns");
     for(size_t i=0;i<c.sample_GT.size();++i) sequence(c.sample_GT[i].GT,f.d3.sample_GT[i].GT,"GT/"+std::to_string(i));
     SEQ(d.sample_GT.GT,f.d4.sample_GT.GT);
