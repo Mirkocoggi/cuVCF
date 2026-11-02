@@ -23,7 +23,7 @@ inline std::vector<Fixture> fixtures() {
         for (const auto& count : {std::string("1"),std::string("3"),std::string("A")}) {
             for (bool prefix : {false,true}) {
                 auto f = base({"Z"}); const bool alt = count == "A", fixed = count == "3";
-                if(alt) alleles(f);
+                if(alt) { alleles(f); if(!prefix) { f.d3.var_id.clear(); f.d3.samp_id.clear(); } }
                 std::string value;
                 if(type == "Integer") {
                     value = alt ? "7,9" : fixed ? "7,9,11" : "7";
@@ -44,9 +44,9 @@ inline std::vector<Fixture> fixtures() {
                 for(auto& c:f.d3.samp_int) c.numb=fixed?3:1;
                 for(auto& c:f.d3.samp_float) c.numb=fixed?3:1;
                 for(auto& c:f.d3.samp_string) c.numb=fixed?3:1;
-                for(auto& c:f.d4.samp_int) c.numb=1;
-                for(auto& c:f.d4.samp_float) c.numb=1;
-                for(auto& c:f.d4.samp_string) c.numb=1;
+                for(auto& c:f.d4.samp_int) c.numb=-1;
+                for(auto& c:f.d4.samp_float) c.numb=-1;
+                for(auto& c:f.d4.samp_string) c.numb=-1;
                 if(fixed) { f.d2.var_id={0}; f.d2.alt_id={0}; f.d2.alt={"C"}; f.d2.numAlt=1; }
                 auto meta=declaration("FORMAT","X",count,type);
                 if(prefix) { f.d3.sample_GT.push_back({{static_cast<char>(122)},1}); meta=declaration("FORMAT","GT","1","String")+meta; }
@@ -66,7 +66,7 @@ inline std::vector<Fixture> fixtures() {
         auto f=base({"Z","A"});
         f.d3.sample_GT.push_back({{static_cast<char>(1),static_cast<char>(133)},1});
         ints(f.d3.samp_int,"DP",{7,0}); f.d3.samp_int[0].numb=1;
-        alleles(f); ints(f.d4.samp_int,"XA",{1,2,3,4}); f.d4.samp_int[0].numb=1;
+        alleles(f); ints(f.d4.samp_int,"XA",{1,2,3,4}); f.d4.samp_int[0].numb=-1;
         out.push_back({"samples/order_and_alleles",header(declaration("FORMAT","GT","1","String")+declaration("FORMAT","DP","1","Integer")+declaration("FORMAT","XA","A","Integer"),"Z\tA")+row(".","GT:DP:XA\t0|1:7:1,2\t1/1:0:3,4"),f});
     }
     for(const auto& gt: {std::string("./."),std::string(".|.")}) {
@@ -121,13 +121,13 @@ inline std::vector<Fixture> fixtures() {
 
     for(const auto& type:{std::string("Integer"),std::string("Float")}) {
         for(bool alt:{false,true}) {
-            auto f=base({"Z"}); if(alt)alleles(f);
+            auto f=base({"Z"}); if(alt) { alleles(f); f.d3.var_id.clear(); f.d3.samp_id.clear(); }
             const auto n=alt?"A":"1";
             if(type=="Integer") {
-                if(alt) { ints(f.d2.alt_int,"I",{missing_int(),7}); ints(f.d4.samp_int,"F",{missing_int(),9}); f.d4.samp_int[0].numb=1; }
+                if(alt) { ints(f.d2.alt_int,"I",{missing_int(),7}); ints(f.d4.samp_int,"F",{missing_int(),9}); f.d4.samp_int[0].numb=-1; }
                 else { ints(f.d1.in_int,"I",{missing_int()}); ints(f.d3.samp_int,"F",{missing_int()}); f.d3.samp_int[0].numb=1; }
             } else {
-                if(alt) { floats(f.d2.alt_float,"I",{missing_float(),0.5f}); floats(f.d4.samp_float,"F",{missing_float(),0.25f}); f.d4.samp_float[0].numb=1; }
+                if(alt) { floats(f.d2.alt_float,"I",{missing_float(),0.5f}); floats(f.d4.samp_float,"F",{missing_float(),0.25f}); f.d4.samp_float[0].numb=-1; }
                 else { floats(f.d1.in_float,"I",{missing_float()}); floats(f.d3.samp_float,"F",{missing_float()}); f.d3.samp_float[0].numb=1; }
             }
             // Missing scalar INFO may be omitted; use omission as the expected textual representation.

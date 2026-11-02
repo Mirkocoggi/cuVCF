@@ -17,6 +17,7 @@ int main(int argc, char** argv) {
         cases.push_back({"parse/"+fixture.id,[fixture] {
             TempDir tmp; vcf_parsed parsed{};
             parse(parsed,tmp.write("input.vcf",fixture.input));
+            expect_equal(parsed.header,fixture.input.substr(0,fixture.input.find("#CHROM\t")),"header/preservation");
             check_frames(parsed,fixture.expected);
         }});
     }
@@ -45,6 +46,7 @@ int main(int argc, char** argv) {
     cases.push_back({"parse/extended/two_threads",[baseline] {
         TempDir tmp; vcf_parsed p{}; parse(p,tmp.write("input.vcf",baseline.input),2); check_frames(p,baseline.expected);
     },true});
-    apply_expected_failures(cases);
+    try { apply_expected_failures(cases); }
+    catch(const std::exception& e) { std::cerr << "Test setup failed: " << e.what() << '\n'; return 2; }
     return run(cases,argc,argv);
 }

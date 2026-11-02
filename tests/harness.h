@@ -1,5 +1,6 @@
 #pragma once
 #include <filesystem>
+#include <chrono>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -66,7 +67,8 @@ inline Result execute(const Case& c, std::ostream& log) {
         log << "ERROR " << c.id << " " << e.what() << '\n'; return Result::fail;
     }
 }
-inline int run(const std::vector<Case>& cases, int argc, char** argv) {
+inline int run(const std::vector<Case>& cases, int argc, char** argv, std::ostream& output=std::cout) {
+    const auto started=std::chrono::steady_clock::now();
     bool extended = false, list = false; std::string filter;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -79,15 +81,16 @@ inline int run(const std::vector<Case>& cases, int argc, char** argv) {
     for (const auto& c : cases) {
         if ((c.extended && !extended) || c.id.find(filter) == std::string::npos) continue;
         ++selected;
-        if (list) { std::cout << c.id << '\n'; continue; }
-        switch (execute(c, std::cout)) {
+        if (list) { output << c.id << '\n'; continue; }
+        switch (execute(c, output)) {
         case Result::pass: ++passed; break;
         case Result::xfail: ++known; break;
         default: ++failed; break;
         }
     }
     if (!selected) { std::cerr << "No cases selected\n"; return 2; }
-    if (!list) std::cout << passed << " passed, " << known << " expected failures, " << failed << " failed\n";
+    if (!list) output << passed << " passed, " << known << " expected failures, " << failed << " failed\n";
+    if (!list) output << "Elapsed: " << std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count() << " s\n";
     return failed ? 1 : 0;
 }
 }
