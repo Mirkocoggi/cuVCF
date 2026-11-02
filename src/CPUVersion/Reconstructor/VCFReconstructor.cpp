@@ -23,6 +23,11 @@ static std::string stripTrailingDigits(const std::string& name){
     return r;
 }
 
+/*Base ID of a FORMAT column: only split columns lose their digits, a declared ID like PS1 stays as it is*/
+static std::string formatBase(const std::string& name, const std::map<std::string, std::string>& numbers){
+    return numbers.count(name) ? name : stripTrailingDigits(name);
+}
+
 /*
  * Recovers the original string values for CHROM and FILTER.
  * In the DataFrames, these are stored as compact codes to save RAM.
@@ -164,7 +169,7 @@ void VCFReconstructor::run(const var_columns_df& df1,
         // E.g., if we see AD0, AD1, we only append "AD" to the format string once
         std::string prev_base = "";
         for (size_t i = 0; i < df3.samp_int.size(); i++) {
-            std::string base = stripTrailingDigits(df3.samp_int[i].name);
+            std::string base = formatBase(df3.samp_int[i].name, format_numbers);
             if (base != prev_base) {
                 if (!format_str.empty()) format_str += ":";
                 format_str += base;
@@ -175,7 +180,7 @@ void VCFReconstructor::run(const var_columns_df& df1,
         // Group DF3 float fields
         prev_base = "";
         for (size_t i = 0; i < df3.samp_float.size(); i++) {
-            std::string base = stripTrailingDigits(df3.samp_float[i].name);
+            std::string base = formatBase(df3.samp_float[i].name, format_numbers);
             if (base != prev_base) {
                 if (!format_str.empty()) format_str += ":";
                 format_str += base;
@@ -192,7 +197,7 @@ void VCFReconstructor::run(const var_columns_df& df1,
         // Group DF4 integer fields (per-allele format fields)
         prev_base = "";
         for (size_t i = 0; i < df4.samp_int.size(); i++) {
-            std::string base = stripTrailingDigits(df4.samp_int[i].name);
+            std::string base = formatBase(df4.samp_int[i].name, format_numbers);
             if (base != prev_base) {
                 if (!format_str.empty()) format_str += ":";
                 format_str += base;
@@ -203,7 +208,7 @@ void VCFReconstructor::run(const var_columns_df& df1,
         // Group DF4 float fields
         prev_base = "";
         for (size_t i = 0; i < df4.samp_float.size(); i++) {
-            std::string base = stripTrailingDigits(df4.samp_float[i].name);
+            std::string base = formatBase(df4.samp_float[i].name, format_numbers);
             if (base != prev_base) {
                 if (!format_str.empty()) format_str += ":";
                 format_str += base;
@@ -381,7 +386,7 @@ std::string VCFReconstructor::formatVariant(int index,
         }
         if (has_data) {
             if (!first_info) ss << ";";
-            ss << stripTrailingDigits(df2.alt_float[col].name) << "=" << val_str;
+            ss << df2.alt_float[col].name << "=" << val_str;
             first_info = false;
         }
     }
@@ -403,7 +408,7 @@ std::string VCFReconstructor::formatVariant(int index,
         }
         if (has_data) {
             if (!first_info) ss << ";";
-            ss << stripTrailingDigits(df2.alt_int[col].name) << "=" << val_str;
+            ss << df2.alt_int[col].name << "=" << val_str;
             first_info = false;
         }
     }
@@ -425,7 +430,7 @@ std::string VCFReconstructor::formatVariant(int index,
         }
         if (has_data) {
             if (!first_info) ss << ";";
-            ss << stripTrailingDigits(df2.alt_string[col].name) << "=" << val_str;
+            ss << df2.alt_string[col].name << "=" << val_str;
             first_info = false;
         }
     }
@@ -486,14 +491,14 @@ std::string VCFReconstructor::formatVariant(int index,
             {
                 size_t col = 0;
                 while (col < df3.samp_int.size()) {
-                    std::string base = stripTrailingDigits(df3.samp_int[col].name);
+                    std::string base = formatBase(df3.samp_int[col].name, format_numbers);
                     if (!sample_data.empty()) sample_data += ":";
 
                     // Each column is one position of the array: a missing value keeps its place
                     std::string group_val = "";
                     bool any = false;
                     while (col < df3.samp_int.size() &&
-                        stripTrailingDigits(df3.samp_int[col].name) == base) {
+                        formatBase(df3.samp_int[col].name, format_numbers) == base) {
                         if (!group_val.empty()) group_val += ",";
                         int v = df3.samp_int[col].i_int[df3_idx];
                         if (v != MISSING_INT) {
@@ -513,13 +518,13 @@ std::string VCFReconstructor::formatVariant(int index,
             {
                 size_t col = 0;
                 while (col < df3.samp_float.size()) {
-                    std::string base = stripTrailingDigits(df3.samp_float[col].name);
+                    std::string base = formatBase(df3.samp_float[col].name, format_numbers);
                     if (!sample_data.empty()) sample_data += ":";
 
                     // Each column is one position of the array: a missing value keeps its place
                     std::string group_val = "";
                     bool any = false;
-                    while(col < df3.samp_float.size() && stripTrailingDigits(df3.samp_float[col].name) == base){
+                    while(col < df3.samp_float.size() && formatBase(df3.samp_float[col].name, format_numbers) == base){
                         if(!group_val.empty()) group_val += ",";
 
                         float v = (float)df3.samp_float[col].i_float[df3_idx];
@@ -551,12 +556,12 @@ std::string VCFReconstructor::formatVariant(int index,
                 {
                     size_t col = 0;
                     while (col < df4.samp_int.size()) {
-                        std::string base = stripTrailingDigits(df4.samp_int[col].name);
+                        std::string base = formatBase(df4.samp_int[col].name, format_numbers);
                         std::string field_val = "";
 
                         // Identify the bounds of the current group (e.g., AD0, AD1)
                         size_t group_start = col;
-                        while (col < df4.samp_int.size() && stripTrailingDigits(df4.samp_int[col].name) == base) {
+                        while (col < df4.samp_int.size() && formatBase(df4.samp_int[col].name, format_numbers) == base) {
                             col++;
                         }
 
@@ -581,11 +586,11 @@ std::string VCFReconstructor::formatVariant(int index,
                 {
                     size_t col = 0;
                     while (col < df4.samp_float.size()) {
-                        std::string base = stripTrailingDigits(df4.samp_float[col].name);
+                        std::string base = formatBase(df4.samp_float[col].name, format_numbers);
                         std::string field_val = "";
 
                         size_t group_start = col;
-                        while (col < df4.samp_float.size() && stripTrailingDigits(df4.samp_float[col].name) == base) {
+                        while (col < df4.samp_float.size() && formatBase(df4.samp_float[col].name, format_numbers) == base) {
                             col++;
                         }
                         size_t k = static_cast<size_t>(start_df4);

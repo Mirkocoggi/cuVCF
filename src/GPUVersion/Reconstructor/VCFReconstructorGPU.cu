@@ -19,6 +19,11 @@ static std::string stripTrailingDigits(const std::string& name){
     return r;
 }
 
+/*Base ID of a FORMAT column: only split columns lose their digits, a declared ID like PS1 stays as it is*/
+static std::string formatBase(const std::string& name, const std::map<std::string, std::string>& numbers){
+    return numbers.count(name) ? name : stripTrailingDigits(name);
+}
+
 // TSA codes written by the parser (Kernels.cu), same table as tsa_names in CPUVersion
 static const char* const tsa_names[] = {
     "SNV", "insertion", "deletion", "inversion", "indel",
@@ -723,10 +728,10 @@ static std::vector<VCFReconstructorGPU::GroupInfo> buildGroups(
     std::vector<VCFReconstructorGPU::GroupInfo> out;
     size_t col = 0;
     while (col < fields.size()) {
-        std::string base = stripTrailingDigits(fields[col].name);
+        std::string base = formatBase(fields[col].name, format_numbers);
         size_t end = col;
         while (end < fields.size() &&
-               stripTrailingDigits(fields[end].name) == base) {
+               formatBase(fields[end].name, format_numbers) == base) {
             end++;
         }
         VCFReconstructorGPU::GroupInfo g;
@@ -818,7 +823,7 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
         // E.g., if we see AD0, AD1, we only append "AD" to the format string once
         std::string prev_base = "";
         for (size_t i = 0; i < df3.samp_int.size(); i++) {
-            std::string base = stripTrailingDigits(df3.samp_int[i].name);
+            std::string base = formatBase(df3.samp_int[i].name, format_numbers);
             if (base != prev_base) {
                 if (!format_str.empty()) format_str += ":";
                 format_str += base;
@@ -829,7 +834,7 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
         // Group DF3 float fields
         prev_base = "";
         for (size_t i = 0; i < df3.samp_float.size(); i++) {
-            std::string base = stripTrailingDigits(df3.samp_float[i].name);
+            std::string base = formatBase(df3.samp_float[i].name, format_numbers);
             if (base != prev_base) {
                 if (!format_str.empty()) format_str += ":";
                 format_str += base;
@@ -846,7 +851,7 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
         // Group DF4 integer fields (per-allele format fields)
         prev_base = "";
         for (size_t i = 0; i < df4.samp_int.size(); i++) {
-            std::string base = stripTrailingDigits(df4.samp_int[i].name);
+            std::string base = formatBase(df4.samp_int[i].name, format_numbers);
             if (base != prev_base) {
                 if (!format_str.empty()) format_str += ":";
                 format_str += base;
@@ -857,7 +862,7 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
         // Group DF4 float fields
         prev_base = "";
         for (size_t i = 0; i < df4.samp_float.size(); i++) {
-            std::string base = stripTrailingDigits(df4.samp_float[i].name);
+            std::string base = formatBase(df4.samp_float[i].name, format_numbers);
             if (base != prev_base) {
                 if (!format_str.empty()) format_str += ":";
                 format_str += base;
