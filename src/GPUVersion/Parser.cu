@@ -1607,6 +1607,8 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
     for(unsigned int samp = 0; samp < n_samp; samp++){
         q = field_end(p, e);
         const char* tb = p;
+        const int samp_base = *tmp_num_alt_format; // first DF4 row of this sample
+        int samp_rows = 0;                         // DF4 rows it needs: the longest Number=A field
         for(size_t j = 0; j < plan.used && tb <= q; j++){
             const char* te = static_cast<const char*>(memchr(tb, ':', q - tb));
             if(!te) te = q;
@@ -1628,7 +1630,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                     break;
                 default: {
                     // Number=A (and GT Number=A): one DF4 row per value
-                    const int base = *tmp_num_alt_format;
+                    const int base = samp_base;
                     const int local_alt = count_tokens(tb, te, ',');
                     ensure_alt_format_capacity(tmp_alt_format, base + local_alt);
                     for_each_token(tb, te, ',', [&](const char* vb, const char* ve, int y){
@@ -1647,12 +1649,14 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                             default: break;
                         }
                     });
-                    *tmp_num_alt_format = base + local_alt;
+                    samp_rows = std::max(samp_rows, local_alt);
                 }
             }
             if(te == q) break;
             tb = te + 1;
         }
+        // The Number=A fields of this sample share the same DF4 rows: advance once, by the longest
+        *tmp_num_alt_format = samp_base + samp_rows;
         p = q < e ? q + 1 : e;
     }
 }

@@ -15,6 +15,7 @@
 #include "VCF_parsed.h"
 #include <chrono>
 #include <Imath/half.h>
+#include <algorithm>
 
 // FORMAT columns are named <ID> (Number=1) or <ID>0, <ID>1, ... (Number>1): match the first column
 // of key exactly. A prefix match picked GQX for GQ when GQX was declared first.
@@ -779,6 +780,8 @@ public:
                     find1 = true;
                     iter++;
                     split_on(tmp_split, tmp, ':');
+                    const int samp_base = *tmp_num_alt_format; // first DF4 row of this sample
+                    int samp_rows = 0;                         // DF4 rows it needs: the longest Number=A field
                     vector<string> tmp_sub;
                     for(int j = 0; j < tmp_split.size() && j < tmp_format_split.size(); j++){ // extra values have no FORMAT key
                         bool find_type = false;
@@ -807,7 +810,7 @@ public:
                                         (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
                                         (*tmp_alt_format).sample_GT.GT[(*tmp_num_alt_format) + y] = (*tmp_alt_format).gt_code(tmp_sub[y]);
                                     }
-                                    (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
+                                    samp_rows = std::max(samp_rows, local_alt);
                                 }
                                 find_type = true;
                             }else if(format_code(tmp_format_split[j]) == STRING_FORMAT || format_code(tmp_format_split[j] + std::to_string(1)) == STRING_FORMAT){
@@ -906,7 +909,7 @@ public:
                                             (*tmp_alt_format).samp_string[el].i_string[(*tmp_num_alt_format) + y] = tmp_sub[y];
                                         }
                                         find_elem = true;
-                                        (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
+                                        samp_rows = std::max(samp_rows, local_alt);
                                     }
                                     el++;
                                 }
@@ -928,7 +931,7 @@ public:
                                             (*tmp_alt_format).samp_int[el].i_int[(*tmp_num_alt_format) + y] = safe_stoi(tmp_sub[y]);
                                         }
                                         find_elem = true;
-                                        (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
+                                        samp_rows = std::max(samp_rows, local_alt);
                                     }
                                     el++;
                                 }
@@ -954,7 +957,7 @@ public:
                                             }
                                         }
                                         find_elem = true;
-                                        (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
+                                        samp_rows = std::max(samp_rows, local_alt);
                                     }
                                     el++;
                                 }
@@ -965,6 +968,10 @@ public:
                             }
                         }
                     }
+
+                    // The Number=A fields of this sample share the same DF4 rows: advance once, by the longest
+                    (*tmp_num_alt_format) = samp_base + samp_rows;
+
                 }else{
                     tmp += at(iter);
                     iter++;
