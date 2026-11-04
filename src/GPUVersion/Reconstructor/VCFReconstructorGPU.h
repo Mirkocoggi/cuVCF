@@ -1,0 +1,365 @@
+#ifndef VCF_RECONSTRUCTOR_GPU_H
+#define VCF_RECONSTRUCTOR_GPU_H
+
+#include <string>
+#include <map>
+#include <vector>
+#include <fstream>
+#include <cuda_runtime.h>
+#include <cuda_fp16.h>
+#include "../DataFrames.h"
+#include "DeviceDataFrames.h"
+#include "PinnedAllocator.h"
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+
+#define CHUNK_SIZE   10000
+#define BLOCK_SIZE   128
+#define NUM_BLOCKS   1024
+
+// Vectors backed by pinned (page-locked) host memory: every one of these is
+// used as a cudaMemcpy source in uploadToDevice(), so pinning them is what
+// will let those transfers become truly asynchronous (cudaMemcpyAsync) later.
+using PinnedCharVec = std::vector<char, PinnedAllocator<char>>;
+using PinnedUintVec = std::vector<unsigned int, PinnedAllocator<unsigned int>>;
+using PinnedIntVec  = std::vector<int, PinnedAllocator<int>>;
+using PinnedHalfVec = std::vector<__half, PinnedAllocator<__half>>;
+using PinnedU8Vec   = std::vector<uint8_t, PinnedAllocator<uint8_t>>;
+using PinnedU16Vec  = std::vector<uint16_t, PinnedAllocator<uint16_t>>;
+
+/**
+ * @brief Staging structure residing in system RAM (Host).
+ *
+ * Buffers and prepares data in chunks before sending them to the CUDA device.
+ * Optimizes writes and avoids bottlenecks in PCIe transfers.
+ */
+struct HostBuffers {
+    // DF1
+    PinnedCharVec id_buffer;       ///< Temporary host buffer for variant IDs
+    PinnedUintVec id_offsets;      ///< Temporary offsets for variant IDs
+    PinnedCharVec ref_buffer;      ///< Temporary host buffer for REF
+    PinnedUintVec ref_offsets;     ///< Temporary offsets for REF
+    PinnedIntVec  in_int_buffer;   ///< Temporary buffer for integer INFO
+    PinnedHalfVec in_float_buffer; ///< Temporary buffer for float INFO
+    PinnedU8Vec   in_flag_buffer;  ///< Temporary buffer for flag INFO
+    PinnedCharVec in_string_buffer;   ///< Temporary flat host buffer for INFO strings.
+    PinnedUintVec in_string_offsets;  ///< Temporary offsets for INFO strings.
+
+    // DF2
+    int           df2_count = 0;      ///< Number of alleles in the current chunk
+    PinnedCharVec alt_data_buffer;    ///< Temporary host buffer for ALT
+    PinnedUintVec alt_data_offsets;   ///< Offsets for ALT
+    PinnedUintVec alt_start_buf;      ///< Start mapping variants->alleles
+    PinnedUintVec alt_count_buf;      ///< Count mapping variants->alleles
+    PinnedIntVec  alt_int_buffer;     ///< Temporary buffer for INFO-ALT int
+    PinnedHalfVec alt_float_buffer;   ///< Temporary buffer for INFO-ALT float
+    PinnedCharVec alt_string_buffer;  ///< Temporary flat host buffer for INFO-ALT strings.
+    PinnedUintVec alt_string_offsets; ///< Temporary offsets for INFO-ALT strings.
+
+    // DF3
+    PinnedCharVec sample_buffer;      ///< Pre-calculated patient data buffer
+    PinnedUintVec sample_offsets;     ///< Offsets for patient strings
+    PinnedUintVec line_start;         ///< Where each output line starts in d_output: prefix sum of the per-line upper bounds, chunk_size + 1 entries
+
+    // DF1 fixed-size columns of the selected variants, gathered: a selection need not be contiguous
+    PinnedUintVec var_number_buf;     ///< var_number of each variant of the chunk
+    PinnedU16Vec  chrom_buf;          ///< CHROM codes
+    PinnedUintVec pos_buf;            ///< POS
+    PinnedHalfVec qual_buf;           ///< QUAL
+    PinnedCharVec filter_buf;         ///< FILTER codes
+    PinnedUintVec df2_rows;           ///< DF2 rows of the chunk's alleles, in order
+    PinnedUintVec df2_var_id_buf;     ///< var_id of those DF2 rows
+
+    // Chunk Metadata
+    int chunk_size = 0;                  ///< Number of variants in the chunk
+    const unsigned int* rows = nullptr;  ///< DF1 rows of the chunk: rows[0 .. chunk_size)
+    int df2_start  = 0;                  ///< First DF2 row that can belong to the chunk
+};
+
+// Per-phase blocking timings (alloc/u2d/kernel/write/free) are gone: once
+// chunk N+1's prep genuinely overlaps chunk N's GPU work, measuring each
+// phase in isolation would require re-inserting the very blocking syncs the
+// pipeline is designed to avoid. setup/prep/drain remain meaningful because
+// they are either purely host-side (chrono, no GPU sync) or already
+// one-time/sequential by construction. For phase-level GPU inspection, use
+// the NVTX ranges still present in run() with Nsight Systems.
+struct TimingResult {
+    double setup_ms = 0; ///< One-time pre-loop initialization (chrono).
+    double prep_ms  = 0; ///< Sum of per-chunk host prep time (chrono, host-only).
+    double loop_ms  = 0; ///< Wall-clock time of the pipelined chunk loop (chrono).
+    double drain_ms = 0; ///< Final chunk finalization + writer thread join (chrono).
+};
+
+/**
+ * @brief Manages the VCF reconstruction pipeline leveraging GPU acceleration.
+ *
+ * This class loads the DataFrames extracted from CSVs, splits them into chunks,
+ * and instructs the CUDA device to build the VCF file strings in a highly parallel manner.
+ */
+class VCFReconstructorGPU {
+public:
+
+    /**
+     * @brief Defines the grouping logic for FORMAT fields (e.g., AD, DP).
+     */
+    struct GroupInfo {
+        size_t col_start;   ///< Starting column
+        size_t col_end;     ///< Ending column
+        char number_kind;   ///< Cardinality rule: 0='R' (Ref+Alt), 1='A' (Alt), 2=Fixed
+    };
+
+    /**
+     * @brief Constructor for the GPU pipeline.
+     * 
+     * @param output_vcf_path Path to the final .vcf file on disk.
+     * @param header_text     Full header text to write at the top of the file.
+     */
+    VCFReconstructorGPU(const std::string& output_vcf_path, const std::string& header_text);
+
+    /**
+    * @brief Class destructor. 
+    * 
+    * Ensures all allocated memory on both the CUDA device and the host is properly 
+    * released when the VCFReconstructorGPU instance goes out of scope.
+    */
+    ~VCFReconstructorGPU();
+
+    /**
+     * @brief Main entry point for the reconstruction process.
+     * 
+     * Triggers map creation, allocation, chunk processing (GPU), 
+     * and the final write to disk for each block.
+     * 
+     * @param df1 Base DataFrame (Core variants)
+     * @param df2 DataFrame for multi-allelic variants (ALT)
+     * @param df3 Base DataFrame for samples
+     * @param df4 Intersected DataFrame for samples x alleles
+     * @param num_threads OpenMP threads used for the host-side preparation
+     */
+    TimingResult run(const var_columns_df& df1,
+                     const alt_columns_df& df2,
+                     const sample_columns_df& df3,
+                     const alt_format_df& df4,
+                     int num_threads);
+
+    /**
+     * @brief Same as run(), but writes only the given DF1 rows, in this order.
+     *
+     * @param rows Sorted, unique DF1 row indices (the var_number values) to write.
+     */
+    TimingResult run(const var_columns_df& df1,
+                     const alt_columns_df& df2,
+                     const sample_columns_df& df3,
+                     const alt_format_df& df4,
+                     int num_threads,
+                     const std::vector<unsigned int>& rows);
+
+private:
+    std::string output_vcf_path; ///< Path to the generated output VCF file.
+    std::string header_text;     ///< The full VCF header string to be written at the top of the file.
+
+    // Inverse maps (host side)
+    std::map<uint16_t, std::string> inv_chrom_map;    ///< Decodes 16-bit chromosome codes back to original strings.
+    std::map<char, std::string> inv_filter_map;       ///< Maps filter char codes back to original strings (e.g., '0' -> "PASS").
+    
+    // Device buffers, in two slots (slot = chunk index % 2) so that chunk N+1
+    // can be prepared and uploaded into one slot while chunk N is still being
+    // read by the GPU from the other slot. d_maps is dataset-constant and
+    // read-only after setup, so it is not duplicated: both slots' kernels can
+    // safely read it concurrently.
+    char*         d_output[2]       = {nullptr, nullptr}; ///< Sparse device buffer for VCF text: line i starts at d_line_start[i]. Grown on demand.
+    unsigned int* d_line_start[2]   = {nullptr, nullptr}; ///< Device copy of HostBuffers::line_start.
+    unsigned int* d_line_lens[2]    = {nullptr, nullptr}; ///< Device array storing the exact string length of each generated row.
+
+    DeviceVarColumns d_df1[2];    ///< Shadow structure holding device pointers for DF1 (core variants).
+    DeviceAltColumns d_df2[2];    ///< Shadow structure holding device pointers for DF2 (alternative alleles).
+    DeviceSampleColumns d_df3[2]; ///< Shadow structure holding device pointers for DF3/DF4 (samples).
+    DeviceMaps d_maps;            ///< Shadow structure holding device pointers for encoding dictionaries. Not slotted (read-only dataset constant).
+
+    // State and Format tracking
+    bool has_gt;                                    ///< Flag indicating if Genotype (GT) data exists in the dataset.
+    bool gt_in_df3;                                 ///< Flag indicating if Genotype (GT) data is stored in DF3.
+    bool gt_in_df4;                                 ///< Flag indicating if Genotype (GT) data is stored in DF4.
+    std::string format_str;                         ///< The dynamically built FORMAT string for the current VCF (e.g., "GT:AD:DP:GQ").
+    std::vector<std::string> ordered_samp_names;    ///< Sample names ordered by their internal integer ID.
+    int num_threads = 1;                            ///< OpenMP threads for the host-side preparation, set by run().
+    size_t line_fixed_bound = 0;                    ///< Upper bound of the part of a line that does not depend on its content, set by run().
+    size_t alt_fixed_bound  = 0;                    ///< Upper bound added by each ALT allele, besides the ALT and INFO-ALT strings, set by run().
+    size_t cell_fixed_bound = 0;                    ///< Upper bound of a sample cell without its strings and DF4 rows, set by run().
+    size_t df4_row_bound    = 0;                    ///< Upper bound added by each DF4 row of a sample, besides its strings, set by run().
+
+    /**
+     * @brief Parses the VCF header to extract the 'Number' attribute for each FORMAT ID.
+     * 
+     * @param header_text The raw VCF header string.
+     * @return std::map<std::string, std::string> Map associating FORMAT IDs to their 'Number' value (e.g., "AD" -> "R").
+     */
+    std::map<std::string, std::string> parseFormatNumbers(const std::string& header_text);
+    std::map<std::string, std::string> format_numbers; ///< Cached map of FORMAT ID cardinalities.
+
+    // Host staging and grouping (slotted the same way as the device buffers).
+    HostBuffers host_buffers[2];  ///< Struct managing staging buffers on the host before transferring to the device.
+
+    std::vector<GroupInfo> df3_int_groups;   ///< Grouping logic for DF3 integer fields (handles multi-value keys).
+    std::vector<GroupInfo> df3_float_groups; ///< Grouping logic for DF3 float fields.
+    std::vector<GroupInfo> df4_int_groups;   ///< Grouping logic for DF4 integer fields.
+    std::vector<GroupInfo> df4_float_groups; ///< Grouping logic for DF4 float fields.
+
+    // Compaction and Disk I/O variables (slotted; see d_output/d_df1 above).
+    char* d_compacted[2] = {nullptr, nullptr};    ///< Device buffer for the compacted, contiguous VCF text. Persistent, grown on demand.
+    unsigned int* d_output_offsets[2] = {nullptr, nullptr}; ///< Device array storing prefix-summed offsets for stream compaction.
+
+    // --- Persistent device buffer capacities (one per slot) ---
+    // allocateDevice() no longer runs cudaMalloc/cudaFree every chunk. Fixed-size
+    // buffers (bounded by CHUNK_SIZE) are allocated once in initDeviceBuffers().
+    // Variable-length buffers below persist across chunks and only grow (never
+    // shrink) when a chunk needs more space than currently allocated.
+    size_t cap_id_data[2] = {0, 0}, cap_ref_data[2] = {0, 0}, cap_in_string_data[2] = {0, 0};
+    size_t cap_df2_var_id[2] = {0, 0}, cap_alt_data[2] = {0, 0}, cap_alt_offsets[2] = {0, 0};
+    size_t cap_alt_int[2] = {0, 0}, cap_alt_float[2] = {0, 0}, cap_alt_string_data[2] = {0, 0}, cap_alt_string_offsets[2] = {0, 0};
+    size_t cap_compacted[2] = {0, 0};
+    size_t cap_temp_storage[2] = {0, 0}, cap_output[2] = {0, 0}, cap_sample_data[2] = {0, 0};
+    unsigned char* d_temp_storage[2] = {nullptr, nullptr}; ///< Persistent scratch storage for cub::DeviceScan, grown on demand.
+
+    // Explicit CUDA streams (created in run(), destroyed at teardown). Chunk i
+    // is prepared, uploaded and launched on streams[i % 2] and device/host
+    // buffer slot i % 2, letting chunk i+1's host prep run while chunk i-1's
+    // GPU work (launched on the other stream, one iteration ago) finishes up.
+    cudaStream_t streams[2] = {nullptr, nullptr};
+
+    // Writer thread infrastructure
+    /**
+     * @brief Descriptor for a pending disk-write job dispatched to the writer thread.
+     */
+    struct WriteJob {
+        int    buffer_idx;  ///< Index into h_compacted_pool identifying the source buffer.
+        size_t total_bytes; ///< Number of bytes to write from the chosen buffer.
+    };
+
+    static constexpr int NUM_WRITE_BUFFERS = 2;
+    char*  h_compacted_pool[NUM_WRITE_BUFFERS]          = {nullptr, nullptr}; ///< Double-buffered host memory pool for compacted VCF text.
+    size_t h_compacted_pool_capacity[NUM_WRITE_BUFFERS] = {0, 0};             ///< Current allocated capacity of each pool slot in bytes.
+
+    std::queue<WriteJob>    write_queue;        ///< Queue of pending write jobs consumed by the writer thread.
+    std::mutex              write_mutex;        ///< Protects write_queue, write_buffer_busy, and writer_should_stop.
+    std::condition_variable cv_job_available;  ///< Notified when a new job is pushed onto write_queue.
+    std::condition_variable cv_buffer_free;    ///< Notified when a buffer slot becomes available for reuse.
+    bool write_buffer_busy[NUM_WRITE_BUFFERS] = {false, false}; ///< Tracks which pool slots are currently held by the writer thread.
+    bool writer_should_stop = false;           ///< Set to true to signal the writer thread to exit after draining the queue.
+    bool writer_failed = false;                ///< Set by the writer thread when a disk write fails; checked at the end of run().
+
+    std::thread   writer_thread; ///< Background thread responsible for writing compacted chunks to disk.
+    std::ofstream* writer_out = nullptr; ///< Non-owning pointer to the output file stream managed by run().
+
+    /**
+     * @brief Background thread entry point; drains the write queue and flushes chunks to disk.
+     */
+    void writerLoop();
+
+    /**
+     * @brief Reconstructs the inverse maps from the DF1 dictionaries for host-side lookups.
+     * 
+     * @param df1 The parsed var_columns_df containing the forward dictionaries.
+     */
+    void buildInverseMaps(const var_columns_df& df1);
+
+    /**
+     * @brief Allocates the device buffers whose size only depends on CHUNK_SIZE and
+     * per-dataset field counts (chromosome/INFO/FORMAT field counts, sample count),
+     * never on a specific chunk's content. Called once before the main chunk loop.
+     *
+     * @param df1 Core variants DataFrame (used for INFO field counts).
+     * @param df2 Alternative alleles DataFrame (used for INFO-ALT field counts).
+     * @param df3 Sample core DataFrame (used for the sample count).
+     */
+    void initDeviceBuffers(const var_columns_df& df1,
+                           const alt_columns_df& df2,
+                           const sample_columns_df& df3);
+
+    /**
+     * @brief Ensures the variable-length device buffers (whose required size depends
+     * on the current chunk's content: ID/REF/ALT/INFO string totals, allele count)
+     * are large enough for the current chunk, growing them only when needed.
+     *
+     * @param buffers The chunk already prepared by prepareHostBuffers(): sizes are read from it.
+     * @param slot Which of the two buffer slots (0 or 1) to prepare.
+     */
+    void allocateDevice(const HostBuffers& buffers, int slot);
+
+    /**
+     * @brief Safely deallocates all CUDA device memory to prevent memory leaks.
+     * Called once after the main chunk loop (and from the destructor as a safety net).
+     */
+    void freeDevice();
+
+    /**
+     * @brief Frees the dataset constants shared by both slots: field names, FORMAT string and maps.
+     * Called at the end of run() and from the destructor, so they are freed after an error too.
+     */
+    void freeConstants();
+
+    /**
+     * @brief Populates the HostBuffers struct with flattened, contiguous data ready for optimal GPU transfer.
+     * 
+     * @param df1 Core variants DataFrame.
+     * @param df2 Alternative alleles DataFrame.
+     * @param df3 Sample core DataFrame.
+     * @param df4 Intersected sample-allele DataFrame.
+     * @param buffers The HostBuffers struct to be populated.
+     */
+    void prepareHostBuffers(const var_columns_df& df1,
+                            const alt_columns_df& df2,
+                            const sample_columns_df& df3,
+                            const alt_format_df& df4,
+                            HostBuffers& buffers);
+
+    /**
+     * @brief Transfers staging buffers (HostBuffers) from system RAM to GPU VRAM using cudaMemcpy.
+     * 
+     * @param buffers The fully populated HostBuffers struct.
+     * @param slot Which of the two buffer slots (0 or 1) to upload into; also selects streams[slot].
+     */
+    void uploadToDevice(const HostBuffers& buffers, int slot);
+
+    /**
+     * @brief Performs stream compaction using Prefix Sum (CUB) and writes the processed, contiguous chunk to disk.
+     *
+     * @param num_variants The number of variants processed in the current chunk.
+     * @param slot Which of the two buffer slots (0 or 1) holds this chunk's reconstructed data.
+     */
+    void writeChunk(int num_variants, int slot);
+
+    /**
+     * @brief Populates the ordered_samp_names vector by mapping sample IDs to their string names.
+     * 
+     * @param df3 Sample core DataFrame containing the sample name dictionary.
+     */
+    void buildSampleNames(const sample_columns_df& df3);
+
+    /**
+     * @brief Pre-processes and flattens complex, multi-allelic sample data into a contiguous character buffer using OpenMP.
+     * 
+     * @param df1 Core variants DataFrame.
+     * @param df2 Alternative alleles DataFrame.
+     * @param df3 Sample core DataFrame.
+     * @param df4 Intersected sample-allele DataFrame.
+     * @param chunk_size Number of variants in the current block.
+     * @param rows DF1 rows of the chunk, sorted: rows[0 .. chunk_size).
+     * @param df2_start First DF2 row that can belong to the chunk.
+     * @param buffer Output vector that will hold the flattened character data.
+     * @param offsets Output vector that will hold the prefix-summed offsets for the character buffer.
+     */
+    void buildSampleStrings(const var_columns_df& df1,
+                            const alt_columns_df& df2,
+                            const sample_columns_df& df3,
+                            const alt_format_df& df4,
+                            int chunk_size,
+                            const unsigned int* rows,
+                            int df2_start,
+                            PinnedCharVec& buffer,
+                            PinnedUintVec& offsets);
+};
+
+#endif

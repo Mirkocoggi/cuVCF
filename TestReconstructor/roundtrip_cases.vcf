@@ -1,0 +1,30 @@
+##fileformat=VCFv4.2
+##contig=<ID=chr1>
+##contig=<ID=chr2>
+##FILTER=<ID=q10,Description="Quality below 10">
+##INFO=<ID=DP,Number=1,Type=Integer,Description="Total depth, same ID as a FORMAT field">
+##INFO=<ID=SL,Number=1,Type=Integer,Description="Negative integers are real values">
+##INFO=<ID=RF,Number=1,Type=Float,Description="Negative floats are real values">
+##INFO=<ID=MQ0,Number=1,Type=Integer,Description="ID ending with a digit">
+##INFO=<ID=AC,Number=A,Type=Integer,Description="Allele count">
+##INFO=<ID=AF,Number=A,Type=Float,Description="Allele frequency">
+##INFO=<ID=AF1,Number=A,Type=Float,Description="ID ending with a digit, Number=A">
+##INFO=<ID=CSQT,Number=1,Type=String,Description="String field">
+##INFO=<ID=DB,Number=0,Type=Flag,Description="Flag field">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype quality">
+##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Depth, same ID as an INFO field">
+##FORMAT=<ID=PS1,Number=1,Type=Integer,Description="ID ending with a digit">
+##FORMAT=<ID=AB,Number=3,Type=Integer,Description="Fixed array of 3">
+##FORMAT=<ID=XF,Number=2,Type=Float,Description="Fixed array of 2">
+##FORMAT=<ID=XS,Number=1,Type=String,Description="String field">
+##FORMAT=<ID=YA,Number=A,Type=Integer,Description="Per-ALT integer">
+##FORMAT=<ID=YB,Number=A,Type=Float,Description="Per-ALT float, together with YA">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1	S2
+chr1	100	rs1	A	G	50	PASS	DP=20;SL=-1;RF=-0.5;MQ0=3;AC=1;AF=0.25;AF1=0.125;CSQT=abc;DB	GT:GQ:DP:PS1:AB:XF:XS	0/1:30:12:7:1,2,3:0.5,1.5:abc	1|1:40:8:9:4,5,6:2.5,3.5:def
+chr1	200	.	A	G	10	q10	DP=5;AC=1;AF=0.5	GT:GQ:DP:PS1:AB:XF:XS	./.:.:12:.:7,8,9:.,1.5:xyz	0/0:.:.:.:.:.:.
+chr1	300	rs3	C	T,G	.	PASS	MQ0=0;AC=1,2;AF=.,0.5	GT:GQ:DP:PS1:AB:XF:XS	0/1:20:5:1:5,.,7:.,2.5:.	1/2:.:.:2:.,.,9:1.5,.:q
+chr2	400	.	G	A	99	PASS	DP=0	GT:GQ	0/1:0	0/0
+chr2	500	.	T	C	1	PASS	.	GT:GQ:DP:PS1:AB:XF:XS	0/1:1:2:3:1,1,1:1,1:z	./.
+chr2	600	.	A	C,G	30	PASS	AC=1,1	GT:YA:YB	1/2:3,4:0.5,1.5	0/1:5,.:.,2.5
+chr2	700	.	C	T	30	PASS	AC=1	GT:YA:YB	0/1:7:0.25	./.

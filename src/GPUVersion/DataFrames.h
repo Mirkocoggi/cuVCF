@@ -35,10 +35,10 @@ class var_columns_df //DF1
 public:
     /// Vector of variant numbers.
     std::vector<unsigned int> var_number;
-    /// Map from chromosome string to a unique unsigned char code.
-    std::map<std::string, unsigned char> chrom_map;
+    /// Map from chromosome string to a unique 16-bit code.
+    std::map<std::string, uint16_t> chrom_map;
     /// Vector of chromosome codes.
-    std::vector<char> chrom;
+    std::vector<uint16_t> chrom;
     /// Vector of variant positions.
     std::vector<unsigned int> pos;
     /// Vector of variant IDs.
@@ -69,6 +69,15 @@ public:
         return it == info_map1.end() ? -1 : it->second;
     }
 
+    /// FORMAT field names and their types: separate from info_map1, the same ID can be in both.
+    std::map<std::string, int> format_map1;
+
+    // Same as info_code, for FORMAT keys
+    int format_code(const std::string& key) const {
+        auto it = format_map1.find(key);
+        return it == format_map1.end() ? -1 : it->second;
+    }
+
     /**
      * @brief Prints the variant columns data frame.
      *
@@ -87,9 +96,9 @@ public:
             else
                 std::cout << "nan\t";
             
-            // Print Chrom: build key from single character
+            // Print Chrom: reverse lookup of the code in chrom_map
             if (i < static_cast<long>(chrom.size())) {
-                unsigned char code = chrom[i];
+                uint16_t code = chrom[i];
                 bool found = false;
                 for (const auto& pair : chrom_map) {
                     if (pair.second == code) {
@@ -241,7 +250,7 @@ class alt_columns_df //DF2
             info_float tmpInfoFloat;
             for(int i = 0; i<tmp; i++){
                 tmpInfoFloat.name = ref.alt_float[i].name;
-                tmpInfoFloat.i_float.resize(numAlt, 0.0f);
+                tmpInfoFloat.i_float.resize(numAlt, missing_half());
                 alt_float.push_back(tmpInfoFloat);
             }
             alt_float.resize(tmp);
@@ -253,7 +262,7 @@ class alt_columns_df //DF2
             info_int tmpInfoInt;
             for(int i = 0; i<tmp; i++){
                 tmpInfoInt.name = ref.alt_int[i].name;
-                tmpInfoInt.i_int.resize(numAlt, 0);
+                tmpInfoInt.i_int.resize(numAlt, MISSING_INT);
                 alt_int.push_back(tmpInfoInt);
 
             }
@@ -498,7 +507,7 @@ class alt_format_df //aka df4 in progress
             for(int i = 0; i<tmp; i++){
                 tmpFloat.name = ref.samp_float[i].name;
                 tmpFloat.numb = ref.samp_float[i].numb;
-                tmpFloat.i_float.resize(numAlt, 0);
+                tmpFloat.i_float.resize(numAlt, missing_half());
                 samp_float.push_back(tmpFloat);
             }
             samp_float.resize(tmp);
@@ -509,7 +518,7 @@ class alt_format_df //aka df4 in progress
             for(int i = 0; i<tmp; i++){
                 tmpInt.name = ref.samp_int[i].name;
                 tmpInt.numb = ref.samp_int[i].numb;
-                tmpInt.i_int.resize(numAlt, 0);
+                tmpInt.i_int.resize(numAlt, MISSING_INT);
                 samp_int.push_back(tmpInt);
             }
             samp_int.resize(tmp);
