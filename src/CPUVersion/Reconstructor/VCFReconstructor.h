@@ -56,6 +56,18 @@ public:
              const alt_format_df& df4,
              int num_threads);
 
+    /**
+     * @brief Same as run(), but writes only the given DF1 rows, in this order.
+     *
+     * @param rows Sorted, unique DF1 row indices (the var_number values) to write.
+     */
+    void run(const var_columns_df& df1,
+             const alt_columns_df& df2,
+             const sample_columns_df& df3,
+             const alt_format_df& df4,
+             int num_threads,
+             const std::vector<unsigned int>& rows);
+
 private:
     std::string output_vcf_path; ///< Path where the reconstructed VCF will be saved.
     std::string header_text;     ///< Raw VCF header string to prepend to the output file.
@@ -78,8 +90,8 @@ private:
      * from the beginning of the DataFrame.
      */
     struct ChunkCursor {
-        size_t var_start;  ///< Index of the first variant in DF1 assigned to this chunk.
-        size_t var_end;    ///< Index one past the last variant in DF1 assigned to this chunk.
+        size_t var_start;  ///< Position in rows of the first variant assigned to this chunk.
+        size_t var_end;    ///< Position in rows one past the last variant assigned to this chunk.
         size_t df2_start;  ///< Index in DF2 where this chunk's variants begin.
         size_t df4_start;  ///< Index in DF4 where this chunk's variants begin.
     };
@@ -95,6 +107,7 @@ private:
      * @param df1 DataFrame containing variant core fields (used to determine chunk boundaries).
      * @param df2 DataFrame containing alternate alleles (scanned to find per-chunk offsets).
      * @param df4 DataFrame containing per-allele sample data (scanned to find per-chunk offsets).
+     * @param rows DF1 rows to write, sorted: chunks are ranges of positions in this list.
      * @param num_threads Number of chunks to generate, one per thread.
      * @return A vector of ChunkCursor structs, one per thread, in ascending order.
      */
@@ -102,6 +115,7 @@ private:
         const var_columns_df& df1,
         const alt_columns_df& df2,
         const alt_format_df& df4,
+        const std::vector<unsigned int>& rows,
         int num_threads);
 
     /**

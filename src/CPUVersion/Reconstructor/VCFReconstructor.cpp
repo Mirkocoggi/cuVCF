@@ -8,6 +8,8 @@
 #include <stdexcept>
 #include <omp.h>
 #include <cmath>
+#include <algorithm>
+#include <numeric>
 
 
 VCFReconstructor::VCFReconstructor(const std::string& output_vcf_path,
@@ -83,15 +85,13 @@ std::vector<VCFReconstructor::ChunkCursor> VCFReconstructor::computeChunkCursor(
     const var_columns_df& df1,
     const alt_columns_df& df2,
     const alt_format_df& df4,
+    const std::vector<unsigned int>& rows,
     int num_threads
 ) {
-    size_t total_vars = df1.var_number.size();
+    size_t total_vars = rows.size();
     size_t chunk_size = (total_vars + num_threads - 1) / num_threads;
-    
-    std::vector<ChunkCursor> chunks(num_threads);
 
-    size_t df2_pos = 0;
-    size_t df4_pos = 0;
+    std::vector<ChunkCursor> chunks(num_threads);
 
     for(int c = 0; c < num_threads; c++){
         size_t var_start = std::min(c * chunk_size, total_vars);
@@ -99,18 +99,16 @@ std::vector<VCFReconstructor::ChunkCursor> VCFReconstructor::computeChunkCursor(
 
         chunks[c].var_start = var_start;
         chunks[c].var_end = var_end;
-        chunks[c].df2_start = df2_pos;
-        chunks[c].df4_start = df4_pos;
+        chunks[c].df2_start = 0;
+        chunks[c].df4_start = 0;
 
         if(var_start == var_end) continue;       //empty chunk: nothing to write
 
-        unsigned int last_var_id = df1.var_number[var_end - 1];
-        while(df2_pos < df2.var_id.size() && df2.var_id[df2_pos] <= last_var_id){
-            df2_pos++;
-        }
-        while(df4_pos < df4.var_id.size() && df4.var_id[df4_pos] <= last_var_id){
-            df4_pos++;
-        }
+        // DF2 and DF4 are sorted by var_id: start at the rows of the chunk's first variant.
+        // formatVariant() then skips forward over the rows of the variants not in the selection.
+        unsigned int first_var_id = df1.var_number[rows[var_start]];
+        chunks[c].df2_start = std::lower_bound(df2.var_id.begin(), df2.var_id.end(), first_var_id) - df2.var_id.begin();
+        chunks[c].df4_start = std::lower_bound(df4.var_id.begin(), df4.var_id.end(), first_var_id) - df4.var_id.begin();
     }
     return chunks;
 }
@@ -119,7 +117,20 @@ void VCFReconstructor::run(const var_columns_df& df1,
                             const alt_columns_df& df2,
                             const sample_columns_df& df3,
                             const alt_format_df& df4,
-                            int num_threads) 
+                            int num_threads)
+{
+    // Every variant, in file order
+    std::vector<unsigned int> rows(df1.var_number.size());
+    std::iota(rows.begin(), rows.end(), 0u);
+    run(df1, df2, df3, df4, num_threads, rows);
+}
+
+void VCFReconstructor::run(const var_columns_df& df1,
+                            const alt_columns_df& df2,
+                            const sample_columns_df& df3,
+                            const alt_format_df& df4,
+                            int num_threads,
+                            const std::vector<unsigned int>& rows)
 {
 
     if(num_threads < 1) num_threads = 1;    
@@ -224,7 +235,7 @@ void VCFReconstructor::run(const var_columns_df& df1,
     }
 
     // 5. Pre-compute chunk cursors 
-    std::vector<ChunkCursor> chunks = computeChunkCursor(df1, df2, df4, num_threads);
+    std::vector<ChunkCursor> chunks = computeChunkCursor(df1, df2, df4, rows, num_threads);
 
     // 6. Parallel processing - each thread writes to its own temp file.
     // An exception must not leave the OpenMP region (std::terminate): keep the first one, rethrow below.
@@ -241,8 +252,8 @@ void VCFReconstructor::run(const var_columns_df& df1,
             size_t local_df2_cursor = chunks[c].df2_start;
             size_t local_df4_cursor = chunks[c].df4_start;
 
-            for(size_t i = chunks[c].var_start; i < chunks[c].var_end; i++){
-                tmp_file << formatVariant(i, df1, df2, df3, df4,
+            for(size_t p = chunks[c].var_start; p < chunks[c].var_end; p++){
+                tmp_file << formatVariant(rows[p], df1, df2, df3, df4,
                                           local_df2_cursor,
                                           local_df4_cursor) << "\n";
             }
