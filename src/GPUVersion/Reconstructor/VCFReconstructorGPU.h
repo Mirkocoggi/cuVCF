@@ -27,6 +27,7 @@ using PinnedUintVec = std::vector<unsigned int, PinnedAllocator<unsigned int>>;
 using PinnedIntVec  = std::vector<int, PinnedAllocator<int>>;
 using PinnedHalfVec = std::vector<__half, PinnedAllocator<__half>>;
 using PinnedU8Vec   = std::vector<uint8_t, PinnedAllocator<uint8_t>>;
+using PinnedU16Vec  = std::vector<uint16_t, PinnedAllocator<uint16_t>>;
 
 /**
  * @brief Staging structure residing in system RAM (Host).
@@ -62,11 +63,19 @@ struct HostBuffers {
     PinnedUintVec sample_offsets;     ///< Offsets for patient strings
     PinnedUintVec line_start;         ///< Where each output line starts in d_output: prefix sum of the per-line upper bounds, chunk_size + 1 entries
 
+    // DF1 fixed-size columns of the selected variants, gathered: a selection need not be contiguous
+    PinnedUintVec var_number_buf;     ///< var_number of each variant of the chunk
+    PinnedU16Vec  chrom_buf;          ///< CHROM codes
+    PinnedUintVec pos_buf;            ///< POS
+    PinnedHalfVec qual_buf;           ///< QUAL
+    PinnedCharVec filter_buf;         ///< FILTER codes
+    PinnedUintVec df2_rows;           ///< DF2 rows of the chunk's alleles, in order
+    PinnedUintVec df2_var_id_buf;     ///< var_id of those DF2 rows
+
     // Chunk Metadata
-    int chunk_size  = 0;  ///< Size of the variant chunk
-    int chunk_start = 0;  ///< Starting index in DF1
-    int chunk_end   = 0;  ///< Ending index in DF1
-    int df2_start   = 0;  ///< Synchronized starting index in DF2
+    int chunk_size = 0;                  ///< Number of variants in the chunk
+    const unsigned int* rows = nullptr;  ///< DF1 rows of the chunk: rows[0 .. chunk_size)
+    int df2_start  = 0;                  ///< First DF2 row that can belong to the chunk
 };
 
 // Per-phase blocking timings (alloc/u2d/kernel/write/free) are gone: once
@@ -134,6 +143,18 @@ public:
                      const sample_columns_df& df3,
                      const alt_format_df& df4,
                      int num_threads);
+
+    /**
+     * @brief Same as run(), but writes only the given DF1 rows, in this order.
+     *
+     * @param rows Sorted, unique DF1 row indices (the var_number values) to write.
+     */
+    TimingResult run(const var_columns_df& df1,
+                     const alt_columns_df& df2,
+                     const sample_columns_df& df3,
+                     const alt_format_df& df4,
+                     int num_threads,
+                     const std::vector<unsigned int>& rows);
 
 private:
     std::string output_vcf_path; ///< Path to the generated output VCF file.
@@ -262,19 +283,10 @@ private:
      * on the current chunk's content: ID/REF/ALT/INFO string totals, allele count)
      * are large enough for the current chunk, growing them only when needed.
      *
-     * @param df1 Core variants DataFrame.
-     * @param df2 Alternative alleles DataFrame.
-     * @param chunk_start Starting index in DF1.
-     * @param chunk_end Ending index in DF1.
-     * @param df2_start Starting index in DF2 corresponding to chunk_start.
+     * @param buffers The chunk already prepared by prepareHostBuffers(): sizes are read from it.
      * @param slot Which of the two buffer slots (0 or 1) to prepare.
      */
-    void allocateDevice(const var_columns_df& df1,
-                        const alt_columns_df& df2,
-                        int chunk_start,
-                        int chunk_end,
-                        int df2_start,
-                        int slot);
+    void allocateDevice(const HostBuffers& buffers, int slot);
 
     /**
      * @brief Safely deallocates all CUDA device memory to prevent memory leaks.
@@ -306,15 +318,10 @@ private:
     /**
      * @brief Transfers staging buffers (HostBuffers) from system RAM to GPU VRAM using cudaMemcpy.
      * 
-     * @param df1 Core variants DataFrame.
-     * @param df2 Alternative alleles DataFrame.
      * @param buffers The fully populated HostBuffers struct.
      * @param slot Which of the two buffer slots (0 or 1) to upload into; also selects streams[slot].
      */
-    void uploadToDevice(const var_columns_df& df1,
-                        const alt_columns_df& df2,
-                        const HostBuffers& buffers,
-                        int slot);
+    void uploadToDevice(const HostBuffers& buffers, int slot);
 
     /**
      * @brief Performs stream compaction using Prefix Sum (CUB) and writes the processed, contiguous chunk to disk.
@@ -339,40 +346,20 @@ private:
      * @param df3 Sample core DataFrame.
      * @param df4 Intersected sample-allele DataFrame.
      * @param chunk_size Number of variants in the current block.
-     * @param chunk_start Starting index in DF1.
-     * @param chunk_end Ending index in DF1.
-     * @param df2_start Starting index in DF2.
+     * @param rows DF1 rows of the chunk, sorted: rows[0 .. chunk_size).
+     * @param df2_start First DF2 row that can belong to the chunk.
      * @param buffer Output vector that will hold the flattened character data.
      * @param offsets Output vector that will hold the prefix-summed offsets for the character buffer.
      */
     void buildSampleStrings(const var_columns_df& df1,
-                        const alt_columns_df& df2,
-                        const sample_columns_df& df3,
-                        const alt_format_df& df4,
-                        int chunk_size,
-                        int chunk_start,
-                        int chunk_end,
-                        int df2_start,
-                        PinnedCharVec& buffer,
-                        PinnedUintVec& offsets);
-
-    /**
-     * @brief Pins (page-locks) the DF1/DF2 host arrays that are copied directly
-     * to the device every chunk in uploadToDevice() (var_number, chrom, pos,
-     * qual, filter, var_id). Called once at the start of run(); paired with
-     * unregisterHostInputBuffers() at the end.
-     *
-     * @param df1 Core variants DataFrame.
-     * @param df2 Alternative alleles DataFrame.
-     */
-    void registerHostInputBuffers(const var_columns_df& df1, const alt_columns_df& df2);
-
-    /**
-     * @brief Undoes registerHostInputBuffers(); must be called before df1/df2's
-     * underlying memory could be freed or reallocated by the caller.
-     */
-    void unregisterHostInputBuffers(const var_columns_df& df1, const alt_columns_df& df2);
-
+                            const alt_columns_df& df2,
+                            const sample_columns_df& df3,
+                            const alt_format_df& df4,
+                            int chunk_size,
+                            const unsigned int* rows,
+                            int df2_start,
+                            PinnedCharVec& buffer,
+                            PinnedUintVec& offsets);
 };
 
 #endif

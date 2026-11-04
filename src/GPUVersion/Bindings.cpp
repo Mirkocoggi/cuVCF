@@ -9,6 +9,8 @@
 #include "DataFrames.h"  // Contains classes: var_columns_df, alt_columns_df, sample_columns_df, alt_format_df
 #include "DataStructures.h"
 #include "Reconstructor/VCFReconstructorGPU.h"
+#include <algorithm>
+#include <numeric>
 
 namespace py = pybind11;
 
@@ -278,6 +280,33 @@ py::dict get_alt_format_data(const alt_format_df &df) {
 }
 
 /**
+ * @brief Converts the variants= argument of reconstruct_vcf to the DF1 rows to write.
+ *
+ * None selects every variant. Otherwise any 1-D integer array of var_number values:
+ * sorted and deduplicated here, since var_number[i] == i they are the DF1 row indices.
+ */
+static std::vector<unsigned int> selected_rows(const py::object& variants, size_t n){
+    std::vector<unsigned int> rows;
+    if (variants.is_none()) {
+        rows.resize(n);
+        std::iota(rows.begin(), rows.end(), 0u);
+        return rows;
+    }
+    py::array_t<long long, py::array::c_style | py::array::forcecast> arr(variants);
+    if (arr.ndim() != 1) throw py::value_error("variants must be a 1-D array of var_number values");
+    auto v = arr.unchecked<1>();
+    rows.reserve(v.shape(0));
+    for (py::ssize_t k = 0; k < v.shape(0); k++) {
+        if (v(k) < 0 || v(k) >= (long long)n)
+            throw py::value_error("variants: " + std::to_string(v(k)) + " is not a var_number (must be >= 0 and < " + std::to_string(n) + ")");
+        rows.push_back(static_cast<unsigned int>(v(k)));
+    }
+    std::sort(rows.begin(), rows.end());
+    rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+    return rows;
+}
+
+/**
  * @brief Binds VCF data structures to Python
  * 
  * Creates Python bindings for the following C++ classes:
@@ -445,9 +474,10 @@ PYBIND11_MODULE(GPUParser, m) {
             self.run(c_vcf_filename.data(), num_threadss);
         }, py::arg("vcf_filename"), py::arg("num_threadss"),
            "Parses the VCF file using the specified number of threads")
-        .def("reconstruct_vcf", [](const vcf_parsed& self, const std::string& path, int num_threads){
-            VCFReconstructorGPU(path, self.header).run(self.var_columns, self.alt_columns, self.samp_columns, self.alt_sample, num_threads);
-        }, py::arg("vcf_filename"), py::arg("num_threads"))
+        .def("reconstruct_vcf", [](const vcf_parsed& self, const std::string& path, int num_threads, py::object variants){
+            std::vector<unsigned int> rows = selected_rows(variants, self.var_columns.var_number.size());
+            VCFReconstructorGPU(path, self.header).run(self.var_columns, self.alt_columns, self.samp_columns, self.alt_sample, num_threads, rows);
+        }, py::arg("vcf_filename"), py::arg("num_threads"), py::arg("variants") = py::none())
         .def_readwrite("id", &vcf_parsed::id)
         .def_readwrite("header", &vcf_parsed::header)
         .def_readwrite("INFO", &vcf_parsed::INFO)

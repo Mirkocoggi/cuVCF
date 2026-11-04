@@ -11,6 +11,7 @@
 #include <climits>
 #include <stdexcept>
 #include <cmath>
+#include <numeric>
 
 /*Strip trailing digits from a field name: cuVCF splits Number>1 into AD0, AD1,...*/
 static std::string stripTrailingDigits(const std::string& name){
@@ -199,34 +200,6 @@ VCFReconstructorGPU::~VCFReconstructorGPU() {
     } catch (...) {}
 }
 
-// Pins (page-locks) the DF1/DF2 arrays that uploadToDevice() copies directly
-// to the device every chunk, so those cudaMemcpy calls can later become truly
-// asynchronous. Guarded with !empty() because cudaHostRegister rejects a
-// zero-byte range.
-void VCFReconstructorGPU::registerHostInputBuffers(const var_columns_df& df1, const alt_columns_df& df2) {
-    if (!df1.var_number.empty())
-        gpuErrchk(cudaHostRegister((void*)df1.var_number.data(), df1.var_number.size() * sizeof(df1.var_number[0]), cudaHostRegisterDefault));
-    if (!df1.chrom.empty())
-        gpuErrchk(cudaHostRegister((void*)df1.chrom.data(), df1.chrom.size() * sizeof(df1.chrom[0]), cudaHostRegisterDefault));
-    if (!df1.pos.empty())
-        gpuErrchk(cudaHostRegister((void*)df1.pos.data(), df1.pos.size() * sizeof(df1.pos[0]), cudaHostRegisterDefault));
-    if (!df1.qual.empty())
-        gpuErrchk(cudaHostRegister((void*)df1.qual.data(), df1.qual.size() * sizeof(df1.qual[0]), cudaHostRegisterDefault));
-    if (!df1.filter.empty())
-        gpuErrchk(cudaHostRegister((void*)df1.filter.data(), df1.filter.size() * sizeof(df1.filter[0]), cudaHostRegisterDefault));
-    if (!df2.var_id.empty())
-        gpuErrchk(cudaHostRegister((void*)df2.var_id.data(), df2.var_id.size() * sizeof(df2.var_id[0]), cudaHostRegisterDefault));
-}
-
-void VCFReconstructorGPU::unregisterHostInputBuffers(const var_columns_df& df1, const alt_columns_df& df2) {
-    if (!df1.var_number.empty()) gpuErrchk(cudaHostUnregister((void*)df1.var_number.data()));
-    if (!df1.chrom.empty())      gpuErrchk(cudaHostUnregister((void*)df1.chrom.data()));
-    if (!df1.pos.empty())        gpuErrchk(cudaHostUnregister((void*)df1.pos.data()));
-    if (!df1.qual.empty())       gpuErrchk(cudaHostUnregister((void*)df1.qual.data()));
-    if (!df1.filter.empty())     gpuErrchk(cudaHostUnregister((void*)df1.filter.data()));
-    if (!df2.var_id.empty())     gpuErrchk(cudaHostUnregister((void*)df2.var_id.data()));
-}
-
 // One-time device allocation for buffers bounded by CHUNK_SIZE and per-dataset
 // field counts. Called once before the main chunk loop (see run()). Allocates
 // both slots identically so the pipeline can alternate between them.
@@ -279,68 +252,28 @@ void VCFReconstructorGPU::initDeviceBuffers(const var_columns_df& df1,
 // slot (whose required size depends on the current chunk's ID/REF/ALT/INFO
 // string content and allele count) only when needed, instead of
 // cudaMalloc/cudaFree on every chunk.
-void VCFReconstructorGPU::allocateDevice(const var_columns_df& df1,
-                                          const alt_columns_df& df2,
-                                          int chunk_start,
-                                          int chunk_end,
-                                          int df2_start,
-                                          int slot) {
+void VCFReconstructorGPU::allocateDevice(const HostBuffers& buffers, int slot) {
+    const size_t df2_count = buffers.df2_count;
+    d_df2[slot].num_entries = buffers.df2_count;
 
-    // --- DF1 ID (Variable-length strings) ---
-    size_t id_total_chars = 0;
-    for (int i = chunk_start; i < chunk_end; i++)
-        id_total_chars += df1.id[i].size() + 1;
-    ensureDeviceCapacity(d_df1[slot].id_data, cap_id_data[slot], id_total_chars);
+    // DF1 ID, REF and INFO strings
+    ensureDeviceCapacity(d_df1[slot].id_data,        cap_id_data[slot],        buffers.id_buffer.size());
+    ensureDeviceCapacity(d_df1[slot].ref_data,       cap_ref_data[slot],       buffers.ref_buffer.size());
+    ensureDeviceCapacity(d_df1[slot].in_string_data, cap_in_string_data[slot], buffers.in_string_buffer.size());
 
-    // --- DF1 REF (Variable-length strings) ---
-    size_t ref_total_chars = 0;
-    for (int i = chunk_start; i < chunk_end; i++)
-        ref_total_chars += df1.ref[i].size() + 1;
-    ensureDeviceCapacity(d_df1[slot].ref_data, cap_ref_data[slot], ref_total_chars);
-
-    // --- DF1 INFO Strings ---
-    size_t info_str_total_chars = 0;
-    for (int f = 0; f < d_df1[slot].num_string_fields; f++) {
-        for (int i = chunk_start; i < chunk_end; i++) {
-            info_str_total_chars += df1.in_string[f].i_string[i].size() + 1; // +1 for the '\0' terminator
-        }
-    }
-    ensureDeviceCapacity(d_df1[slot].in_string_data, cap_in_string_data[slot], info_str_total_chars);
-
-    // --- DF2 (Alternative alleles for this chunk) ---
-    int df2_count = 0;
-    size_t alt_total_chars = 0;
-    for (size_t j = df2_start; j < df2.var_id.size() && (int)df2.var_id[j] < chunk_end; j++) {
-        alt_total_chars += df2.alt[j].size() + 1;
-        df2_count++;
-    }
-    d_df2[slot].num_entries = df2_count;
-
-    ensureDeviceCapacity(d_df2[slot].var_id,      cap_df2_var_id[slot],  (size_t)df2_count);
-    ensureDeviceCapacity(d_df2[slot].alt_data,    cap_alt_data[slot],    alt_total_chars);
-    ensureDeviceCapacity(d_df2[slot].alt_offsets, cap_alt_offsets[slot], (size_t)df2_count);
+    // DF2 alleles of the chunk and their INFO-ALT fields
+    ensureDeviceCapacity(d_df2[slot].var_id,      cap_df2_var_id[slot],  df2_count);
+    ensureDeviceCapacity(d_df2[slot].alt_data,    cap_alt_data[slot],    buffers.alt_data_buffer.size());
+    ensureDeviceCapacity(d_df2[slot].alt_offsets, cap_alt_offsets[slot], df2_count);
     ensureDeviceCapacity(d_df2[slot].alt_int,   cap_alt_int[slot],   (size_t)d_df2[slot].num_alt_int_fields   * df2_count);
     ensureDeviceCapacity(d_df2[slot].alt_float, cap_alt_float[slot], (size_t)d_df2[slot].num_alt_float_fields * df2_count);
-
-    // --- DF2 INFO-ALT Strings ---
-    size_t alt_info_str_total_chars = 0;
-    for (int f = 0; f < d_df2[slot].num_alt_string_fields; f++) {
-        for (int i = df2_start; i < df2_start + df2_count; i++) {
-            alt_info_str_total_chars += df2.alt_string[f].i_string[i].size() + 1;
-        }
-    }
-    ensureDeviceCapacity(d_df2[slot].alt_string_data, cap_alt_string_data[slot], alt_info_str_total_chars);
+    ensureDeviceCapacity(d_df2[slot].alt_string_data, cap_alt_string_data[slot], buffers.alt_string_buffer.size());
     ensureDeviceCapacity(d_df2[slot].alt_string_offsets, cap_alt_string_offsets[slot],
                           (size_t)d_df2[slot].num_alt_string_fields * df2_count);
 }
 
-void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
-                                          const alt_columns_df& df2,
-                                          const HostBuffers& buffers,
-                                          int slot) {
+void VCFReconstructorGPU::uploadToDevice(const HostBuffers& buffers, int slot) {
     int chunk_size  = buffers.chunk_size;
-    int chunk_start = buffers.chunk_start;
-    int df2_start   = buffers.df2_start;
     int df2_count   = buffers.df2_count;
     cudaStream_t stream = streams[slot];
 
@@ -351,22 +284,21 @@ void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
                          chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
 
     // All transfers below are issued as cudaMemcpyAsync on this slot's stream.
-    // The sources are pinned host memory (HostBuffers uses PinnedAllocator;
-    // the direct df1/df2 arrays are pinned via registerHostInputBuffers()),
-    // so these calls genuinely queue asynchronously and, combined with the
+    // The sources are pinned host memory (HostBuffers uses PinnedAllocator), so
+    // these calls genuinely queue asynchronously and, combined with the
     // pipelined run() loop, can execute concurrently with the other slot's
     // in-flight GPU work.
 
-    // --- DF1 Direct Copies (Fixed-size arrays) ---
-    gpuErrchk(cudaMemcpyAsync(d_df1[slot].var_number, df1.var_number.data() + chunk_start,
+    // --- DF1 fixed-size columns (gathered in prepareHostBuffers()) ---
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].var_number, buffers.var_number_buf.data(),
                          chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
-    gpuErrchk(cudaMemcpyAsync(d_df1[slot].chrom, df1.chrom.data() + chunk_start,
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].chrom, buffers.chrom_buf.data(),
                          chunk_size * sizeof(uint16_t), cudaMemcpyHostToDevice, stream));
-    gpuErrchk(cudaMemcpyAsync(d_df1[slot].pos, df1.pos.data() + chunk_start,
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].pos, buffers.pos_buf.data(),
                          chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
-    gpuErrchk(cudaMemcpyAsync(d_df1[slot].qual, df1.qual.data() + chunk_start,
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].qual, buffers.qual_buf.data(),
                          chunk_size * sizeof(__half), cudaMemcpyHostToDevice, stream));
-    gpuErrchk(cudaMemcpyAsync(d_df1[slot].filter, df1.filter.data() + chunk_start,
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].filter, buffers.filter_buf.data(),
                          chunk_size * sizeof(char), cudaMemcpyHostToDevice, stream));
 
     // --- DF1 Staging Copies (Variable-length flattened data) ---
@@ -396,7 +328,7 @@ void VCFReconstructorGPU::uploadToDevice(const var_columns_df& df1,
                         d_df1[slot].num_string_fields * chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
 
     // --- DF2 Direct and Staging Copies ---
-    gpuErrchk(cudaMemcpyAsync(d_df2[slot].var_id, df2.var_id.data() + df2_start,
+    gpuErrchk(cudaMemcpyAsync(d_df2[slot].var_id, buffers.df2_var_id_buf.data(),
                          df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
 
     gpuErrchk(cudaMemcpyAsync(d_df2[slot].alt_data, buffers.alt_data_buffer.data(),
@@ -774,6 +706,19 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
          const alt_format_df& df4,
          int num_threads)
 {
+    // Every variant, in file order
+    std::vector<unsigned int> rows(df1.var_number.size());
+    std::iota(rows.begin(), rows.end(), 0u);
+    return run(df1, df2, df3, df4, num_threads, rows);
+}
+
+TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
+         const alt_columns_df& df2,
+         const sample_columns_df& df3,
+         const alt_format_df& df4,
+         int num_threads,
+         const std::vector<unsigned int>& rows)
+{
     this->num_threads = num_threads < 1 ? 1 : num_threads;
     auto t_setup_start = std::chrono::high_resolution_clock::now();
 
@@ -809,13 +754,9 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
     writer_failed = false;
     writer_thread = std::thread(&VCFReconstructorGPU::writerLoop, this);
 
-    // If anything below throws, stop the writer (it writes to vcf_file, a local of run()) and unpin
-    // df1/df2 before leaving run(); on success both are already done when the guard is destroyed.
+    // If anything below throws, stop the writer before leaving run(): it writes to vcf_file, a local of run()
     struct RunGuard {
         VCFReconstructorGPU* self;
-        const var_columns_df& df1;
-        const alt_columns_df& df2;
-        bool registered = false;
         ~RunGuard() {
             try {
                 if (self->writer_thread.joinable()) {
@@ -826,10 +767,9 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
                     self->cv_job_available.notify_all();
                     self->writer_thread.join();
                 }
-                if (registered) self->unregisterHostInputBuffers(df1, df2);
             } catch (...) {}
         }
-    } guard{this, df1, df2};
+    } guard{this};
 
     // Construct the FORMAT string
     gt_in_df3 = !df3.sample_GT.empty();
@@ -1095,10 +1035,6 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
     // Persistent device buffers: allocated once here instead of every chunk.
     initDeviceBuffers(df1, df2, df3);
 
-    // Pin the DF1/DF2 arrays that get copied to the device every chunk.
-    registerHostInputBuffers(df1, df2);
-    guard.registered = true;
-
     // Explicit streams (not attached to any operation yet, see run() loop).
     gpuErrchk(cudaStreamCreate(&streams[0]));
     gpuErrchk(cudaStreamCreate(&streams[1]));
@@ -1117,32 +1053,24 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
 
     auto t_loop_start = std::chrono::high_resolution_clock::now();
 
-    int    df2_start = 0;
     bool   have_pending = false;
     int    pending_slot = -1;
     int    pending_chunk_size = 0;
     double ms_prep_total = 0;
 
-    for (int chunk_start = 0; chunk_start < (int)df1.var_number.size(); chunk_start += CHUNK_SIZE){
-        int chunk_end  = std::min(chunk_start + CHUNK_SIZE, (int)df1.var_number.size());
-        int chunk_size = chunk_end - chunk_start;
-        int slot = (chunk_start / CHUNK_SIZE) % 2;
+    // Chunks are ranges of positions in rows (the selected DF1 rows, sorted)
+    const int total_rows = (int)rows.size();
+    for (int chunk_pos = 0; chunk_pos < total_rows; chunk_pos += CHUNK_SIZE){
+        int chunk_size = std::min(CHUNK_SIZE, total_rows - chunk_pos);
+        int slot = (chunk_pos / CHUNK_SIZE) % 2;
 
-        while(df2_start < (int)df2.var_id.size() &&
-                df2.var_id[df2_start] < df1.var_number[chunk_start]){
-            df2_start++;
-        }
+        // DF2 is sorted by var_id: start at the rows of the chunk's first variant
+        const unsigned int first_var_id = df1.var_number[rows[chunk_pos]];
+        const int df2_start = (int)(std::lower_bound(df2.var_id.begin(), df2.var_id.end(), first_var_id) - df2.var_id.begin());
 
-        // Ensure this slot's variable-length device buffers are big enough
-        // (typically a no-op after the first couple of chunks).
-        nvtxRangePushA("allocate");
-        allocateDevice(df1, df2, chunk_start, chunk_end, df2_start, slot);
-        nvtxRangePop();
-
-        host_buffers[slot].chunk_size  = chunk_size;
-        host_buffers[slot].chunk_start = chunk_start;
-        host_buffers[slot].chunk_end   = chunk_end;
-        host_buffers[slot].df2_start   = df2_start;
+        host_buffers[slot].chunk_size = chunk_size;
+        host_buffers[slot].rows       = rows.data() + chunk_pos;
+        host_buffers[slot].df2_start  = df2_start;
 
         // Host preparation phase: while this CPU work runs, the previous
         // chunk's GPU work (launched at the end of the prior iteration, on
@@ -1153,11 +1081,18 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
         auto t1 = std::chrono::high_resolution_clock::now();
         ms_prep_total += std::chrono::duration<double, std::milli>(t1 - t0).count();
         nvtxRangePop();
-        
+
+        // Grow this slot's variable-length device buffers to the prepared chunk
+        // (typically a no-op after the first couple of chunks). The slot's previous
+        // chunk was fully drained by writeChunk(), so reallocating here is safe.
+        nvtxRangePushA("allocate");
+        allocateDevice(host_buffers[slot], slot);
+        nvtxRangePop();
+
         // Upload + launch this chunk on its own stream (both async, return
         // to the host immediately).
         nvtxRangePushA("upload_H2D");
-        uploadToDevice(df1, df2, host_buffers[slot], slot);
+        uploadToDevice(host_buffers[slot], slot);
         nvtxRangePop();
 
         nvtxRangePushA("reconstruct_kernel");
@@ -1203,10 +1138,6 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
     // Free the persistent per-chunk device buffers (allocated once in
     // initDeviceBuffers(), grown on demand in allocateDevice()/writeChunk()).
     freeDevice();
-
-    // Undo registerHostInputBuffers() now that the loop is done with df1/df2.
-    unregisterHostInputBuffers(df1, df2);
-    guard.registered = false;
 
     safe_stream_destroy(streams[0]);
     safe_stream_destroy(streams[1]);
@@ -1403,9 +1334,8 @@ static inline int fast_ftoa(float f, char* dst) {
  * @param df3         Sample core DataFrame.
  * @param df4         Intersected sample-allele DataFrame.
  * @param chunk_size  Number of variants in the current block.
- * @param chunk_start Starting index in DF1.
- * @param chunk_end   Ending index in DF1 (exclusive).
- * @param df2_start   Starting index in DF2 corresponding to chunk_start.
+ * @param rows        DF1 rows of the chunk, sorted: rows[0 .. chunk_size).
+ * @param df2_start   First DF2 row that can belong to the chunk.
  * @param buffer      Output vector that will hold the flattened character data.
  * @param offsets     Output vector that will hold the prefix-summed offsets for the character buffer.
  */
@@ -1414,8 +1344,7 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                                              const sample_columns_df& df3,
                                              const alt_format_df& df4,
                                              int chunk_size,
-                                             int chunk_start,
-                                             int chunk_end,
+                                             const unsigned int* rows,
                                              int df2_start,
                                              PinnedCharVec& buffer,
                                              PinnedUintVec& offsets) {
@@ -1427,28 +1356,27 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
     std::vector<size_t> per_var_num_alts(chunk_size, 0);
     std::vector<long>   per_var_start_df4(chunk_size, -1);
     {
+        // DF2 and DF4 are sorted by var_id; the rows of the variants not selected are skipped
         size_t df2_cursor = (size_t)df2_start;
-        size_t df4_cursor = 0;
-        while (df4_cursor < df4.var_id.size() &&
-               df4.var_id[df4_cursor] < df1.var_number[chunk_start]) df4_cursor++;
-               
-        for (int i = chunk_start; i < chunk_end; i++) {
-            unsigned int current_var_id = df1.var_number[i];
-            
+        size_t df4_cursor = std::lower_bound(df4.var_id.begin(), df4.var_id.end(), df1.var_number[rows[0]]) - df4.var_id.begin();
+
+        for (int r = 0; r < chunk_size; r++) {
+            unsigned int current_var_id = df1.var_number[rows[r]];
+
             while (df2_cursor < df2.var_id.size() &&
                    df2.var_id[df2_cursor] < current_var_id) df2_cursor++;
-                   
+
             size_t num_alts = 0;
             {
                 size_t j = df2_cursor;
                 while (j < df2.var_id.size() && df2.var_id[j] == current_var_id) { num_alts++; j++; }
             }
-            per_var_num_alts[i - chunk_start] = num_alts;
-            
+            per_var_num_alts[r] = num_alts;
+
             while (df4_cursor < df4.var_id.size() &&
                    df4.var_id[df4_cursor] < current_var_id) df4_cursor++;
-                   
-            per_var_start_df4[i - chunk_start] =
+
+            per_var_start_df4[r] =
                 (df4_cursor < df4.var_id.size() &&
                  df4.var_id[df4_cursor] == current_var_id) ? (long)df4_cursor : -1;
         }
@@ -1472,7 +1400,7 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
 
         #pragma omp for schedule(static)
         for (int i_rel = 0; i_rel < chunk_size; i_rel++) {
-            int i = chunk_start + i_rel;
+            int i = rows[i_rel];
             unsigned int current_var_id = df1.var_number[i];
             size_t num_alts  = per_var_num_alts[i_rel];
             long   start_df4 = per_var_start_df4[i_rel];
@@ -1669,21 +1597,35 @@ void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
                                               const sample_columns_df& df3,
                                               const alt_format_df& df4,
                                               HostBuffers& buffers) {
-    int chunk_size  = buffers.chunk_size;
-    int chunk_start = buffers.chunk_start;
-    int chunk_end   = buffers.chunk_end;
-    int df2_start   = buffers.df2_start;
+    const int chunk_size = buffers.chunk_size;
+    const unsigned int* rows = buffers.rows; // DF1 rows of the chunk, sorted, not necessarily contiguous
+
+    // --- DF1 fixed-size columns, gathered for the selected rows ---
+    buffers.var_number_buf.resize(chunk_size);
+    buffers.chrom_buf.resize(chunk_size);
+    buffers.pos_buf.resize(chunk_size);
+    buffers.qual_buf.resize(chunk_size);
+    buffers.filter_buf.resize(chunk_size);
+    for (int r = 0; r < chunk_size; r++) {
+        const unsigned int i = rows[r];
+        buffers.var_number_buf[r] = df1.var_number[i];
+        buffers.chrom_buf[r]      = df1.chrom[i];
+        buffers.pos_buf[r]        = df1.pos[i];
+        buffers.qual_buf[r]       = df1.qual[i];
+        buffers.filter_buf[r]     = df1.filter[i];
+    }
 
     // --- Prepare DF1 ID buffer ---
     buffers.id_buffer.clear();
     buffers.id_offsets.resize(chunk_size);
     {
         unsigned int offset = 0;
-        for (int i = chunk_start; i < chunk_end; i++) {
-            buffers.id_offsets[i - chunk_start] = offset;
-            for (char c : df1.id[i]) buffers.id_buffer.push_back(c);
+        for (int r = 0; r < chunk_size; r++) {
+            const std::string& id = df1.id[rows[r]];
+            buffers.id_offsets[r] = offset;
+            for (char c : id) buffers.id_buffer.push_back(c);
             buffers.id_buffer.push_back('\0');
-            offset += df1.id[i].size() + 1;
+            offset += id.size() + 1;
         }
     }
 
@@ -1692,130 +1634,112 @@ void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
     buffers.ref_offsets.resize(chunk_size);
     {
         unsigned int offset = 0;
-        for (int i = chunk_start; i < chunk_end; i++) {
-            buffers.ref_offsets[i - chunk_start] = offset;
-            for (char c : df1.ref[i]) buffers.ref_buffer.push_back(c);
+        for (int r = 0; r < chunk_size; r++) {
+            const std::string& ref = df1.ref[rows[r]];
+            buffers.ref_offsets[r] = offset;
+            for (char c : ref) buffers.ref_buffer.push_back(c);
             buffers.ref_buffer.push_back('\0');
-            offset += df1.ref[i].size() + 1;
+            offset += ref.size() + 1;
         }
     }
 
-    // --- Prepare DF1 INFO integers ---
-    // Flatten multi-dimensional array into a 1D contiguous block. Field
-    // counts are dataset constants, identical in both slots (see
+    // --- Prepare DF1 INFO integers, floats and flags ---
+    // Field counts are dataset constants, identical in both slots (see
     // initDeviceBuffers()); slot 0 is read here purely as a convenient handle.
     buffers.in_int_buffer.assign(d_df1[0].num_int_fields * chunk_size, 0);
-    for (int f = 0; f < d_df1[0].num_int_fields; f++) {
-        for (int i = chunk_start; i < chunk_end; i++) {
-            buffers.in_int_buffer[f * chunk_size + (i - chunk_start)] = df1.in_int[f].i_int[i];
-        }
-    }
+    for (int f = 0; f < d_df1[0].num_int_fields; f++)
+        for (int r = 0; r < chunk_size; r++)
+            buffers.in_int_buffer[f * chunk_size + r] = df1.in_int[f].i_int[rows[r]];
 
-    // --- Prepare DF1 INFO floats ---
     buffers.in_float_buffer.assign(d_df1[0].num_float_fields * chunk_size, __half(0));
-    for (int f = 0; f < d_df1[0].num_float_fields; f++) {
-        for (int i = chunk_start; i < chunk_end; i++) {
-            buffers.in_float_buffer[f * chunk_size + (i - chunk_start)] = df1.in_float[f].i_float[i];
-        }
-    }
+    for (int f = 0; f < d_df1[0].num_float_fields; f++)
+        for (int r = 0; r < chunk_size; r++)
+            buffers.in_float_buffer[f * chunk_size + r] = df1.in_float[f].i_float[rows[r]];
 
-    // --- Prepare DF1 INFO flags ---
     buffers.in_flag_buffer.assign(d_df1[0].num_flag_fields * chunk_size, 0);
-    for (int f = 0; f < d_df1[0].num_flag_fields; f++) {
-        for (int i = chunk_start; i < chunk_end; i++) {
-            buffers.in_flag_buffer[f * chunk_size + (i - chunk_start)] = df1.in_flag[f].i_flag[i];
-        }
-    }
+    for (int f = 0; f < d_df1[0].num_flag_fields; f++)
+        for (int r = 0; r < chunk_size; r++)
+            buffers.in_flag_buffer[f * chunk_size + r] = df1.in_flag[f].i_flag[rows[r]];
 
     // --- Prepare DF1 INFO Strings ---
     buffers.in_string_buffer.clear();
     buffers.in_string_offsets.assign(d_df1[0].num_string_fields * chunk_size, 0);
     unsigned int current_offset = 0;
-
     for (int f = 0; f < d_df1[0].num_string_fields; f++) {
-        for (int i = chunk_start; i < chunk_end; i++) {
-            int flat_idx = f * chunk_size + (i - chunk_start);
-            buffers.in_string_offsets[flat_idx] = current_offset;
-            
-            const std::string& val = df1.in_string[f].i_string[i];
+        for (int r = 0; r < chunk_size; r++) {
+            buffers.in_string_offsets[f * chunk_size + r] = current_offset;
+            const std::string& val = df1.in_string[f].i_string[rows[r]];
             for (char c : val) buffers.in_string_buffer.push_back(c);
             buffers.in_string_buffer.push_back('\0'); // C-style string terminator
-            
             current_offset += val.size() + 1;
         }
     }
 
-    // --- Prepare DF2 counts ---
-    int df2_count = 0;
-    for (size_t j = df2_start; j < df2.var_id.size() && (int)df2.var_id[j] < chunk_end; j++) df2_count++;
+    // --- DF2: the allele rows of each selected variant ---
+    // DF2 is sorted by var_id and df2_start is the first row of the chunk's first variant:
+    // the rows of the variants left out of the selection are skipped.
+    buffers.df2_rows.clear();
+    buffers.alt_start_buf.assign(chunk_size, 0);
+    buffers.alt_count_buf.assign(chunk_size, 0);
+    {
+        size_t j = (size_t)buffers.df2_start;
+        for (int r = 0; r < chunk_size; r++) {
+            const unsigned int var_num = df1.var_number[rows[r]];
+            while (j < df2.var_id.size() && df2.var_id[j] < var_num) j++;
+            buffers.alt_start_buf[r] = (unsigned int)buffers.df2_rows.size();
+            while (j < df2.var_id.size() && df2.var_id[j] == var_num) buffers.df2_rows.push_back((unsigned int)j++);
+            buffers.alt_count_buf[r] = (unsigned int)buffers.df2_rows.size() - buffers.alt_start_buf[r];
+        }
+    }
+    const int df2_count = (int)buffers.df2_rows.size();
     buffers.df2_count = df2_count;
 
-    // --- Prepare DF2 ALT strings ---
+    // --- Prepare DF2 var_id and ALT strings ---
+    buffers.df2_var_id_buf.resize(df2_count);
     buffers.alt_data_buffer.clear();
     buffers.alt_data_offsets.resize(df2_count);
     {
         unsigned int offset = 0;
-        for (int i = df2_start; i < df2_start + df2_count; i++) {
-            buffers.alt_data_offsets[i - df2_start] = offset;
-            for (char c : df2.alt[i]) buffers.alt_data_buffer.push_back(c);
+        for (int a = 0; a < df2_count; a++) {
+            const unsigned int k = buffers.df2_rows[a];
+            buffers.df2_var_id_buf[a]   = df2.var_id[k];
+            buffers.alt_data_offsets[a] = offset;
+            for (char c : df2.alt[k]) buffers.alt_data_buffer.push_back(c);
             buffers.alt_data_buffer.push_back('\0');
-            offset += df2.alt[i].size() + 1;
-        }
-    }
-
-    // --- Setup alt_start and alt_count mapping arrays ---
-    buffers.alt_start_buf.assign(chunk_size, 0);
-    buffers.alt_count_buf.assign(chunk_size, 0);
-    {
-        int j = df2_start;
-        for (int i = 0; i < chunk_size; i++) {
-            unsigned int var_num = df1.var_number[chunk_start + i];
-            buffers.alt_start_buf[i] = j - df2_start;
-            while (j < df2_start + df2_count && df2.var_id[j] == var_num) j++;
-            buffers.alt_count_buf[i] = (j - df2_start) - buffers.alt_start_buf[i];
+            offset += df2.alt[k].size() + 1;
         }
     }
 
     // --- Prepare DF2 ALT INFO fields ---
-    // Field counts are dataset constants, identical in both slots; slot 0 is
-    // read here purely as a convenient handle.
     buffers.alt_int_buffer.assign(d_df2[0].num_alt_int_fields * df2_count, 0);
-    for (int f = 0; f < d_df2[0].num_alt_int_fields; f++) {
-        for (int i = df2_start; i < df2_start + df2_count; i++) {
-            buffers.alt_int_buffer[f * df2_count + (i - df2_start)] = df2.alt_int[f].i_int[i];
-        }
-    }
+    for (int f = 0; f < d_df2[0].num_alt_int_fields; f++)
+        for (int a = 0; a < df2_count; a++)
+            buffers.alt_int_buffer[f * df2_count + a] = df2.alt_int[f].i_int[buffers.df2_rows[a]];
 
     buffers.alt_float_buffer.assign(d_df2[0].num_alt_float_fields * df2_count, __half(0));
-    for (int f = 0; f < d_df2[0].num_alt_float_fields; f++) {
-        for (int i = df2_start; i < df2_start + df2_count; i++) {
-            buffers.alt_float_buffer[f * df2_count + (i - df2_start)] = df2.alt_float[f].i_float[i];
-        }
-    }
+    for (int f = 0; f < d_df2[0].num_alt_float_fields; f++)
+        for (int a = 0; a < df2_count; a++)
+            buffers.alt_float_buffer[f * df2_count + a] = df2.alt_float[f].i_float[buffers.df2_rows[a]];
 
     // --- Prepare DF2 INFO-ALT Strings ---
     buffers.alt_string_buffer.clear();
     buffers.alt_string_offsets.assign(d_df2[0].num_alt_string_fields * df2_count, 0);
     current_offset = 0;
-
     for (int f = 0; f < d_df2[0].num_alt_string_fields; f++) {
-        for (int i = df2_start; i < df2_start + df2_count; i++) {
-            int flat_idx = f * df2_count + (i - df2_start);
-            buffers.alt_string_offsets[flat_idx] = current_offset;
-            
-            const std::string& val = df2.alt_string[f].i_string[i];
+        for (int a = 0; a < df2_count; a++) {
+            buffers.alt_string_offsets[f * df2_count + a] = current_offset;
+            const std::string& val = df2.alt_string[f].i_string[buffers.df2_rows[a]];
             for (char c : val) buffers.alt_string_buffer.push_back(c);
             buffers.alt_string_buffer.push_back('\0');
-            
             current_offset += val.size() + 1;
         }
     }
 
     // --- Package complex sample strings (delegates to buildSampleStrings) ---
     buildSampleStrings(df1, df2, df3, df4,
-                       chunk_size, chunk_start, chunk_end, df2_start,
+                       chunk_size, rows, buffers.df2_start,
                        buffers.sample_buffer, buffers.sample_offsets);
-                    
+
     // --- Upper bound of each output line -> where it starts in d_output ---
     // Each sample cell's '\0' leaves room for the '\t' before it in the line.
     buffers.line_start.resize(chunk_size + 1);
@@ -1823,11 +1747,11 @@ void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
         const int num_samples = df3.numSample;
         unsigned long long total = 0;
         for (int r = 0; r < chunk_size; r++) {
-            int i = chunk_start + r;
+            const unsigned int i = rows[r];
             unsigned long long len = line_fixed_bound + df1.id[i].size() + df1.ref[i].size();
             for (int f = 0; f < d_df1[0].num_string_fields; f++) len += df1.in_string[f].i_string[i].size();
             for (unsigned int a = 0; a < buffers.alt_count_buf[r]; a++) {
-                int k = df2_start + buffers.alt_start_buf[r] + a;
+                const unsigned int k = buffers.df2_rows[buffers.alt_start_buf[r] + a];
                 len += alt_fixed_bound + df2.alt[k].size();
                 for (int f = 0; f < d_df2[0].num_alt_string_fields; f++) len += df2.alt_string[f].i_string[k].size();
             }
