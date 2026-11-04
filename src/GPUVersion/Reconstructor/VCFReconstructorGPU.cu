@@ -786,6 +786,7 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
 
     writer_out = &vcf_file;
     writer_should_stop = false;
+    writer_failed = false;
     writer_thread = std::thread(&VCFReconstructorGPU::writerLoop, this);
 
     // If anything below throws, stop the writer (it writes to vcf_file, a local of run()) and unpin
@@ -1219,6 +1220,9 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
     writer_thread.join();
 
     vcf_file.close();
+    if (writer_failed || !vcf_file)
+        throw std::runtime_error("Error writing output VCF file (disk full?): " + output_vcf_path +
+                                 " - the output VCF is incomplete");
     timing.drain_ms = std::chrono::duration<double, std::milli>(
         std::chrono::high_resolution_clock::now() - t_drain_start).count();
     return timing;
@@ -1886,11 +1890,13 @@ void VCFReconstructorGPU::writerLoop() {
         nvtxRangePushA("Async Disk Write");
         writer_out->write(h_compacted_pool[job.buffer_idx], job.total_bytes);
         nvtxRangePop();
+        const bool failed = !*writer_out; // e.g. disk full: ofstream does not throw
 
         // Mark the slot as free and notify whoever is waiting on it.
         {
             std::lock_guard<std::mutex> lock(write_mutex);
             write_buffer_busy[job.buffer_idx] = false;
+            if (failed) writer_failed = true;
         }
         cv_buffer_free.notify_all();
     }

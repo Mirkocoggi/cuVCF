@@ -226,35 +226,52 @@ void VCFReconstructor::run(const var_columns_df& df1,
     // 5. Pre-compute chunk cursors 
     std::vector<ChunkCursor> chunks = computeChunkCursor(df1, df2, df4, num_threads);
 
-    // 6. Parallel processing - each thread writes to its own temp file
+    // 6. Parallel processing - each thread writes to its own temp file.
+    // An exception must not leave the OpenMP region (std::terminate): keep the first one, rethrow below.
+    std::string error;
     #pragma omp parallel for num_threads(num_threads) schedule(static)
     for (int c = 0; c < num_threads; c++) {
-        std::string tmp_path = output_vcf_path + ".tmp_" + std::to_string(c);
-        std::ofstream tmp_file(tmp_path);
-        
-        // Each thread has its own local cursors — no shared state
-        size_t local_df2_cursor = chunks[c].df2_start;
-        size_t local_df4_cursor = chunks[c].df4_start;
+        try {
+            std::string tmp_path = output_vcf_path + ".tmp_" + std::to_string(c);
+            std::ofstream tmp_file(tmp_path);
+            if (!tmp_file.is_open())
+                throw std::runtime_error("Error opening temporary file: " + tmp_path);
 
-        for(size_t i = chunks[c].var_start; i < chunks[c].var_end; i++){
-            tmp_file << formatVariant(i, df1, df2, df3, df4,
-                                      local_df2_cursor,
-                                      local_df4_cursor) << "\n";
+            // Each thread has its own local cursors — no shared state
+            size_t local_df2_cursor = chunks[c].df2_start;
+            size_t local_df4_cursor = chunks[c].df4_start;
+
+            for(size_t i = chunks[c].var_start; i < chunks[c].var_end; i++){
+                tmp_file << formatVariant(i, df1, df2, df3, df4,
+                                          local_df2_cursor,
+                                          local_df4_cursor) << "\n";
+            }
+            tmp_file.close();
+            if (!tmp_file)
+                throw std::runtime_error("Error writing temporary file: " + tmp_path);
+        } catch (const std::exception& e) {
+            #pragma omp critical(reconstructor_error)
+            if (error.empty()) error = e.what();
         }
-        tmp_file.close();
     }
 
-    // 7. Concatenate temp files in order
-    for(int c = 0; c < num_threads; c++){
+    // 7. Concatenate temp files in order. An empty chunk leaves an empty file: skip it, inserting
+    // the rdbuf() of an empty file sets failbit on vcf_file.
+    for(int c = 0; c < num_threads && error.empty(); c++){
         std::string tmp_path = output_vcf_path + ".tmp_" + std::to_string(c);
         std::ifstream tmp_file(tmp_path);
-        vcf_file << tmp_file.rdbuf();
-        tmp_file.close();
-        std::remove(tmp_path.c_str());
+        if (!tmp_file.is_open()) error = "Error reading temporary file: " + tmp_path;
+        else if (tmp_file.peek() != std::ifstream::traits_type::eof()) vcf_file << tmp_file.rdbuf();
     }
-    
+    for(int c = 0; c < num_threads; c++)
+        std::remove((output_vcf_path + ".tmp_" + std::to_string(c)).c_str());
+
     vcf_file.close();
-}
+    if (error.empty() && !vcf_file)
+        error = "Error writing output VCF file (disk full?): " + output_vcf_path;
+    if (!error.empty())
+        throw std::runtime_error(error + " - the output VCF is incomplete");
+} 
 
 std::string VCFReconstructor::formatVariant(int index,
                                              const var_columns_df& df1,

@@ -227,6 +227,7 @@ private:
     std::condition_variable cv_buffer_free;    ///< Notified when a buffer slot becomes available for reuse.
     bool write_buffer_busy[NUM_WRITE_BUFFERS] = {false, false}; ///< Tracks which pool slots are currently held by the writer thread.
     bool writer_should_stop = false;           ///< Set to true to signal the writer thread to exit after draining the queue.
+    bool writer_failed = false;                ///< Set by the writer thread when a disk write fails; checked at the end of run().
 
     std::thread   writer_thread; ///< Background thread responsible for writing compacted chunks to disk.
     std::ofstream* writer_out = nullptr; ///< Non-owning pointer to the output file stream managed by run().
