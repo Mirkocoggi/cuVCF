@@ -283,6 +283,12 @@ private:
     void freeDevice();
 
     /**
+     * @brief Frees the dataset constants shared by both slots: field names, FORMAT string and maps.
+     * Called at the end of run() and from the destructor, so they are freed after an error too.
+     */
+    void freeConstants();
+
+    /**
      * @brief Populates the HostBuffers struct with flattened, contiguous data ready for optimal GPU transfer.
      * 
      * @param df1 Core variants DataFrame.

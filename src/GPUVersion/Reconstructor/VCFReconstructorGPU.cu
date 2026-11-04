@@ -154,6 +154,25 @@ void VCFReconstructorGPU::freeDevice(){
     }
 }
 
+// Frees the dataset constants allocated once in run(). d_df1[0]/d_df1[1] (and the matching d_df2/d_df3
+// fields) share the same pointer, so each is freed once via slot 0 and nulled in slot 1 to avoid a double free.
+void VCFReconstructorGPU::freeConstants(){
+    safe_cuda_free(d_df1[0].int_names);         d_df1[1].int_names        = nullptr;
+    safe_cuda_free(d_df1[0].float_names);       d_df1[1].float_names      = nullptr;
+    safe_cuda_free(d_df1[0].flag_names);        d_df1[1].flag_names       = nullptr;
+    safe_cuda_free(d_df1[0].string_names);      d_df1[1].string_names     = nullptr;
+    safe_cuda_free(d_df2[0].alt_int_names);     d_df2[1].alt_int_names    = nullptr;
+    safe_cuda_free(d_df2[0].alt_float_names);   d_df2[1].alt_float_names  = nullptr;
+    safe_cuda_free(d_df2[0].alt_string_names);  d_df2[1].alt_string_names = nullptr;
+    safe_cuda_free(d_df3[0].format_str);        d_df3[1].format_str       = nullptr;
+    safe_cuda_free(d_maps.chrom_strings);
+    safe_cuda_free(d_maps.chrom_offsets);
+    safe_cuda_free(d_maps.filter_strings);
+    safe_cuda_free(d_maps.filter_offsets);
+    safe_cuda_free(d_maps.tsa_strings);
+    safe_cuda_free(d_maps.tsa_offsets);
+}
+
 //Destructor
 VCFReconstructorGPU::~VCFReconstructorGPU() {
     // A destructor must not throw (std::terminate), and after a CUDA error the frees below can fail too
@@ -169,6 +188,7 @@ VCFReconstructorGPU::~VCFReconstructorGPU() {
         }
 
         freeDevice(); // Clean up VRAM
+        freeConstants();
 
         safe_stream_destroy(streams[0]);
         safe_stream_destroy(streams[1]);
@@ -1191,25 +1211,8 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
     safe_stream_destroy(streams[0]);
     safe_stream_destroy(streams[1]);
 
-    // Final cleanup of global constants. d_df1[0]/d_df1[1] (and the matching
-    // d_df2/d_df3 fields) share the same underlying pointer for these
-    // dataset-constant buffers (allocated once, see the setup blocks above),
-    // so each is freed once via slot 0 and then nulled in slot 1 as well to
-    // avoid a double free.
-    safe_cuda_free(d_df1[0].int_names);         d_df1[1].int_names    = nullptr;
-    safe_cuda_free(d_df1[0].float_names);       d_df1[1].float_names  = nullptr;
-    safe_cuda_free(d_df1[0].flag_names);        d_df1[1].flag_names   = nullptr;
-    safe_cuda_free(d_df2[0].alt_int_names);     d_df2[1].alt_int_names   = nullptr;
-    safe_cuda_free(d_df2[0].alt_float_names);   d_df2[1].alt_float_names = nullptr;
-    safe_cuda_free(d_df1[0].string_names);      d_df1[1].string_names = nullptr;
-    safe_cuda_free(d_df2[0].alt_string_names);  d_df2[1].alt_string_names = nullptr;   
-    safe_cuda_free(d_df3[0].format_str);   d_df3[1].format_str   = nullptr;
-    safe_cuda_free(d_maps.chrom_strings);
-    safe_cuda_free(d_maps.chrom_offsets);
-    safe_cuda_free(d_maps.filter_strings);
-    safe_cuda_free(d_maps.filter_offsets);
-    safe_cuda_free(d_maps.tsa_strings);
-    safe_cuda_free(d_maps.tsa_offsets);
+    // Dataset constants shared by both slots (field names, FORMAT string, maps)
+    freeConstants();
 
     // Signal the writer thread, wait for it to drain the queue, then close file.
     {
