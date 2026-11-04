@@ -1375,6 +1375,9 @@ static inline int count_tokens(const char* b, const char* e, char sep){
     return n;
 }
 
+// float -> __half on the host: NaN (missing) becomes missing_half(), the same bits as the kernel and the CPU
+static inline __half host_half(float v){ return std::isnan(v) ? missing_half() : __half(v); }
+
 // Same result as std::stoi, without throwing: leading spaces and an optional sign, MISSING_INT if nothing parses or out of range
 static inline int parse_int_token(const char* b, const char* e){
     while(b < e && isspace(static_cast<unsigned char>(*b))) ++b;
@@ -1528,7 +1531,7 @@ const char* vcf_parsed::parse_record_head(const char* p, const char* e, long i, 
                 for_each_token(vb, te, ',', [&](const char* vtb, const char* vte, int k){
                     if(k >= local_alt) return;
                     if(it->second.code == INT_ALT) tmp_alt->alt_int[el].i_int[base + k] = parse_int_token(vtb, vte);
-                    else if(it->second.code == FLOAT_ALT) tmp_alt->alt_float[el].i_float[base + k] = (__half)parse_float_token(vtb, vte);
+                    else if(it->second.code == FLOAT_ALT) tmp_alt->alt_float[el].i_float[base + k] = host_half(parse_float_token(vtb, vte));
                     else tmp_alt->alt_string[el].i_string[base + k].assign(vtb, vte - vtb);
                     y = k + 1;
                 });
@@ -1645,7 +1648,7 @@ void vcf_parsed::get_vcf_line_in_var_columns_format(char *line, long start, long
                             }
                             case format_step::STR_ALT: tmp_alt_format->samp_string[step.el].i_string[base + y].assign(vb, ve - vb); break;
                             case format_step::INT_ALT: tmp_alt_format->samp_int[step.el].i_int[base + y] = parse_int_token(vb, ve); break;
-                            case format_step::FLT_ALT: tmp_alt_format->samp_float[step.el].i_float[base + y] = (__half)parse_float_token(vb, ve); break;
+                            case format_step::FLT_ALT: tmp_alt_format->samp_float[step.el].i_float[base + y] = host_half(parse_float_token(vb, ve)); break;
                             default: break;
                         }
                     });
