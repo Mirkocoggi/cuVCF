@@ -202,10 +202,15 @@ void VCFReconstructor::run(const var_columns_df& df1,
             }
         }
 
-        // DF3 string fields are usually singular (no grouping needed)
+        // Group DF3 string fields (a String with Number=3 is split into X0, X1, X2)
+        prev_base = "";
         for (size_t i = 0; i < df3.samp_string.size(); i++) {
-            if (!format_str.empty()) format_str += ":";
-            format_str += df3.samp_string[i].name;
+            std::string base = formatBase(df3.samp_string[i].name, format_numbers);
+            if (base != prev_base) {
+                if (!format_str.empty()) format_str += ":";
+                format_str += base;
+                prev_base = base;
+            }
         }
 
         // Group DF4 integer fields (per-allele format fields)
@@ -573,11 +578,24 @@ std::string VCFReconstructor::formatVariant(int index,
             }
 
             // --- DF3 string fields ---
-            // Append single string fields
-            for (size_t col = 0; col < df3.samp_string.size(); col++) {
-                if (!sample_data.empty()) sample_data += ":";
-                const std::string& s_val = df3.samp_string[col].i_string[df3_idx];
-                sample_data += s_val.empty() ? "." : s_val;
+            // Re-group array fields (X0, X1, X2 -> a,b,c), a missing value stays "." in its position
+            {
+                size_t col = 0;
+                while (col < df3.samp_string.size()) {
+                    if (!sample_data.empty()) sample_data += ":";
+                    std::string base = formatBase(df3.samp_string[col].name, format_numbers);
+                    std::string group_val = "";
+                    bool any = false;
+                    size_t group_start = col;
+                    while (col < df3.samp_string.size() && formatBase(df3.samp_string[col].name, format_numbers) == base) {
+                        if (col != group_start) group_val += ",";
+                        const std::string& s_val = df3.samp_string[col].i_string[df3_idx];
+                        if (s_val.empty()) group_val += ".";
+                        else { group_val += s_val; any = true; }
+                        col++;
+                    }
+                    sample_data += any ? group_val : ".";
+                }
             }
 
             // --- DF4 per-allele fields ---

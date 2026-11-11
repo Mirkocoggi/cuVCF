@@ -733,6 +733,7 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
 
     df3_int_groups   = buildGroups(df3.samp_int,   format_numbers);
     df3_float_groups = buildGroups(df3.samp_float, format_numbers);
+    df3_string_groups = buildGroups(df3.samp_string, format_numbers);
     df4_int_groups   = buildGroups(df4.samp_int,   format_numbers);
     df4_float_groups = buildGroups(df4.samp_float, format_numbers);
 
@@ -806,10 +807,10 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
             }
         }
 
-        // DF3 string fields are usually singular (no grouping needed)
-        for (size_t i = 0; i < df3.samp_string.size(); i++) {
+        // Group DF3 string fields (a String with Number=3 is split into X0, X1, X2)
+        for (const auto& g : df3_string_groups) {
             if (!format_str.empty()) format_str += ":";
-            format_str += df3.samp_string[i].name;
+            format_str += formatBase(df3.samp_string[g.col_start].name, format_numbers);
         }
 
         // Group DF4 integer fields (per-allele format fields)
@@ -1488,12 +1489,22 @@ void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
                         if(!any){w = start; *w++ = '.';}
                     }
 
-                    // Process DF3 String fields
-                    for (size_t col = 0; col < df3.samp_string.size(); col++) {
+                    // Process DF3 String fields (X0, X1, X2 -> a,b,c)
+                    for (const auto& g : df3_string_groups) {
                         write_sep();
-                        const std::string& s_val = df3.samp_string[col].i_string[df3_idx];
-                        if (s_val.empty()) *w++ = '.';
-                        else { memcpy(w, s_val.data(), s_val.size()); w += s_val.size(); }
+
+                        char* start = w;
+                        bool any = false;
+
+                        for (size_t cc = g.col_start; cc < g.col_end; cc++) {
+                            if (cc != g.col_start) *w++ = ',';
+
+                            const std::string& s_val = df3.samp_string[cc].i_string[df3_idx];
+
+                            if (s_val.empty()) *w++ = '.';
+                            else { memcpy(w, s_val.data(), s_val.size()); w += s_val.size(); any = true; }
+                        }
+                        if (!any) { w = start; *w++ = '.'; }
                     }
 
                     // Process DF4 Allele-specific fields

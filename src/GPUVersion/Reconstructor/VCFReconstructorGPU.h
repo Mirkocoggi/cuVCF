@@ -204,6 +204,7 @@ private:
 
     std::vector<GroupInfo> df3_int_groups;   ///< Grouping logic for DF3 integer fields (handles multi-value keys).
     std::vector<GroupInfo> df3_float_groups; ///< Grouping logic for DF3 float fields.
+    std::vector<GroupInfo> df3_string_groups; ///< Grouping logic for DF3 string fields (X0, X1, X2 -> X).
     std::vector<GroupInfo> df4_int_groups;   ///< Grouping logic for DF4 integer fields.
     std::vector<GroupInfo> df4_float_groups; ///< Grouping logic for DF4 float fields.
 
