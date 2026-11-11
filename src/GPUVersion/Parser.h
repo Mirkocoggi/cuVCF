@@ -170,9 +170,10 @@ public:
     * Copies keys and integer values from the host map to device constant memory.
     * Prints an error if the number of keys exceeds the allowed limit.
     *
-    * @param my_map Host map containing keys and their corresponding integer values.
+    * @param info_keys Host map of the INFO keys and their type codes.
+    * @param format_keys Host map of the FORMAT keys and their type codes.
     */
-    void initialize_map1(const std::map<std::string, int> &my_map);
+    void initialize_map1(const std::map<std::string, int> &info_keys, const std::map<std::string, int> &format_keys);
 
     /**
     * @brief Allocates device memory for VCF parsing data.
@@ -334,7 +335,7 @@ public:
     void get_vcf_line_in_var_columns_format(char *line, long start, long end, long i, alt_columns_df* tmp_alt, int *tmp_num_alt, sample_columns_df* sample, header_element* FORMAT, int *tmp_num_alt_format, alt_format_df* tmp_alt_format, format_plan_cache* plans);
 
     /// Read-only lookups for the parallel host parse (filled by build_host_lookup)
-    std::unordered_map<std::string_view, unsigned char> host_chrom;
+    std::unordered_map<std::string_view, uint16_t> host_chrom;
     std::unordered_map<std::string_view, char> host_filter;
     std::unordered_map<std::string_view, host_key> host_info;
 

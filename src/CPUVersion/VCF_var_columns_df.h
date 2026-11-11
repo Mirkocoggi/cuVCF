@@ -15,6 +15,7 @@
 #include "VCF_parsed.h"
 #include <chrono>
 #include <Imath/half.h>
+#include <algorithm>
 
 // FORMAT columns are named <ID> (Number=1) or <ID>0, <ID>1, ... (Number>1): match the first column
 // of key exactly. A prefix match picked GQX for GQ when GQX was declared first.
@@ -22,22 +23,29 @@ static inline bool format_name_matches(const std::string& name, const std::strin
     return name == key || (name.size() == key.size() + 1 && name.back() == '0' && name.compare(0, key.size(), key) == 0);
 }
 
-// Numeric conversions for VCF values: a missing value ('.') or a malformed token yields 0
-// instead of throwing and aborting the whole parse.
+// Numeric conversions for VCF values: a missing value ('.') or a malformed token yields
+// MISSING_INT / NaN instead of throwing and aborting the whole parse.
 static inline int safe_stoi(const std::string& s){
-    try{ return std::stoi(s); }catch(const std::exception&){ return 0; }
+    try{ return std::stoi(s); }catch(const std::exception&){ return MISSING_INT; }
 }
 static inline float safe_stof(const std::string& s){
-    try{ return std::stof(s); }catch(const std::exception&){ return 0.0f; }
+    try{ return std::stof(s); }catch(const std::exception&){ return MISSING_FLOAT; }
 }
 
-// The Ensembl TSA (variant class) String INFO is stored as an Integer code, like the GPU backend.
+// TSA names, values not in the table get TSA_UNKNOWN
+static const char* const tsa_names[] = {
+    "SNV", "insertion", "deletion", "inversion", "indel",
+    "substitution", "sequence_alteration"
+};
+static constexpr int TSA_UNKNOWN = -1;
+
 static inline int tsa_code(const std::string& v){
-    if(v == "SNV") return 0;
-    if(v == "INS" || v == "insertion") return 1;
-    if(v == "DEL" || v == "deletion") return 2;
-    if(v == "INV" || v == "inversion") return 3;
-    return 4;
+    if(v == "INS") return 1;
+    if(v == "DEL") return 2;
+    if(v == "INV") return 3;
+    for(int c = 0; c < static_cast<int>(sizeof(tsa_names) / sizeof(tsa_names[0])); c++)
+        if(v == tsa_names[c]) return c;
+    return TSA_UNKNOWN;
 }
 
 /**
@@ -78,14 +86,14 @@ public:
     vector<unsigned int> var_number;
     
     /** 
-     * @brief Maps chromosome names to compact char codes
+     * @brief Maps chromosome names to compact 16-bit codes
      * @details Provides efficient storage by mapping chromosome names (e.g., "chr1") 
-     *          to single character codes
+     *          to 16-bit codes
      */
-    std::map<std::string, char> chrom_map;
+    std::map<std::string, uint16_t> chrom_map;
     
     /** @brief Vector storing chromosome codes sequentially */
-    vector<char> chrom;
+    vector<uint16_t> chrom;
     
     /** @brief Vector storing genomic positions */
     vector<unsigned int> pos;
@@ -127,6 +135,15 @@ public:
         return it == info_map1.end() ? -1 : it->second;
     }
 
+    /** @brief Maps FORMAT field names to their type: separate from info_map1, the same ID can be in both */
+    map<string,int> format_map1;
+
+    // Same as info_code, for FORMAT keys
+    int format_code(const string& key) const {
+        auto it = format_map1.find(key);
+        return it == format_map1.end() ? -1 : it->second;
+    }
+
     // Per-thread alternative buffers are pre-sized for ~2 ALTs per line; grow them when a chunk needs more.
     void ensure_alt_capacity(alt_columns_df* tmp_alt, int needed)
     {
@@ -138,10 +155,10 @@ public:
         (*tmp_alt).alt_id.resize(needed, static_cast<char>(0));
 
         for(size_t j = 0; j < (*tmp_alt).alt_int.size(); j++){
-            (*tmp_alt).alt_int[j].i_int.resize(needed, 0);
+            (*tmp_alt).alt_int[j].i_int.resize(needed, MISSING_INT);
         }
         for(size_t j = 0; j < (*tmp_alt).alt_float.size(); j++){
-            (*tmp_alt).alt_float[j].i_float.resize(needed, 0);
+            (*tmp_alt).alt_float[j].i_float.resize(needed, MISSING_FLOAT);
         }
         for(size_t j = 0; j < (*tmp_alt).alt_string.size(); j++){
             (*tmp_alt).alt_string[j].i_string.resize(needed, "\0");
@@ -158,10 +175,10 @@ public:
         (*tmp_alt_format).samp_id.resize(needed, static_cast<unsigned short>(0));
 
         for(size_t j = 0; j < (*tmp_alt_format).samp_int.size(); j++){
-            (*tmp_alt_format).samp_int[j].i_int.resize(needed, 0);
+            (*tmp_alt_format).samp_int[j].i_int.resize(needed, MISSING_INT);
         }
         for(size_t j = 0; j < (*tmp_alt_format).samp_float.size(); j++){
-            (*tmp_alt_format).samp_float[j].i_float.resize(needed, 0);
+            (*tmp_alt_format).samp_float[j].i_float.resize(needed, MISSING_FLOAT);
         }
         for(size_t j = 0; j < (*tmp_alt_format).samp_string.size(); j++){
             (*tmp_alt_format).samp_string[j].i_string.resize(needed, "\0");
@@ -209,7 +226,7 @@ public:
                 iter++;
                 // chrom_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
                 auto chrom_it = chrom_map.find(tmp);
-                chrom[i] = (chrom_it != chrom_map.end()) ? chrom_it->second : static_cast<char>(0);
+                chrom[i] = (chrom_it != chrom_map.end()) ? chrom_it->second : uint16_t(0);
             }else{
                 tmp += at(iter);
                 iter++;
@@ -358,7 +375,7 @@ public:
                                         try{
                                             in_float[el].i_float[i] = (half)safe_stof(tmp_elems[1]);
                                         }catch (const std::exception& e){
-                                            in_float[el].i_float[i] = 0;
+                                            in_float[el].i_float[i] = MISSING_FLOAT;
                                         }
                                         find_info_elem = true;
                                     } 
@@ -383,7 +400,7 @@ public:
                                     if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
                                         split_on(tmp_split, tmp_elems[1], ',');
                                         for(int y = 0; y<local_alt; y++){
-                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? safe_stoi(tmp_split[y]) : 0; // "." has a single token
+                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? safe_stoi(tmp_split[y]) : MISSING_INT; // "." has a single token
                                         }
                                         find_info_elem = true;
                                     }
@@ -399,9 +416,9 @@ public:
                                         
                                         for(int y = 0; y<local_alt; y++){
                                             try{
-                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? (half)safe_stof(tmp_split[y]) : (half)0.0f; // "." has a single token
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? (half)safe_stof(tmp_split[y]) : MISSING_FLOAT; // "." has a single token
                                             }catch (const std::exception& e){
-                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = MISSING_FLOAT;
                                             }
                                         }
                                         find_info_elem = true;
@@ -498,7 +515,7 @@ public:
                 iter++;
                 // chrom_map is filled before the parallel parse (prebuild_chrom_filter_maps): read only here
                 auto chrom_it = chrom_map.find(tmp);
-                chrom[i] = (chrom_it != chrom_map.end()) ? chrom_it->second : static_cast<char>(0);
+                chrom[i] = (chrom_it != chrom_map.end()) ? chrom_it->second : uint16_t(0);
             }else{
                 tmp += at(iter);
                 iter++;
@@ -646,7 +663,7 @@ public:
                                         try{
                                             in_float[el].i_float[i] = (half)safe_stof(tmp_elems[1]);
                                         }catch (const std::exception& e){
-                                            in_float[el].i_float[i] = 0;
+                                            in_float[el].i_float[i] = MISSING_FLOAT;
                                         }
                                         find_info_elem = true;
                                     } 
@@ -671,7 +688,7 @@ public:
                                     if((*tmp_alt).alt_int[el].name == tmp_elems[0]){
                                         split_on(tmp_split, tmp_elems[1], ',');
                                         for(int y = 0; y<local_alt; y++){
-                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? safe_stoi(tmp_split[y]) : 0; // "." has a single token
+                                            (*tmp_alt).alt_int[el].i_int[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? safe_stoi(tmp_split[y]) : MISSING_INT; // "." has a single token
                                         }
                                         find_info_elem = true;
                                     }
@@ -686,9 +703,9 @@ public:
                                         split_on(tmp_split, tmp_elems[1], ',');
                                         for(int y = 0; y<local_alt; y++){
                                             try{
-                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? (half)safe_stof(tmp_split[y]) : (half)0.0f; // "." has a single token
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = y < (int)tmp_split.size() ? (half)safe_stof(tmp_split[y]) : MISSING_FLOAT; // "." has a single token
                                             }catch (const std::exception& e){
-                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = 0;
+                                                (*tmp_alt).alt_float[el].i_float[(*tmp_num_alt)+y] = MISSING_FLOAT;
                                             }
                                         }
                                         find_info_elem = true;
@@ -763,6 +780,8 @@ public:
                     find1 = true;
                     iter++;
                     split_on(tmp_split, tmp, ':');
+                    const int samp_base = *tmp_num_alt_format; // first DF4 row of this sample
+                    int samp_rows = 0;                         // DF4 rows it needs: the longest Number=A field
                     vector<string> tmp_sub;
                     for(int j = 0; j < tmp_split.size() && j < tmp_format_split.size(); j++){ // extra values have no FORMAT key
                         bool find_type = false;
@@ -791,10 +810,10 @@ public:
                                         (*tmp_alt_format).alt_id[(*tmp_num_alt_format) + y] = (char)y;
                                         (*tmp_alt_format).sample_GT.GT[(*tmp_num_alt_format) + y] = (*tmp_alt_format).gt_code(tmp_sub[y]);
                                     }
-                                    (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
+                                    samp_rows = std::max(samp_rows, local_alt);
                                 }
                                 find_type = true;
-                            }else if(info_code(tmp_format_split[j]) == STRING_FORMAT || info_code(tmp_format_split[j] + std::to_string(1)) == STRING_FORMAT){
+                            }else if(format_code(tmp_format_split[j]) == STRING_FORMAT || format_code(tmp_format_split[j] + std::to_string(1)) == STRING_FORMAT){
                                 //String - deterministic
                                 (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
                                 (*sample).samp_id[i*(*sample).numSample + samp] =  static_cast<unsigned short>(samp);
@@ -821,7 +840,7 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_code(tmp_format_split[j]) == INT_FORMAT || info_code(tmp_format_split[j] + std::to_string(1)) == INT_FORMAT){
+                            }else if(format_code(tmp_format_split[j]) == INT_FORMAT || format_code(tmp_format_split[j] + std::to_string(1)) == INT_FORMAT){
                                 //Integer - deterministic
                                 (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
                                 (*sample).samp_id[i*(*sample).numSample + samp] = samp;
@@ -837,7 +856,7 @@ public:
                                             split_on(tmp_sub, tmp_split[j], ',');
                                             // k, not i: i is the record index. A '.' value has a single token.
                                             for(int k = 0; k<(*sample).samp_int[el].numb; k++){
-                                                (*sample).samp_int[el+k].i_int[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? safe_stoi(tmp_sub[k]) : 0;
+                                                (*sample).samp_int[el+k].i_int[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? safe_stoi(tmp_sub[k]) : MISSING_INT;
                                             }
                                         }
                                         find_elem = true;
@@ -845,7 +864,7 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_code(tmp_format_split[j]) == FLOAT_FORMAT || info_code(tmp_format_split[j] + std::to_string(1)) == FLOAT_FORMAT){
+                            }else if(format_code(tmp_format_split[j]) == FLOAT_FORMAT || format_code(tmp_format_split[j] + std::to_string(1)) == FLOAT_FORMAT){
                                 //Float - deterministic
                                 (*sample).var_id[i*(*sample).numSample + samp] = var_number[i];
                                 (*sample).samp_id[i*(*sample).numSample + samp] = samp;
@@ -857,7 +876,7 @@ public:
                                             try{ //Check if format is 10E-40 to crop to 0
                                                 (*sample).samp_float[el].i_float[i*(*sample).numSample + samp] = (half)safe_stof(tmp_split[j]);
                                             }catch (const std::exception& e){
-                                                (*sample).samp_float[el].i_float[i*(*sample).numSample + samp] = 0;
+                                                (*sample).samp_float[el].i_float[i*(*sample).numSample + samp] = MISSING_FLOAT;
                                             }
                                         }else{
                                             //Float with numb > 1
@@ -865,7 +884,7 @@ public:
                                             split_on(tmp_sub, tmp_split[j], ',');
                                             // k, not i: i is the record index. A '.' value has a single token.
                                             for(int k = 0; k<(*sample).samp_float[el].numb; k++){
-                                                (*sample).samp_float[el+k].i_float[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? (half)safe_stof(tmp_sub[k]) : (half)0.0f;
+                                                (*sample).samp_float[el+k].i_float[i*(*sample).numSample + samp] = k < (int)tmp_sub.size() ? (half)safe_stof(tmp_sub[k]) : MISSING_FLOAT;
                                             }
                                         }
                                         find_elem = true;
@@ -873,7 +892,7 @@ public:
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_code(tmp_format_split[j]) == STRING_FORMAT_ALT){
+                            }else if(format_code(tmp_format_split[j]) == STRING_FORMAT_ALT){
                                 //String alternatives
                                 split_on(tmp_sub, tmp_split[j], ',');
                                 local_alt = tmp_sub.size();
@@ -890,12 +909,12 @@ public:
                                             (*tmp_alt_format).samp_string[el].i_string[(*tmp_num_alt_format) + y] = tmp_sub[y];
                                         }
                                         find_elem = true;
-                                        (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
+                                        samp_rows = std::max(samp_rows, local_alt);
                                     }
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_code(tmp_format_split[j]) == INT_FORMAT_ALT){
+                            }else if(format_code(tmp_format_split[j]) == INT_FORMAT_ALT){
                                 //Integer alternatives
                                 split_on(tmp_sub, tmp_split[j], ',');
                                 local_alt = tmp_sub.size();
@@ -912,12 +931,12 @@ public:
                                             (*tmp_alt_format).samp_int[el].i_int[(*tmp_num_alt_format) + y] = safe_stoi(tmp_sub[y]);
                                         }
                                         find_elem = true;
-                                        (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
+                                        samp_rows = std::max(samp_rows, local_alt);
                                     }
                                     el++;
                                 }
                                 find_type = true;
-                            }else if(info_code(tmp_format_split[j]) == FLOAT_FORMAT_ALT){
+                            }else if(format_code(tmp_format_split[j]) == FLOAT_FORMAT_ALT){
                                 //Float alternatives
                                 split_on(tmp_sub, tmp_split[j], ',');
                                 local_alt = tmp_sub.size();
@@ -934,11 +953,11 @@ public:
                                             try{
                                                 (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = (half)safe_stof(tmp_sub[y]);
                                             }catch (const std::exception& e){
-                                                (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = 0;
+                                                (*tmp_alt_format).samp_float[el].i_float[(*tmp_num_alt_format) + y] = MISSING_FLOAT;
                                             }
                                         }
                                         find_elem = true;
-                                        (*tmp_num_alt_format) = (*tmp_num_alt_format) + local_alt;
+                                        samp_rows = std::max(samp_rows, local_alt);
                                     }
                                     el++;
                                 }
@@ -949,6 +968,10 @@ public:
                             }
                         }
                     }
+
+                    // The Number=A fields of this sample share the same DF4 rows: advance once, by the longest
+                    (*tmp_num_alt_format) = samp_base + samp_rows;
+
                 }else{
                     tmp += at(iter);
                     iter++;
@@ -965,7 +988,7 @@ public:
      */
     void print(long num_lines){
         // Reverse lookup of a code in chrom_map / filter_map
-        auto name_of = [](const std::map<std::string, char>& m, char code) -> std::string {
+        auto name_of = [](const auto& m, auto code) -> std::string {
             for (const auto& pair : m) if (pair.second == code) return pair.first;
             return "nan";
         };

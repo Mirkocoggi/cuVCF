@@ -1,0 +1,1850 @@
+#include "VCFReconstructorGPU.h"
+#include "DeviceUtils.cuh"
+#include <sstream>
+#include <cctype>
+#include <cstdlib>
+#include <cstring>
+#include <algorithm>
+#include <omp.h>
+#include <chrono>
+#include <cub/cub.cuh>
+#include <nvtx3/nvToolsExt.h>
+#include <climits>
+#include <stdexcept>
+#include <cmath>
+#include <numeric>
+
+/*Base ID of a FORMAT column. A declared ID like PS1 stays as it is. A split column (AD0, AD1, ...)
+  loses one digit at a time until it matches an ID declared with a fixed Number greater than 1,
+  so AF20 gives AF2 and not AF. Without a match all trailing digits are removed*/
+static std::string formatBase(const std::string& name, const std::map<std::string, std::string>& numbers){
+    if (numbers.count(name)) return name;
+    std::string r = name;
+    while (!r.empty() && std::isdigit(static_cast<unsigned char>(r.back()))) {
+        r.pop_back();
+        auto it = numbers.find(r);
+        if (it != numbers.end() && std::atoi(it->second.c_str()) > 1) return r;
+    }
+    return r;
+}
+
+// TSA codes written by the parser (Kernels.cu), same table as tsa_names in CPUVersion
+static const char* const tsa_names[] = {
+    "SNV", "insertion", "deletion", "inversion", "indel",
+    "substitution", "sequence_alteration"
+};
+
+// Longest text device_itoa / device_ftoa / getGTStringFromChar can write: used to bound the output buffers
+static constexpr size_t INT_LEN   = 11; // "-2147483648"
+static constexpr size_t FLOAT_LEN = 19; // '-', 11 digits, '.', 6 decimals
+static constexpr size_t GT_LEN    = 9;  // "Not found"
+
+//Constructor
+VCFReconstructorGPU::VCFReconstructorGPU(const std::string& output_vcf_path,
+                                         const std::string& header_text)
+    : output_vcf_path(output_vcf_path),
+      header_text(header_text)
+{}
+
+/**
+ * @brief Safely frees device memory and nullifies the pointer.
+ * 
+ * This templated utility ensures that `cudaFree` is only called on valid 
+ * (non-null) pointers. By taking the pointer by reference (`T*&`), it 
+ * automatically sets the original pointer to `nullptr` after freeing, 
+ * preventing dangling pointer bugs or double-free errors during the 
+ * cleanup phase of the GPU pipeline.
+ * 
+ * @tparam T The data type of the device pointer.
+ * @param d_ptr Reference to the device pointer to be freed.
+ */
+template <typename T>
+inline void safe_cuda_free(T*& d_ptr) {
+    if (d_ptr != nullptr) {
+        gpuErrchk( cudaFree(d_ptr));
+        d_ptr = nullptr;
+    }
+}
+
+/**
+ * @brief Destroys a CUDA stream if it was created, and nulls the handle so a
+ * later call (e.g. from the destructor's safety net) is a no-op.
+ */
+inline void safe_stream_destroy(cudaStream_t& s) {
+    if (s != nullptr) {
+        gpuErrchk(cudaStreamDestroy(s));
+        s = nullptr;
+    }
+}
+
+/**
+ * @brief Grows a persistent device buffer in place if it is too small, otherwise
+ * leaves it untouched.
+ *
+ * Replaces the previous per-chunk cudaMalloc/cudaFree pattern for buffers whose
+ * required size varies chunk to chunk (ID/REF/ALT/INFO string totals, allele
+ * counts): the buffer is only reallocated when a chunk needs more space than is
+ * currently allocated, so most chunks pay no allocation cost at all.
+ *
+ * @tparam T Element type of the buffer.
+ * @param d_ptr Reference to the device pointer to grow.
+ * @param capacity Reference to the tracked capacity (in elements of T).
+ * @param needed_elems Number of elements required for the current chunk.
+ */
+template <typename T>
+inline void ensureDeviceCapacity(T*& d_ptr, size_t& capacity, size_t needed_elems) {
+    if (needed_elems > capacity) {
+        safe_cuda_free(d_ptr);
+        capacity = needed_elems;
+        if (capacity > 0) {
+            gpuErrchk(cudaMalloc((void**)&d_ptr, capacity * sizeof(T)));
+        }
+    }
+}
+
+/**
+ * @brief Frees all device pointers for the current chunk and resets them to nullptr.
+ *
+ * Iterates through all device pointers (d_*) associated with the sparse output
+ * buffer, stream compaction arrays, and the flattened shadow DataFrames (DF1,
+ * DF2, DF3). Relies on safe_cuda_free to avoid double-free errors.
+ */
+void VCFReconstructorGPU::freeDevice(){
+    for (int s = 0; s < 2; s++) {
+        // --- Sparse Output Buffers ---
+        safe_cuda_free(d_output[s]);
+        safe_cuda_free(d_line_lens[s]);
+        safe_cuda_free(d_line_start[s]);
+        safe_cuda_free(d_output_offsets[s]);
+
+        // --- DF1 (Core Variants & INFO) ---
+        safe_cuda_free(d_df1[s].var_number);
+        safe_cuda_free(d_df1[s].chrom);
+        safe_cuda_free(d_df1[s].pos);
+        safe_cuda_free(d_df1[s].id_data);
+        safe_cuda_free(d_df1[s].id_offsets);
+        safe_cuda_free(d_df1[s].ref_data);
+        safe_cuda_free(d_df1[s].ref_offsets);
+        safe_cuda_free(d_df1[s].qual);
+        safe_cuda_free(d_df1[s].filter);
+        safe_cuda_free(d_df1[s].in_int);
+        safe_cuda_free(d_df1[s].in_float);
+        safe_cuda_free(d_df1[s].in_flag);
+        safe_cuda_free(d_df1[s].in_string_data);
+        safe_cuda_free(d_df1[s].in_string_offsets);
+
+        // --- DF2 (Alternative Alleles & INFO-ALT) ---
+        safe_cuda_free(d_df2[s].var_id);
+        safe_cuda_free(d_df2[s].alt_data);
+        safe_cuda_free(d_df2[s].alt_offsets);
+        safe_cuda_free(d_df2[s].alt_start);
+        safe_cuda_free(d_df2[s].alt_count);
+        safe_cuda_free(d_df2[s].alt_int);
+        safe_cuda_free(d_df2[s].alt_float);
+        safe_cuda_free(d_df2[s].alt_string_data);
+        safe_cuda_free(d_df2[s].alt_string_offsets);
+
+        // --- DF3/DF4 (Packed Sample Data) ---
+        safe_cuda_free(d_df3[s].sample_data);
+        safe_cuda_free(d_df3[s].sample_offsets);
+
+        // --- Compaction scratch (persistent across chunks, see writeChunk()) ---
+        safe_cuda_free(d_compacted[s]);
+        safe_cuda_free(d_temp_storage[s]);
+        cap_id_data[s] = cap_ref_data[s] = cap_in_string_data[s] = 0;
+        cap_df2_var_id[s] = cap_alt_data[s] = cap_alt_offsets[s] = 0;
+        cap_alt_int[s] = cap_alt_float[s] = cap_alt_string_data[s] = cap_alt_string_offsets[s] = 0;
+        cap_compacted[s] = cap_temp_storage[s] = cap_output[s] = cap_sample_data[s] = 0;
+    }
+}
+
+// Frees the dataset constants allocated once in run(). d_df1[0]/d_df1[1] (and the matching d_df2/d_df3
+// fields) share the same pointer, so each is freed once via slot 0 and nulled in slot 1 to avoid a double free.
+void VCFReconstructorGPU::freeConstants(){
+    safe_cuda_free(d_df1[0].int_names);         d_df1[1].int_names        = nullptr;
+    safe_cuda_free(d_df1[0].float_names);       d_df1[1].float_names      = nullptr;
+    safe_cuda_free(d_df1[0].flag_names);        d_df1[1].flag_names       = nullptr;
+    safe_cuda_free(d_df1[0].string_names);      d_df1[1].string_names     = nullptr;
+    safe_cuda_free(d_df2[0].alt_int_names);     d_df2[1].alt_int_names    = nullptr;
+    safe_cuda_free(d_df2[0].alt_float_names);   d_df2[1].alt_float_names  = nullptr;
+    safe_cuda_free(d_df2[0].alt_string_names);  d_df2[1].alt_string_names = nullptr;
+    safe_cuda_free(d_df3[0].format_str);        d_df3[1].format_str       = nullptr;
+    safe_cuda_free(d_maps.chrom_strings);
+    safe_cuda_free(d_maps.chrom_offsets);
+    safe_cuda_free(d_maps.filter_strings);
+    safe_cuda_free(d_maps.filter_offsets);
+    safe_cuda_free(d_maps.tsa_strings);
+    safe_cuda_free(d_maps.tsa_offsets);
+}
+
+//Destructor
+VCFReconstructorGPU::~VCFReconstructorGPU() {
+    // A destructor must not throw (std::terminate), and after a CUDA error the frees below can fail too
+    try {
+        // If run() was interrupted, make sure the writer thread shuts down cleanly.
+        if (writer_thread.joinable()) {
+            {
+                std::lock_guard<std::mutex> lock(write_mutex);
+                writer_should_stop = true;
+            }
+            cv_job_available.notify_all();
+            writer_thread.join();
+        }
+
+        freeDevice(); // Clean up VRAM
+        freeConstants();
+
+        safe_stream_destroy(streams[0]);
+        safe_stream_destroy(streams[1]);
+
+        for (int b = 0; b < NUM_WRITE_BUFFERS; b++) {
+            if (h_compacted_pool[b]) cudaFreeHost(h_compacted_pool[b]);
+        }
+    } catch (...) {}
+}
+
+// One-time device allocation for buffers bounded by CHUNK_SIZE and per-dataset
+// field counts. Called once before the main chunk loop (see run()). Allocates
+// both slots identically so the pipeline can alternate between them.
+void VCFReconstructorGPU::initDeviceBuffers(const var_columns_df& df1,
+                                             const alt_columns_df& df2,
+                                             const sample_columns_df& df3) {
+    for (int s = 0; s < 2; s++) {
+        // --- Output buffers ---
+        // Sized to CHUNK_SIZE, the maximum number of variants any chunk can hold
+        // (the final chunk of the dataset may be smaller, never larger).
+
+        // d_output depends on the chunk's line lengths: grown in uploadToDevice()
+        gpuErrchk( cudaMalloc((void**)&d_line_start[s], (size_t)(CHUNK_SIZE + 1) * sizeof(unsigned int)));
+        gpuErrchk( cudaMalloc((void**)&d_line_lens[s], (size_t)CHUNK_SIZE * sizeof(unsigned int)));
+        gpuErrchk(cudaMalloc((void**)&d_output_offsets[s], (size_t)(CHUNK_SIZE + 1) * sizeof(unsigned int)));
+
+        // --- DF1 scalar fields ---
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].var_number, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].chrom,      (size_t)CHUNK_SIZE * sizeof(uint16_t)));
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].pos,        (size_t)CHUNK_SIZE * sizeof(unsigned int)));
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].qual,       (size_t)CHUNK_SIZE * sizeof(__half)));
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].filter,     (size_t)CHUNK_SIZE * sizeof(char)));
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].id_offsets, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].ref_offsets,(size_t)CHUNK_SIZE * sizeof(unsigned int)));
+
+        // --- DF1 INFO fields (field counts are per-dataset constants) ---
+        d_df1[s].num_int_fields   = df1.in_int.size();
+        d_df1[s].num_float_fields = df1.in_float.size();
+        d_df1[s].num_flag_fields  = df1.in_flag.size();
+        d_df1[s].num_string_fields = df1.in_string.size();
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].in_int,      (size_t)d_df1[s].num_int_fields   * CHUNK_SIZE * sizeof(int)));
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].in_float,    (size_t)d_df1[s].num_float_fields * CHUNK_SIZE * sizeof(__half)));
+        gpuErrchk( cudaMalloc((void**)&d_df1[s].in_flag,     (size_t)d_df1[s].num_flag_fields  * CHUNK_SIZE * sizeof(bool)));
+        gpuErrchk(cudaMalloc((void**)&d_df1[s].in_string_offsets, (size_t)d_df1[s].num_string_fields * CHUNK_SIZE * sizeof(unsigned int)));
+
+        // --- DF2 fixed-size fields ---
+        d_df2[s].num_alt_int_fields    = df2.alt_int.size();
+        d_df2[s].num_alt_float_fields  = df2.alt_float.size();
+        d_df2[s].num_alt_string_fields = df2.alt_string.size();
+        gpuErrchk(cudaMalloc((void**)&d_df2[s].alt_start, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
+        gpuErrchk(cudaMalloc((void**)&d_df2[s].alt_count, (size_t)CHUNK_SIZE * sizeof(unsigned int)));
+
+        // --- DF3 (sample_data depends on the chunk's strings: grown in uploadToDevice()) ---
+        d_df3[s].num_samples = df3.numSample;
+        gpuErrchk( cudaMalloc(&d_df3[s].sample_offsets, (size_t)CHUNK_SIZE * df3.numSample * sizeof(unsigned int)));
+    }
+}
+
+// Per-chunk device preparation: grows the variable-length buffers of the given
+// slot (whose required size depends on the current chunk's ID/REF/ALT/INFO
+// string content and allele count) only when needed, instead of
+// cudaMalloc/cudaFree on every chunk.
+void VCFReconstructorGPU::allocateDevice(const HostBuffers& buffers, int slot) {
+    const size_t df2_count = buffers.df2_count;
+    d_df2[slot].num_entries = buffers.df2_count;
+
+    // DF1 ID, REF and INFO strings
+    ensureDeviceCapacity(d_df1[slot].id_data,        cap_id_data[slot],        buffers.id_buffer.size());
+    ensureDeviceCapacity(d_df1[slot].ref_data,       cap_ref_data[slot],       buffers.ref_buffer.size());
+    ensureDeviceCapacity(d_df1[slot].in_string_data, cap_in_string_data[slot], buffers.in_string_buffer.size());
+
+    // DF2 alleles of the chunk and their INFO-ALT fields
+    ensureDeviceCapacity(d_df2[slot].var_id,      cap_df2_var_id[slot],  df2_count);
+    ensureDeviceCapacity(d_df2[slot].alt_data,    cap_alt_data[slot],    buffers.alt_data_buffer.size());
+    ensureDeviceCapacity(d_df2[slot].alt_offsets, cap_alt_offsets[slot], df2_count);
+    ensureDeviceCapacity(d_df2[slot].alt_int,   cap_alt_int[slot],   (size_t)d_df2[slot].num_alt_int_fields   * df2_count);
+    ensureDeviceCapacity(d_df2[slot].alt_float, cap_alt_float[slot], (size_t)d_df2[slot].num_alt_float_fields * df2_count);
+    ensureDeviceCapacity(d_df2[slot].alt_string_data, cap_alt_string_data[slot], buffers.alt_string_buffer.size());
+    ensureDeviceCapacity(d_df2[slot].alt_string_offsets, cap_alt_string_offsets[slot],
+                          (size_t)d_df2[slot].num_alt_string_fields * df2_count);
+}
+
+void VCFReconstructorGPU::uploadToDevice(const HostBuffers& buffers, int slot) {
+    int chunk_size  = buffers.chunk_size;
+    int df2_count   = buffers.df2_count;
+    cudaStream_t stream = streams[slot];
+
+    // Line i is written at line_start[i] (host upper bounds, see prepareHostBuffers()).
+    // The slot's previous chunk was fully drained by writeChunk(), so growing d_output here is safe.
+    ensureDeviceCapacity(d_output[slot], cap_output[slot], (size_t)buffers.line_start[chunk_size]);
+    gpuErrchk(cudaMemcpyAsync(d_line_start[slot], buffers.line_start.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
+
+    // All transfers below are issued as cudaMemcpyAsync on this slot's stream.
+    // The sources are pinned host memory (HostBuffers uses PinnedAllocator), so
+    // these calls genuinely queue asynchronously and, combined with the
+    // pipelined run() loop, can execute concurrently with the other slot's
+    // in-flight GPU work.
+
+    // --- DF1 fixed-size columns (gathered in prepareHostBuffers()) ---
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].var_number, buffers.var_number_buf.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].chrom, buffers.chrom_buf.data(),
+                         chunk_size * sizeof(uint16_t), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].pos, buffers.pos_buf.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].qual, buffers.qual_buf.data(),
+                         chunk_size * sizeof(__half), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].filter, buffers.filter_buf.data(),
+                         chunk_size * sizeof(char), cudaMemcpyHostToDevice, stream));
+
+    // --- DF1 Staging Copies (Variable-length flattened data) ---
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].id_data, buffers.id_buffer.data(),
+                         buffers.id_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].id_offsets, buffers.id_offsets.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].ref_data, buffers.ref_buffer.data(),
+                         buffers.ref_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].ref_offsets, buffers.ref_offsets.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
+
+    // --- DF1 INFO Copies ---
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].in_int, buffers.in_int_buffer.data(),
+                         d_df1[slot].num_int_fields * chunk_size * sizeof(int), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].in_float, buffers.in_float_buffer.data(),
+                         d_df1[slot].num_float_fields * chunk_size * sizeof(__half), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].in_flag, buffers.in_flag_buffer.data(),
+                         d_df1[slot].num_flag_fields * chunk_size * sizeof(uint8_t), cudaMemcpyHostToDevice, stream));
+
+    // --- DF1 String INFO Copies ---
+    if (buffers.in_string_buffer.size() > 0) {
+        gpuErrchk(cudaMemcpyAsync(d_df1[slot].in_string_data, buffers.in_string_buffer.data(),
+                            buffers.in_string_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, stream));
+    }
+    gpuErrchk(cudaMemcpyAsync(d_df1[slot].in_string_offsets, buffers.in_string_offsets.data(),
+                        d_df1[slot].num_string_fields * chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
+
+    // --- DF2 Direct and Staging Copies ---
+    gpuErrchk(cudaMemcpyAsync(d_df2[slot].var_id, buffers.df2_var_id_buf.data(),
+                         df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
+
+    gpuErrchk(cudaMemcpyAsync(d_df2[slot].alt_data, buffers.alt_data_buffer.data(),
+                         buffers.alt_data_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df2[slot].alt_offsets, buffers.alt_data_offsets.data(),
+                         df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
+
+    gpuErrchk(cudaMemcpyAsync(d_df2[slot].alt_start, buffers.alt_start_buf.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df2[slot].alt_count, buffers.alt_count_buf.data(),
+                         chunk_size * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
+
+    gpuErrchk(cudaMemcpyAsync(d_df2[slot].alt_int, buffers.alt_int_buffer.data(),
+                         d_df2[slot].num_alt_int_fields * df2_count * sizeof(int), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df2[slot].alt_float, buffers.alt_float_buffer.data(),
+                         d_df2[slot].num_alt_float_fields * df2_count * sizeof(__half), cudaMemcpyHostToDevice, stream));
+
+    // --- DF2 String INFO-ALT Copies ---
+    if (buffers.alt_string_buffer.size() > 0) {
+        gpuErrchk(cudaMemcpyAsync(d_df2[slot].alt_string_data, buffers.alt_string_buffer.data(),
+                            buffers.alt_string_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, stream));
+    }
+    gpuErrchk(cudaMemcpyAsync(d_df2[slot].alt_string_offsets, buffers.alt_string_offsets.data(),
+                        d_df2[slot].num_alt_string_fields * df2_count * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
+
+    // --- DF3 Sample Data Copies ---
+    ensureDeviceCapacity(d_df3[slot].sample_data, cap_sample_data[slot], buffers.sample_buffer.size());
+    gpuErrchk(cudaMemcpyAsync(d_df3[slot].sample_data, buffers.sample_buffer.data(),
+                         buffers.sample_buffer.size() * sizeof(char), cudaMemcpyHostToDevice, stream));
+    gpuErrchk(cudaMemcpyAsync(d_df3[slot].sample_offsets, buffers.sample_offsets.data(),
+                         buffers.sample_offsets.size() * sizeof(unsigned int), cudaMemcpyHostToDevice, stream));
+}
+
+/**
+ * @brief Stream compaction kernel to consolidate sparse VCF string buffers.
+ * 
+ * `reconstructKernel` outputs strings into a sparse 2D buffer (`d_output`) where 
+ * each row starts at line_start[i], with room for its longest possible content to prevent data races. 
+ * This kernel reads the actual length of each generated string (`line_lens`) and 
+ * its designated starting position (`offsets`, calculated via prefix sum) to pack 
+ * everything into a contiguous, dense 1D array (`dst`).
+ * 
+ * @param src         Pointer to the sparse input buffer (d_output).
+ * @param line_lens   Array holding the actual string length of each row.
+ * @param offsets     Prefix-summed array indicating where each compacted row should start.
+ * @param dst         Pointer to the dense destination buffer (d_compacted).
+ * @param chunk_size  Total number of variants (rows) processed in this block.
+ * @param line_start  Where each row starts in the sparse src buffer (upper-bound prefix sum from the host).
+ */
+__global__ void compactKernel(
+    const char* __restrict__ src,       
+    const unsigned int* __restrict__ line_lens,
+    const unsigned int* __restrict__ offsets, 
+    char* __restrict__ dst,               
+    int chunk_size,
+    const unsigned int* __restrict__ line_start)
+{
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = gridDim.x * blockDim.x;
+
+    // Grid-stride loop handles chunks larger than the total number of launched threads
+    for (int i = tid; i < chunk_size; i += stride) {
+        unsigned int len = line_lens[i];
+        unsigned int dst_off = offsets[i];
+        const char* s = src + line_start[i];
+        char* d = dst + dst_off;
+        for (unsigned int k = 0; k < len; k++) {
+            d[k] = s[k];
+        }
+    }
+}
+
+/**
+ * @brief Main execution kernel that constructs VCF formatted strings per variant.
+ * 
+ * This kernel performs the core text reconstruction using a grid-stride loop. 
+ * While each iteration processes a single variant row, a single CUDA thread 
+ * may process multiple variants if the chunk size exceeds the total number of 
+ * launched threads. It reads the raw data from the shadowed DataFrame structures, 
+ * translates integer codes back to strings using the mapped dictionaries, handles 
+ * multi-allelic expansions, and concatenates the final VCF string into a sparse buffer.
+ * 
+ * @param maps       Dictionaries for translating codes to strings (Chrom, Filter).
+ * @param df1        Device memory view of the core variants DataFrame.
+ * @param df2        Device memory view of the alternative alleles DataFrame.
+ * @param df3        Device memory view containing pre-packed format/sample data.
+ * @param output     The sparse destination buffer for the generated text.
+ * @param line_lens  Output array where the thread records the final length of each generated string.
+ * @param line_start Where each row starts in output (upper-bound prefix sum from the host).
+ * @param chunk_size The total number of variants to process in this execution block.
+ */
+__global__ void reconstructKernel(
+    DeviceMaps maps,
+    DeviceVarColumns df1,
+    DeviceAltColumns df2,
+    DeviceSampleColumns df3,
+    char* output, unsigned int* line_lens,
+    const unsigned int* __restrict__ line_start,
+    int chunk_size
+){
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    int stride = blockDim.x * gridDim.x;
+
+    for (int i = tid; i < chunk_size; i += stride){
+        // Pointer to the start of this thread's designated row in the sparse matrix
+        char* line = output + line_start[i];
+        int pos = 0;
+
+        // --- 1. CHROM ---
+        uint16_t chrom_code = df1.chrom[i];
+        // A code not in chrom_map has offset 0, which points to "." (as on the CPU)
+        unsigned int chrom_off = chrom_code < maps.chrom_count ? maps.chrom_offsets[chrom_code] : 0;
+        pos += device_strcpy(line + pos, maps.chrom_strings + chrom_off);
+        line[pos++] = '\t';
+
+        // --- 2. POS ---
+        pos += device_itoa(df1.pos[i], line + pos);
+        line[pos++] = '\t';
+
+        // --- 3. ID ---
+        pos += device_strcpy(line + pos, df1.id_data + df1.id_offsets[i]);
+        line[pos++] = '\t';
+
+        // --- 4. REF ---
+        pos += device_strcpy(line + pos, df1.ref_data + df1.ref_offsets[i]);
+        line[pos++] = '\t';
+
+        // --- 5. ALT ---
+        // Handle multiple alternative alleles separated by commas
+        int alt_begin = df2.alt_start[i];
+        int alt_end   = alt_begin + df2.alt_count[i];
+        bool first_alt = true;
+        for (int j = alt_begin; j < alt_end; j++){
+            if (!first_alt) line[pos++] = ',';
+            first_alt = false;
+            pos += device_strcpy(line + pos, df2.alt_data + df2.alt_offsets[j]);
+        }
+        if (first_alt) line[pos++] = '.';   // no ALT rows: missing, as on the CPU
+        line[pos++] = '\t';
+
+        // --- 6. QUAL ---
+        float q = df1.qual[i];
+        if(q == -1.0f) line[pos++] = '.'; //missing QUAL stays -1, as in the parser
+        else pos += device_ftoa(q, line + pos);
+        line[pos++] = '\t';
+
+        // --- 7. FILTER ---
+        unsigned char filter_code = df1.filter[i];
+        pos += device_strcpy(line + pos, maps.filter_strings + maps.filter_offsets[filter_code]);
+        line[pos++] = '\t';
+
+        // --- 8. INFO ---
+        bool first_info = true;
+        
+        // Append variant-level Flag fields (e.g., SOMATIC)
+        for (int f = 0; f < df1.num_flag_fields; f++){
+            if (df1.in_flag[f * chunk_size + i]){
+                if(!first_info){
+                    line[pos++] = ';';
+                }
+                first_info = false;
+                pos += device_strcpy(line + pos, df1.flag_names + f * df1.name_stride);
+            }
+        }
+
+        // Append variant-level Integer fields
+        for (int f = 0; f < df1.num_int_fields; f++){
+            int v = df1.in_int[f * chunk_size + i];
+            if (v != MISSING_INT && !(f == df1.tsa_field && v == -1)){  //-1: unknown TSA
+                if(!first_info){
+                    line[pos++] = ';';
+                }
+                first_info = false;
+                pos += device_strcpy(line + pos, df1.int_names + f * df1.name_stride);
+                line[pos++] = '=';
+                if(f == df1.tsa_field && v>=0 && v < maps.tsa_count)
+                    pos += device_strcpy(line + pos, maps.tsa_strings + maps.tsa_offsets[v]);
+                else
+                    pos += device_itoa(v, line + pos);
+            }
+        }
+
+        // Append variant-level Float fields
+        for (int f = 0; f < df1.num_float_fields; f++){
+            if (!isnan(__half2float(df1.in_float[f * chunk_size + i]))){
+                if(!first_info){
+                    line[pos++] = ';';
+                }
+                first_info = false;
+                pos += device_strcpy(line + pos, df1.float_names + f * df1.name_stride);
+                line[pos++] = '=';
+                pos += device_ftoa(__half2float(df1.in_float[f * chunk_size + i]), line + pos);
+            }
+        }
+
+        // --- Append variant-level String fields ---
+        for (int f = 0; f < df1.num_string_fields; f++){
+            int flat_idx = f * chunk_size + i;
+            unsigned int offset = df1.in_string_offsets[flat_idx];
+            const char* str_val = df1.in_string_data + offset;
+            
+            // Ensure the string is neither empty nor the missing value sentinel "."
+            if (str_val[0] != '\0' && !(str_val[0] == '.' && str_val[1] == '\0')){
+                if(!first_info) line[pos++] = ';';
+                first_info = false;
+                
+                pos += device_strcpy(line + pos, df1.string_names + f * df1.name_stride);
+                line[pos++] = '=';
+                pos += device_strcpy(line + pos, str_val);
+            }
+        }
+
+        // Append allele-specific Integer fields from DF2 (comma-separated if multi-allelic)
+        for (int f = 0; f < df2.num_alt_int_fields; f++){
+            // Validate if the group contains any actual data
+            bool any_valid = false;
+            for (int j = alt_begin; j < alt_end; j++){
+                if (df2.alt_int[f * df2.num_entries + j] != MISSING_INT){
+                    any_valid = true;
+                    break;
+                }
+            }
+            if (!any_valid) continue;
+
+            if (!first_info) line[pos++] = ';';
+            first_info = false;
+
+            pos += device_strcpy(line + pos, df2.alt_int_names + f * df2.name_stride);
+            line[pos++] = '=';
+
+            bool first_val = true;
+            for (int j = alt_begin; j < alt_end; j++){
+                if (!first_val) line[pos++] = ',';
+                first_val = false;
+                int v = df2.alt_int[f * df2.num_entries + j];
+                if (v == MISSING_INT){
+                    line[pos++] = '.';
+                } else {
+                    pos += device_itoa(v, line + pos);
+                }
+            }
+        }
+
+        // Append allele-specific Float fields from DF2
+        for (int f = 0; f < df2.num_alt_float_fields; f++){
+            bool any_valid = false;
+            for (int j = alt_begin; j < alt_end; j++){
+                if (!isnan(__half2float(df2.alt_float[f * df2.num_entries + j]))){
+                    any_valid = true;
+                    break;
+                }
+            }
+            if (!any_valid) continue;
+
+            if (!first_info) line[pos++] = ';';
+            first_info = false;
+
+            pos += device_strcpy(line + pos, df2.alt_float_names + f * df2.name_stride);
+            line[pos++] = '=';
+
+            bool first_val = true;
+            for (int j = alt_begin; j < alt_end; j++){
+                if (!first_val) line[pos++] = ',';
+                first_val = false;
+                float v = __half2float(df2.alt_float[f * df2.num_entries + j]);
+                if (isnan(v)){
+                    line[pos++] = '.';
+                } else {
+                    pos += device_ftoa(v, line + pos);
+                }
+            }
+        }
+
+        // --- Append allele-specific String fields from DF2 ---
+        for (int f = 0; f < df2.num_alt_string_fields; f++){
+            bool any_valid = false;
+            
+            // First pass: check if there is at least one valid data point in the multi-allelic group
+            for (int j = alt_begin; j < alt_end; j++){
+                int flat_idx = f * df2.num_entries + j;
+                const char* str_val = df2.alt_string_data + df2.alt_string_offsets[flat_idx];
+                if (str_val[0] != '\0' && !(str_val[0] == '.' && str_val[1] == '\0')){
+                    any_valid = true;
+                    break;
+                }
+            }
+            if (!any_valid) continue;
+
+            if (!first_info) line[pos++] = ';';
+            first_info = false;
+
+            pos += device_strcpy(line + pos, df2.alt_string_names + f * df2.name_stride);
+            line[pos++] = '=';
+
+            bool first_val = true;
+            for (int j = alt_begin; j < alt_end; j++){
+                if (!first_val) line[pos++] = ',';
+                first_val = false;
+                
+                int flat_idx = f * df2.num_entries + j;
+                const char* str_val = df2.alt_string_data + df2.alt_string_offsets[flat_idx];
+                
+                // Write the missing indicator if the string is empty or already a sentinel
+                if (str_val[0] == '\0' || (str_val[0] == '.' && str_val[1] == '\0')){
+                    line[pos++] = '.';
+                } else {
+                    pos += device_strcpy(line + pos, str_val);
+                }
+            }
+        }
+
+        // If no INFO fields were present, write the missing indicator
+        if(first_info){
+            line[pos++] = '.';
+        }
+
+        // --- 9. FORMAT & SAMPLES ---
+        if (df3.num_samples > 0) {
+            line[pos++] = '\t';
+            pos += device_strcpy(line + pos, df3.format_str);
+
+            for (int s = 0; s < df3.num_samples; s++) {
+                line[pos++] = '\t';
+                int idx = i * df3.num_samples + s;
+                // Copy the pre-packed string for this specific variant-sample combination
+                pos += device_strcpy(line + pos, df3.sample_data + df3.sample_offsets[idx]);
+            }
+        }
+
+        // Finalize the row and record its total length
+        line[pos++] = '\n';
+        line_lens[i] = pos;
+    }
+}
+
+/**
+ * @brief Parses and groups format fields to determine their cardinality.
+ * 
+ * Groups fields based on their base name (stripping trailing digits) and 
+ * cross-references them with the parsed FORMAT numbers from the VCF header.
+ * 
+ * @tparam FieldVec The type of the vector containing the fields.
+ * @param fields The vector of fields to group.
+ * @param format_numbers Map associating FORMAT IDs to their 'Number' value.
+ * @return std::vector<VCFReconstructorGPU::GroupInfo> A vector describing the grouped fields and their rules.
+ */
+template <typename FieldVec>
+static std::vector<VCFReconstructorGPU::GroupInfo> buildGroups(
+    const FieldVec& fields,
+    const std::map<std::string, std::string>& format_numbers)
+{
+    std::vector<VCFReconstructorGPU::GroupInfo> out;
+    size_t col = 0;
+    while (col < fields.size()) {
+        std::string base = formatBase(fields[col].name, format_numbers);
+        size_t end = col;
+        while (end < fields.size() &&
+               formatBase(fields[end].name, format_numbers) == base) {
+            end++;
+        }
+        VCFReconstructorGPU::GroupInfo g;
+        g.col_start = col;
+        g.col_end   = end;
+        auto it = format_numbers.find(base);
+        std::string num = (it != format_numbers.end()) ? it->second : "R";
+        if      (num == "A") g.number_kind = 1;
+        else if (num == "R") g.number_kind = 0;
+        else                 g.number_kind = 2;
+        out.push_back(g);
+        col = end;
+    }
+    return out;
+}
+
+TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
+         const alt_columns_df& df2,
+         const sample_columns_df& df3,
+         const alt_format_df& df4,
+         int num_threads)
+{
+    // Every variant, in file order
+    std::vector<unsigned int> rows(df1.var_number.size());
+    std::iota(rows.begin(), rows.end(), 0u);
+    return run(df1, df2, df3, df4, num_threads, rows);
+}
+
+TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
+         const alt_columns_df& df2,
+         const sample_columns_df& df3,
+         const alt_format_df& df4,
+         int num_threads,
+         const std::vector<unsigned int>& rows)
+{
+    this->num_threads = num_threads < 1 ? 1 : num_threads;
+    auto t_setup_start = std::chrono::high_resolution_clock::now();
+
+    // Initialize mappings and formatting rules based on the header
+    buildInverseMaps(df1);
+    buildSampleNames(df3);
+    format_numbers = parseFormatNumbers(header_text);
+
+
+    df3_int_groups   = buildGroups(df3.samp_int,   format_numbers);
+    df3_float_groups = buildGroups(df3.samp_float, format_numbers);
+    df3_string_groups = buildGroups(df3.samp_string, format_numbers);
+    df4_int_groups   = buildGroups(df4.samp_int,   format_numbers);
+    df4_float_groups = buildGroups(df4.samp_float, format_numbers);
+
+    // Open file and write initial VCF headers
+    std::ofstream vcf_file(output_vcf_path);
+    if (!vcf_file.is_open()) {
+        throw std::runtime_error("Error opening output VCF file: " + output_vcf_path);
+    }
+
+    vcf_file << header_text;
+    vcf_file << "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO";
+    if (df3.numSample > 0) {
+        vcf_file << "\tFORMAT";
+        for (const auto& name : ordered_samp_names) {
+            vcf_file << "\t" << name;
+        }
+    }
+    vcf_file << "\n";
+
+    writer_out = &vcf_file;
+    writer_should_stop = false;
+    writer_failed = false;
+    writer_thread = std::thread(&VCFReconstructorGPU::writerLoop, this);
+
+    // If anything below throws, stop the writer before leaving run(): it writes to vcf_file, a local of run()
+    struct RunGuard {
+        VCFReconstructorGPU* self;
+        ~RunGuard() {
+            try {
+                if (self->writer_thread.joinable()) {
+                    {
+                        std::lock_guard<std::mutex> lock(self->write_mutex);
+                        self->writer_should_stop = true;
+                    }
+                    self->cv_job_available.notify_all();
+                    self->writer_thread.join();
+                }
+            } catch (...) {}
+        }
+    } guard{this};
+
+    // Construct the FORMAT string
+    gt_in_df3 = !df3.sample_GT.empty();
+    gt_in_df4 = !gt_in_df3 && !df4.sample_GT.GT.empty();
+    has_gt    = gt_in_df3 || gt_in_df4;
+
+    format_str = "";
+    if (df3.numSample > 0) {
+        if (has_gt) format_str = "GT";
+
+        // Group DF3 integer fields
+        // E.g., if we see AD0, AD1, we only append "AD" to the format string once
+        std::string prev_base = "";
+        for (size_t i = 0; i < df3.samp_int.size(); i++) {
+            std::string base = formatBase(df3.samp_int[i].name, format_numbers);
+            if (base != prev_base) {
+                if (!format_str.empty()) format_str += ":";
+                format_str += base;
+                prev_base = base;
+            }
+        }
+
+        // Group DF3 float fields
+        prev_base = "";
+        for (size_t i = 0; i < df3.samp_float.size(); i++) {
+            std::string base = formatBase(df3.samp_float[i].name, format_numbers);
+            if (base != prev_base) {
+                if (!format_str.empty()) format_str += ":";
+                format_str += base;
+                prev_base = base;
+            }
+        }
+
+        // Group DF3 string fields (a String with Number=3 is split into X0, X1, X2)
+        for (const auto& g : df3_string_groups) {
+            if (!format_str.empty()) format_str += ":";
+            format_str += formatBase(df3.samp_string[g.col_start].name, format_numbers);
+        }
+
+        // Group DF4 integer fields (per-allele format fields)
+        prev_base = "";
+        for (size_t i = 0; i < df4.samp_int.size(); i++) {
+            std::string base = formatBase(df4.samp_int[i].name, format_numbers);
+            if (base != prev_base) {
+                if (!format_str.empty()) format_str += ":";
+                format_str += base;
+                prev_base = base;
+            }
+        }
+
+        // Group DF4 float fields
+        prev_base = "";
+        for (size_t i = 0; i < df4.samp_float.size(); i++) {
+            std::string base = formatBase(df4.samp_float[i].name, format_numbers);
+            if (base != prev_base) {
+                if (!format_str.empty()) format_str += ":";
+                format_str += base;
+                prev_base = base;
+            }
+        }
+
+        // DF4 string fields
+        for (size_t i = 0; i < df4.samp_string.size(); i++) {
+            if (!format_str.empty()) format_str += ":";
+            format_str += df4.samp_string[i].name;
+        }
+    }
+
+    // Dataset constant: allocated once, the same device pointer is shared by
+    // both slots (read-only after this point, so concurrent kernels reading
+    // it from either stream is safe). Freed once at the end of run(), see the
+    // final cleanup block below.
+    {
+        char* p_format_str = nullptr;
+        gpuErrchk( cudaMalloc(&p_format_str, (format_str.size() + 1) * sizeof(char)));
+        gpuErrchk( cudaMemcpy(p_format_str, format_str.c_str(), format_str.size() + 1, cudaMemcpyHostToDevice));
+        for (int s = 0; s < 2; s++) {
+            d_df3[s].format_str     = p_format_str;
+            d_df3[s].format_str_len = format_str.size();
+            d_df3[s].num_samples    = df3.numSample;
+        }
+    }
+
+    // ====== Dataset Constants (Allocated and copied once) ======
+    {
+        // --- Helper per allocazione sicura ---
+        auto safe_alloc_and_copy = [](void** device_ptr, const std::vector<char>& buffer) {
+            if (!buffer.empty()) {
+                gpuErrchk(cudaMalloc(device_ptr, buffer.size()));
+                gpuErrchk(cudaMemcpy(*device_ptr, buffer.data(), buffer.size(), cudaMemcpyHostToDevice));
+            } else {
+                *device_ptr = nullptr; // Fondamentale per evitare crash in free
+            }
+        };
+
+        // One slot per name, as long as the longest INFO key + '\0': no key is truncated
+        size_t name_stride = 1;
+        for (const auto& c : df1.in_int)     name_stride = std::max(name_stride, c.name.size() + 1);
+        for (const auto& c : df1.in_float)   name_stride = std::max(name_stride, c.name.size() + 1);
+        for (const auto& c : df1.in_flag)    name_stride = std::max(name_stride, c.name.size() + 1);
+        for (const auto& c : df1.in_string)  name_stride = std::max(name_stride, c.name.size() + 1);
+        for (const auto& c : df2.alt_int)    name_stride = std::max(name_stride, c.name.size() + 1);
+        for (const auto& c : df2.alt_float)  name_stride = std::max(name_stride, c.name.size() + 1);
+        for (const auto& c : df2.alt_string) name_stride = std::max(name_stride, c.name.size() + 1);
+
+        // Preparazione buffer nomi (DF1)
+        std::vector<char> int_names_buf(df1.in_int.size() * name_stride, '\0');
+        for (size_t f = 0; f < df1.in_int.size(); f++) strncpy(&int_names_buf[f * name_stride], df1.in_int[f].name.c_str(), name_stride - 1);
+        
+        std::vector<char> float_names_buf(df1.in_float.size() * name_stride, '\0');
+        for (size_t f = 0; f < df1.in_float.size(); f++) strncpy(&float_names_buf[f * name_stride], df1.in_float[f].name.c_str(), name_stride - 1);
+        
+        std::vector<char> flag_names_buf(df1.in_flag.size() * name_stride, '\0');
+        for (size_t f = 0; f < df1.in_flag.size(); f++) strncpy(&flag_names_buf[f * name_stride], df1.in_flag[f].name.c_str(), name_stride - 1);
+
+        std::vector<char> string_names_buf(df1.in_string.size() * name_stride, '\0');
+        for (size_t f = 0; f < df1.in_string.size(); f++) strncpy(&string_names_buf[f * name_stride], df1.in_string[f].name.c_str(), name_stride - 1);
+
+        // Preparazione buffer nomi (DF2)
+        std::vector<char> alt_int_names_buf(df2.alt_int.size() * name_stride, '\0');
+        for (size_t f = 0; f < df2.alt_int.size(); f++) strncpy(&alt_int_names_buf[f * name_stride], df2.alt_int[f].name.c_str(), name_stride - 1);
+        
+        std::vector<char> alt_float_names_buf(df2.alt_float.size() * name_stride, '\0');
+        for (size_t f = 0; f < df2.alt_float.size(); f++) strncpy(&alt_float_names_buf[f * name_stride], df2.alt_float[f].name.c_str(), name_stride - 1);
+
+        std::vector<char> alt_string_names_buf(df2.alt_string.size() * name_stride, '\0');
+        for (size_t f = 0; f < df2.alt_string.size(); f++) strncpy(&alt_string_names_buf[f * name_stride], df2.alt_string[f].name.c_str(), name_stride - 1);
+
+        // Esecuzione allocazioni protette (una sola volta; il puntatore
+        // risultante e' condiviso da entrambi gli slot, sono buffer costanti
+        // e read-only per tutta la durata di run()).
+        void *p_int_names = nullptr, *p_float_names = nullptr, *p_flag_names = nullptr, *p_string_names = nullptr;
+        void *p_alt_int_names = nullptr, *p_alt_float_names = nullptr, *p_alt_string_names = nullptr;
+        safe_alloc_and_copy(&p_int_names,   int_names_buf);
+        safe_alloc_and_copy(&p_float_names, float_names_buf);
+        safe_alloc_and_copy(&p_flag_names,  flag_names_buf);
+        safe_alloc_and_copy(&p_string_names, string_names_buf);
+
+        safe_alloc_and_copy(&p_alt_int_names,   alt_int_names_buf);
+        safe_alloc_and_copy(&p_alt_float_names, alt_float_names_buf);
+        safe_alloc_and_copy(&p_alt_string_names, alt_string_names_buf);
+
+        for (int s = 0; s < 2; s++) {
+            d_df1[s].int_names    = (char*)p_int_names;
+            d_df1[s].float_names  = (char*)p_float_names;
+            d_df1[s].flag_names   = (char*)p_flag_names;
+            d_df1[s].string_names = (char*)p_string_names;
+
+            d_df2[s].alt_int_names    = (char*)p_alt_int_names;
+            d_df2[s].alt_float_names  = (char*)p_alt_float_names;
+            d_df2[s].alt_string_names = (char*)p_alt_string_names;
+
+            // Update counters
+            d_df1[s].num_int_fields    = df1.in_int.size();
+            d_df1[s].num_float_fields  = df1.in_float.size();
+            d_df1[s].num_flag_fields   = df1.in_flag.size();
+            d_df1[s].num_string_fields = df1.in_string.size();
+            d_df1[s].name_stride       = (int)name_stride;
+
+            d_df1[s].tsa_field = -1;
+            for(size_t f = 0; f < df1.in_int.size(); f++){
+                if(df1.in_int[f].name == "TSA") d_df1[s].tsa_field = (int)f;
+            }
+
+            d_df2[s].num_alt_int_fields    = df2.alt_int.size();
+            d_df2[s].num_alt_float_fields  = df2.alt_float.size();
+            d_df2[s].num_alt_string_fields = df2.alt_string.size();
+            d_df2[s].name_stride           = (int)name_stride;
+        }
+    }
+
+    // Inverse maps buffers
+{
+        auto safe_map_alloc = [](void** str_ptr, void** off_ptr, const std::vector<char>& s_buf, const std::vector<unsigned int>& o_buf) {
+            gpuErrchk(cudaMalloc(off_ptr, o_buf.size() * sizeof(unsigned int)));
+            gpuErrchk(cudaMemcpy(*off_ptr, o_buf.data(), o_buf.size() * sizeof(unsigned int), cudaMemcpyHostToDevice));
+
+            if (!s_buf.empty()) {
+                gpuErrchk(cudaMalloc(str_ptr, s_buf.size()));
+                gpuErrchk(cudaMemcpy(*str_ptr, s_buf.data(), s_buf.size(), cudaMemcpyHostToDevice));
+            } else {
+                *str_ptr = nullptr;
+            }
+        };
+
+        // CHROM codes are 16 bit: one offset per code up to the largest one in chrom_map
+        // Both tables start with ".": codes not in the map keep offset 0 and are written as ".", as on the CPU
+        std::vector<char> chrom_strings_buf = {'.', '\0'};
+        std::vector<unsigned int> chrom_offsets_buf(inv_chrom_map.empty() ? 1 : inv_chrom_map.rbegin()->first + 1, 0);
+        unsigned int offset = 2;
+        for (const auto& pair : inv_chrom_map) {
+            chrom_offsets_buf[pair.first] = offset;
+            for (char c : pair.second) chrom_strings_buf.push_back(c);
+            chrom_strings_buf.push_back('\0');
+            offset += pair.second.size() + 1;
+        }
+
+        std::vector<char> filter_strings_buf = {'.', '\0'};
+        std::vector<unsigned int> filter_offsets_buf(256, 0);
+        offset = 2;
+        for (const auto& pair : inv_filter_map) {
+            int idx = static_cast<unsigned char>(pair.first); // codes >= 128 are negative as char
+            filter_offsets_buf[idx] = offset;
+            for (char c : pair.second) filter_strings_buf.push_back(c);
+            filter_strings_buf.push_back('\0');
+            offset += pair.second.size() + 1;
+        }
+
+        // --- TSA Map (code -> name, same codes as the parser) ---
+        std::vector<char> tsa_strings_buf;
+        std::vector<unsigned int> tsa_offsets_buf;
+        offset = 0;
+        for (const char* name : tsa_names) {
+            tsa_offsets_buf.push_back(offset);
+            for (const char* c = name; *c; c++) tsa_strings_buf.push_back(*c);
+            tsa_strings_buf.push_back('\0');
+            offset += std::strlen(name) + 1;
+        }
+        d_maps.tsa_count = (int)tsa_offsets_buf.size();
+        d_maps.chrom_count = (int)chrom_offsets_buf.size();
+
+        safe_map_alloc((void**)&d_maps.chrom_strings,  (void**)&d_maps.chrom_offsets,  chrom_strings_buf,  chrom_offsets_buf);
+        safe_map_alloc((void**)&d_maps.filter_strings, (void**)&d_maps.filter_offsets, filter_strings_buf, filter_offsets_buf);
+        safe_map_alloc((void**)&d_maps.tsa_strings,    (void**)&d_maps.tsa_offsets,    tsa_strings_buf,    tsa_offsets_buf);
+}
+
+    // Upper bound of the line parts that do not depend on the content; prepareHostBuffers() adds
+    // ID/REF/ALT/INFO strings and the sample strings to get each line's bound
+    {
+        size_t max_chrom = 1, max_filter = 1, max_tsa = 0;   // at least "." for an unknown code
+        for (const auto& p : inv_chrom_map)  max_chrom  = std::max(max_chrom,  p.second.size());
+        for (const auto& p : inv_filter_map) max_filter = std::max(max_filter, p.second.size());
+        for (const char* name : tsa_names)   max_tsa    = std::max(max_tsa,    std::strlen(name));
+
+        line_fixed_bound = (max_chrom + 1) + (INT_LEN + 1) + 3   // CHROM, POS, and the ID/REF/ALT tabs
+                         + (FLOAT_LEN + 1) + (max_filter + 1)    // QUAL, FILTER
+                         + 1 + 1 + 1;                            // '.' for an empty ALT and INFO, '\n'
+        for (const auto& c : df1.in_flag)    line_fixed_bound += c.name.size() + 1;
+        for (const auto& c : df1.in_int)     line_fixed_bound += c.name.size() + 2 + (c.name == "TSA" ? max_tsa : INT_LEN);
+        for (const auto& c : df1.in_float)   line_fixed_bound += c.name.size() + 2 + FLOAT_LEN;
+        for (const auto& c : df1.in_string)  line_fixed_bound += c.name.size() + 2;
+        for (const auto& c : df2.alt_int)    line_fixed_bound += c.name.size() + 2;
+        for (const auto& c : df2.alt_float)  line_fixed_bound += c.name.size() + 2;
+        for (const auto& c : df2.alt_string) line_fixed_bound += c.name.size() + 2;
+        if (df3.numSample > 0) line_fixed_bound += 1 + format_str.size();  // '\t' FORMAT
+
+        alt_fixed_bound = 1                                       // ',' between ALT alleles
+                        + df2.alt_int.size()    * (INT_LEN + 1)   // value and ','
+                        + df2.alt_float.size()  * (FLOAT_LEN + 1)
+                        + df2.alt_string.size() * 2;              // '.' and ','
+
+        // Sample cells (buildSampleStrings): ':' before each field, '.' for an empty one, '\0' at the end
+        cell_fixed_bound = (1 + GT_LEN) + 1;
+        for (const auto& g : df3_int_groups)   cell_fixed_bound += 1 + (g.col_end - g.col_start) * (INT_LEN + 1);
+        for (const auto& g : df3_float_groups) cell_fixed_bound += 1 + (g.col_end - g.col_start) * (FLOAT_LEN + 1);
+        cell_fixed_bound += df3.samp_string.size() * 2;
+        cell_fixed_bound += (df4_int_groups.size() + df4_float_groups.size() + df4.samp_string.size()) * 2;
+
+        df4_row_bound = 0;  // each DF4 row of the sample adds its values and the ',' before them
+        for (const auto& g : df4_int_groups)   df4_row_bound += (g.col_end - g.col_start) * (INT_LEN + 1);
+        for (const auto& g : df4_float_groups) df4_row_bound += (g.col_end - g.col_start) * (FLOAT_LEN + 1);
+        df4_row_bound += df4.samp_string.size() * 2;
+    }
+
+    // Persistent device buffers: allocated once here instead of every chunk.
+    initDeviceBuffers(df1, df2, df3);
+
+    // Explicit streams (not attached to any operation yet, see run() loop).
+    gpuErrchk(cudaStreamCreate(&streams[0]));
+    gpuErrchk(cudaStreamCreate(&streams[1]));
+
+    // Main execution loop: process data in chunks, pipelined across the two
+    // buffer slots / streams. Chunk i is prepared and launched into slot
+    // i % 2; the chunk that occupied that slot two iterations ago (i - 2) is
+    // guaranteed fully finalized already (writeChunk() below fully drains its
+    // stream before returning), so reusing the slot needs no extra sync here.
+    // Chunk i - 1's compaction/write is finalized only after chunk i has
+    // already been uploaded and launched, so chunk i's host prep (typically
+    // the most expensive per-chunk step) overlaps chunk i - 1's GPU work.
+    TimingResult timing;
+    timing.setup_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::high_resolution_clock::now() - t_setup_start).count();
+
+    auto t_loop_start = std::chrono::high_resolution_clock::now();
+
+    bool   have_pending = false;
+    int    pending_slot = -1;
+    int    pending_chunk_size = 0;
+    double ms_prep_total = 0;
+
+    // Chunks are ranges of positions in rows (the selected DF1 rows, sorted)
+    const int total_rows = (int)rows.size();
+    for (int chunk_pos = 0; chunk_pos < total_rows; chunk_pos += CHUNK_SIZE){
+        int chunk_size = std::min(CHUNK_SIZE, total_rows - chunk_pos);
+        int slot = (chunk_pos / CHUNK_SIZE) % 2;
+
+        // DF2 is sorted by var_id: start at the rows of the chunk's first variant
+        const unsigned int first_var_id = df1.var_number[rows[chunk_pos]];
+        const int df2_start = (int)(std::lower_bound(df2.var_id.begin(), df2.var_id.end(), first_var_id) - df2.var_id.begin());
+
+        host_buffers[slot].chunk_size = chunk_size;
+        host_buffers[slot].rows       = rows.data() + chunk_pos;
+        host_buffers[slot].df2_start  = df2_start;
+
+        // Host preparation phase: while this CPU work runs, the previous
+        // chunk's GPU work (launched at the end of the prior iteration, on
+        // the other stream) keeps executing in the background.
+        nvtxRangePushA("prep_host");
+        auto t0 = std::chrono::high_resolution_clock::now();
+        prepareHostBuffers(df1, df2, df3, df4, host_buffers[slot]);
+        auto t1 = std::chrono::high_resolution_clock::now();
+        ms_prep_total += std::chrono::duration<double, std::milli>(t1 - t0).count();
+        nvtxRangePop();
+
+        // Grow this slot's variable-length device buffers to the prepared chunk
+        // (typically a no-op after the first couple of chunks). The slot's previous
+        // chunk was fully drained by writeChunk(), so reallocating here is safe.
+        nvtxRangePushA("allocate");
+        allocateDevice(host_buffers[slot], slot);
+        nvtxRangePop();
+
+        // Upload + launch this chunk on its own stream (both async, return
+        // to the host immediately).
+        nvtxRangePushA("upload_H2D");
+        uploadToDevice(host_buffers[slot], slot);
+        nvtxRangePop();
+
+        nvtxRangePushA("reconstruct_kernel");
+        reconstructKernel<<<NUM_BLOCKS, BLOCK_SIZE, 0, streams[slot]>>>(
+            d_maps,
+            d_df1[slot],
+            d_df2[slot],
+            d_df3[slot],
+            d_output[slot],
+            d_line_lens[slot],
+            d_line_start[slot],
+            chunk_size
+        );
+        gpuErrchk(cudaPeekAtLastError());
+        nvtxRangePop();
+
+        // Finalize the previous chunk now that this one's work is already
+        // queued: by this point the host has spent a full chunk's worth of
+        // prep+launch time since the previous chunk's kernel was issued, so
+        // its GPU work is often already done and this returns quickly.
+        if (have_pending) {
+            nvtxRangePushA("compact_write");
+            writeChunk(pending_chunk_size, pending_slot);
+            nvtxRangePop();
+        }
+
+        have_pending       = true;
+        pending_slot       = slot;
+        pending_chunk_size = chunk_size;
+    }
+
+    timing.prep_ms = ms_prep_total;
+    timing.loop_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::high_resolution_clock::now() - t_loop_start).count();
+
+    auto t_drain_start = std::chrono::high_resolution_clock::now();
+
+    // Finalize the one chunk still left pending by the loop above.
+    if (have_pending) {
+        writeChunk(pending_chunk_size, pending_slot);
+    }
+
+    // Free the persistent per-chunk device buffers (allocated once in
+    // initDeviceBuffers(), grown on demand in allocateDevice()/writeChunk()).
+    freeDevice();
+
+    safe_stream_destroy(streams[0]);
+    safe_stream_destroy(streams[1]);
+
+    // Dataset constants shared by both slots (field names, FORMAT string, maps)
+    freeConstants();
+
+    // Signal the writer thread, wait for it to drain the queue, then close file.
+    {
+        std::lock_guard<std::mutex> lock(write_mutex);
+        writer_should_stop = true;
+    }
+    cv_job_available.notify_all();
+    writer_thread.join();
+
+    vcf_file.close();
+    if (writer_failed || !vcf_file)
+        throw std::runtime_error("Error writing output VCF file (disk full?): " + output_vcf_path +
+                                 " - the output VCF is incomplete");
+    timing.drain_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::high_resolution_clock::now() - t_drain_start).count();
+    return timing;
+}
+
+void VCFReconstructorGPU::writeChunk(int num_variants, int slot) {
+    cudaStream_t stream = streams[slot];
+
+    // ---- 1. Exclusive prefix scan: line_lens -> output_offsets ----
+    // Issued on the same stream as reconstructKernel for this slot, so it is
+    // automatically ordered after it, no host-side wait needed here.
+    size_t temp_storage_bytes = 0;
+    cub::DeviceScan::ExclusiveSum(
+        nullptr, temp_storage_bytes,
+        d_line_lens[slot], d_output_offsets[slot], num_variants, stream);
+    ensureDeviceCapacity(d_temp_storage[slot], cap_temp_storage[slot], temp_storage_bytes);
+    cub::DeviceScan::ExclusiveSum(
+        d_temp_storage[slot], temp_storage_bytes,
+        d_line_lens[slot], d_output_offsets[slot], num_variants, stream);
+
+    // ---- 2. Total bytes = last offset + last length ----
+    // Data-dependent sync point: the host needs these two values right away
+    // to size d_compacted and the compaction kernel's grid. This is also the
+    // point where we actually wait for reconstructKernel + the scan above to
+    // finish; by now the caller has already issued the next chunk's prep and
+    // launch, so most of that wait is typically already hidden.
+    unsigned int last_offset, last_len;
+    gpuErrchk(cudaMemcpyAsync(&last_offset, d_output_offsets[slot] + (num_variants - 1),
+                         sizeof(unsigned int), cudaMemcpyDeviceToHost, stream));
+    gpuErrchk(cudaMemcpyAsync(&last_len, d_line_lens[slot] + (num_variants - 1),
+                         sizeof(unsigned int), cudaMemcpyDeviceToHost, stream));
+    gpuErrchk(cudaStreamSynchronize(stream));
+    size_t total_bytes = last_offset + last_len;
+
+    // ---- 3. Ensure the compacted buffer on device is large enough ----
+    ensureDeviceCapacity(d_compacted[slot], cap_compacted[slot], total_bytes);
+
+    // ---- 4. Compaction kernel ----
+    compactKernel<<<NUM_BLOCKS, BLOCK_SIZE, 0, stream>>>(
+        d_output[slot], d_line_lens[slot], d_output_offsets[slot],
+        d_compacted[slot], num_variants, d_line_start[slot]);
+    gpuErrchk(cudaPeekAtLastError());
+
+    // ---- 5. Pick a host buffer slot. Wait if both are still being written ----
+    int buf_idx;
+    {
+        std::unique_lock<std::mutex> lock(write_mutex);
+        cv_buffer_free.wait(lock, [this, &buf_idx]() {
+            for (int b = 0; b < NUM_WRITE_BUFFERS; b++) {
+                if (!write_buffer_busy[b]) { buf_idx = b; return true; }
+            }
+            return false;
+        });
+        // Reserve the slot before releasing the lock.
+        write_buffer_busy[buf_idx] = true;
+    }
+
+    // ---- 6. Grow the chosen host buffer if necessary ----
+    // Pinned (cudaHostAlloc) rather than plain malloc: this is the buffer the
+    // D2H copy lands in, so it needs to be page-locked for that copy to be
+    // eligible for cudaMemcpyAsync.
+    if (total_bytes > h_compacted_pool_capacity[buf_idx]) {
+        if (h_compacted_pool[buf_idx]) gpuErrchk(cudaFreeHost(h_compacted_pool[buf_idx]));
+        h_compacted_pool_capacity[buf_idx] = total_bytes + total_bytes / 4;
+        gpuErrchk(cudaHostAlloc((void**)&h_compacted_pool[buf_idx], h_compacted_pool_capacity[buf_idx], cudaHostAllocDefault));
+    }
+
+    // ---- 7. D2H copy into the reserved slot ----
+    // Async, but must be finished before the writer thread can read the
+    // buffer, so sync the stream right before handing off the job below.
+    gpuErrchk(cudaMemcpyAsync(h_compacted_pool[buf_idx], d_compacted[slot],
+                         total_bytes * sizeof(char), cudaMemcpyDeviceToHost, stream));
+    gpuErrchk(cudaStreamSynchronize(stream));
+
+    // ---- 8. Hand the job to the writer thread; do NOT write here ----
+    {
+        std::lock_guard<std::mutex> lock(write_mutex);
+        write_queue.push({buf_idx, total_bytes});
+    }
+    cv_job_available.notify_one();
+
+    // d_temp_storage and d_compacted are persistent class members now (grown
+    // on demand above); they are freed once in freeDevice(), not per chunk.
+}
+
+void VCFReconstructorGPU::buildSampleNames(const sample_columns_df& df3) {
+    ordered_samp_names.resize(df3.sampNames.size());
+    for (const auto& pair : df3.sampNames) {
+        ordered_samp_names[pair.second] = pair.first;
+    }
+}
+
+std::map<std::string, std::string> VCFReconstructorGPU::parseFormatNumbers(const std::string& header_text) {
+    std::map<std::string, std::string> result;
+    std::istringstream stream(header_text);
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (line.substr(0, 8) != "##FORMAT") continue;
+        size_t id_pos  = line.find("ID=");
+        size_t num_pos = line.find("Number=");
+        if (id_pos == std::string::npos || num_pos == std::string::npos) continue;
+        size_t id_start = id_pos + 3;
+        size_t id_end   = line.find_first_of(",", id_start);
+        std::string id  = line.substr(id_start, id_end - id_start);
+        size_t num_start = num_pos + 7;
+        size_t num_end   = line.find_first_of(",", num_start);
+        std::string number = line.substr(num_start, num_end - num_start);
+        result[id] = number;
+    }
+    return result;
+}
+
+/**
+ * @brief Fast integer-to-ASCII conversion (host code).
+ *
+ * Drop-in replacement for snprintf(dst, _, "%d", n) within buildSampleStrings,
+ * avoiding the format-string parsing overhead that dominates a hot path with
+ * millions of calls per chunk. Handles negatives by emitting a leading '-'.
+ *
+ * @param n Integer value to convert.
+ * @param dst Destination buffer (caller-owned, must have at least 12 bytes).
+ * @return Number of bytes written (excluding any terminator; none is added).
+ */
+static inline int fast_itoa(int n, char* dst) {
+    if (n == 0) { dst[0] = '0'; return 1; }
+    char tmp[12];
+    int tmp_len = 0;
+    int dst_pos = 0;
+    if (n < 0) { dst[0] = '-'; n = -n; dst_pos = 1; }
+    while (n > 0) {
+        tmp[tmp_len++] = '0' + n % 10;
+        n /= 10;
+    }
+    for (int j = 0; j < tmp_len; j++) {
+        dst[dst_pos + j] = tmp[tmp_len - j - 1];
+    }
+    return dst_pos + tmp_len;
+}
+
+/**
+ * @brief Fast float-to-ASCII conversion (host code).
+ *
+ * Mirrors device_ftoa: handles missing values (NaN) as ".", otherwise
+ * prints the integer part, a dot, and exactly 6 fractional digits (zero-padded) in fixed
+ * point. Avoids snprintf's "%g" overhead at the cost of slightly different
+ * formatting (always 6 fractional digits, no scientific notation).
+ *
+ * @param f Float value to convert.
+ * @param dst Destination buffer (caller-owned, must have at least 24 bytes).
+ * @return Number of bytes written.
+ */
+static inline int fast_ftoa(float f, char* dst) {
+    if (std::isnan(f)) { dst[0] = '.'; return 1; }
+    // Same as device_ftoa: fixed point with 6 decimals, rounded, like printf("%f")
+    int pos = 0;
+    double v = f;
+    if (v < 0) { dst[pos++] = '-'; v = -v; }
+    long long scaled = (long long)(v * 1000000.0 + 0.5);
+    pos += fast_itoa((int)(scaled / 1000000), dst + pos);
+    dst[pos++] = '.';
+    int frac = (int)(scaled % 1000000);
+    for (int d = 5; d >= 0; d--) { dst[pos + d] = '0' + frac % 10; frac /= 10; }
+    return pos + 6;
+}
+
+/**
+ * @brief Pre-processes and flattens complex multi-allelic sample data into a contiguous character buffer.
+ *
+ * Uses a two-pass OpenMP strategy: Pass 1 writes each sample string into a
+ * per-thread scratch buffer while recording its length; Pass 2 computes a
+ * global prefix sum and memcpy's each cell to its final position in buffer.
+ *
+ * @param df1         Core variants DataFrame.
+ * @param df2         Alternative alleles DataFrame.
+ * @param df3         Sample core DataFrame.
+ * @param df4         Intersected sample-allele DataFrame.
+ * @param chunk_size  Number of variants in the current block.
+ * @param rows        DF1 rows of the chunk, sorted: rows[0 .. chunk_size).
+ * @param df2_start   First DF2 row that can belong to the chunk.
+ * @param buffer      Output vector that will hold the flattened character data.
+ * @param offsets     Output vector that will hold the prefix-summed offsets for the character buffer.
+ */
+void VCFReconstructorGPU::buildSampleStrings(const var_columns_df& df1,
+                                             const alt_columns_df& df2,
+                                             const sample_columns_df& df3,
+                                             const alt_format_df& df4,
+                                             int chunk_size,
+                                             const unsigned int* rows,
+                                             int df2_start,
+                                             PinnedCharVec& buffer,
+                                             PinnedUintVec& offsets) {
+    int num_samples = df3.numSample;
+    int total_cells = chunk_size * num_samples;
+    offsets.resize(total_cells);
+
+    // Sequential pre-calculation per variant
+    std::vector<size_t> per_var_num_alts(chunk_size, 0);
+    std::vector<long>   per_var_start_df4(chunk_size, -1);
+    {
+        // DF2 and DF4 are sorted by var_id; the rows of the variants not selected are skipped
+        size_t df2_cursor = (size_t)df2_start;
+        size_t df4_cursor = std::lower_bound(df4.var_id.begin(), df4.var_id.end(), df1.var_number[rows[0]]) - df4.var_id.begin();
+
+        for (int r = 0; r < chunk_size; r++) {
+            unsigned int current_var_id = df1.var_number[rows[r]];
+
+            while (df2_cursor < df2.var_id.size() &&
+                   df2.var_id[df2_cursor] < current_var_id) df2_cursor++;
+
+            size_t num_alts = 0;
+            {
+                size_t j = df2_cursor;
+                while (j < df2.var_id.size() && df2.var_id[j] == current_var_id) { num_alts++; j++; }
+            }
+            per_var_num_alts[r] = num_alts;
+
+            while (df4_cursor < df4.var_id.size() &&
+                   df4.var_id[df4_cursor] < current_var_id) df4_cursor++;
+
+            per_var_start_df4[r] =
+                (df4_cursor < df4.var_id.size() &&
+                 df4.var_id[df4_cursor] == current_var_id) ? (long)df4_cursor : -1;
+        }
+    }
+
+    // Parallel Pass 1: Each thread writes to its private scratch buffer
+    std::vector<unsigned int> cell_lens(total_cells, 0);
+    std::vector<std::vector<char>> scratch(num_threads);
+    std::vector<std::vector<unsigned int>> cell_offsets_in_scratch(num_threads);
+    std::vector<std::vector<int>> global_indices(num_threads);
+
+    #pragma omp parallel num_threads(num_threads)
+    {
+        int tid = omp_get_thread_num();
+        int my_var_count = (chunk_size + num_threads - 1) / num_threads;
+        scratch[tid].resize((size_t)my_var_count * num_samples * cell_fixed_bound);     // grown below when strings or DF4 rows need more
+        cell_offsets_in_scratch[tid].reserve(my_var_count * num_samples);
+        global_indices[tid].reserve(my_var_count * num_samples);
+
+        size_t local_pos = 0;
+
+        #pragma omp for schedule(static)
+        for (int i_rel = 0; i_rel < chunk_size; i_rel++) {
+            int i = rows[i_rel];
+            unsigned int current_var_id = df1.var_number[i];
+            size_t num_alts  = per_var_num_alts[i_rel];
+            long   start_df4 = per_var_start_df4[i_rel];
+
+            for (int s = 0; s < num_samples; s++) {
+                size_t df3_idx = (size_t)i * num_samples + s;
+
+                // Make room for this cell's longest possible text before taking a pointer into scratch
+                size_t need = cell_fixed_bound;
+                for (size_t col = 0; col < df3.samp_string.size(); col++) need += df3.samp_string[col].i_string[df3_idx].size();
+                if (start_df4 != -1) {
+                    for (long k = start_df4; k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id; k++) {
+                        if (df4.samp_id[k] != (unsigned short)s) continue;
+                        need += df4_row_bound;
+                        for (size_t col = 0; col < df4.samp_string.size(); col++) need += df4.samp_string[col].i_string[k].size();
+                    }
+                }
+                if (local_pos + need > scratch[tid].size())
+                    scratch[tid].resize(std::max(scratch[tid].size() * 2, local_pos + need));
+
+                char* w  = scratch[tid].data() + local_pos;
+
+                char* w0 = w;
+                bool first_field = true;
+                auto write_sep = [&]() { if (!first_field) *w++ = ':'; first_field = false; };
+
+                // Handle Genotype (GT)
+                if (has_gt) {
+                    bool found = false;
+                    char gt_code = 0;
+                    if (gt_in_df3) {
+                        gt_code = df3.sample_GT[0].GT[df3_idx];
+                        found = true;
+                    } else if (gt_in_df4 && start_df4 != -1) {
+                        long k = start_df4;
+                        while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                            if (df4.samp_id[k] == (unsigned short)s) { gt_code = df4.sample_GT.GT[k]; found = true; break; }
+                            k++;
+                        }
+                    }
+
+                    write_sep();
+                    const std::string gt = found ? df3.getGTStringFromChar(gt_code) : "./.";
+
+                    memcpy(w, gt.data(), gt.size()); w += gt.size();
+                }
+
+                {
+                    // Process DF3 Integer fields
+                    for (const auto& g : df3_int_groups) {
+                        write_sep();
+                        
+                        char* start = w;
+                        bool any = false;
+
+                        for (size_t cc = g.col_start; cc < g.col_end; cc++) {
+                            if (cc != g.col_start) *w++ = ',';
+
+                            int v = df3.samp_int[cc].i_int[df3_idx];
+
+                            if (v == MISSING_INT) *w++ = '.';
+                            else { w += fast_itoa(v, w); any = true; }
+                        }
+                        if (!any) { w = start; *w++ = '.'; }
+                    }
+
+                    // Process DF3 Float fields
+                    for (const auto& g : df3_float_groups) {
+                        write_sep();
+                        
+                        char* start = w;
+                        bool any = false;
+
+                        for(size_t cc = g.col_start; cc < g.col_end; cc++){
+                            if(cc != g.col_start) *w++ = ',';
+
+                            float v = (float)df3.samp_float[cc].i_float[df3_idx];
+
+                            if(std::isnan(v)) *w++ = '.';
+                            else{w += fast_ftoa(v, w); any = true;}
+                        }
+                        if(!any){w = start; *w++ = '.';}
+                    }
+
+                    // Process DF3 String fields (X0, X1, X2 -> a,b,c)
+                    for (const auto& g : df3_string_groups) {
+                        write_sep();
+
+                        char* start = w;
+                        bool any = false;
+
+                        for (size_t cc = g.col_start; cc < g.col_end; cc++) {
+                            if (cc != g.col_start) *w++ = ',';
+
+                            const std::string& s_val = df3.samp_string[cc].i_string[df3_idx];
+
+                            if (s_val.empty()) *w++ = '.';
+                            else { memcpy(w, s_val.data(), s_val.size()); w += s_val.size(); any = true; }
+                        }
+                        if (!any) { w = start; *w++ = '.'; }
+                    }
+
+                    // Process DF4 Allele-specific fields
+                    if (start_df4 != -1) {
+                        for (const auto& g : df4_int_groups) {
+                            write_sep();
+                            bool any = false;
+                            long k = start_df4;
+                            while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                                if (df4.samp_id[k] == (unsigned short)s) {
+                                    for (size_t cc = g.col_start; cc < g.col_end; cc++) {
+                                        if (any) *w++ = ',';
+                                        int v = df4.samp_int[cc].i_int[k];
+                                        if (v == MISSING_INT) *w++ = '.';
+                                        else w += fast_itoa(v, w);
+                                        any = true;
+                                    }
+                                }
+                                k++;
+                            }
+                            if (!any) *w++ = '.';
+                        }
+
+                        for (const auto& g : df4_float_groups) {
+                            write_sep();
+                            bool any = false;
+                            long k = start_df4;
+                            while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                                if (df4.samp_id[k] == (unsigned short)s) {
+                                    for (size_t cc = g.col_start; cc < g.col_end; cc++) {
+                                        if (any) *w++ = ',';
+                                        float v = (float)df4.samp_float[cc].i_float[k];
+                                        if (std::isnan(v)) *w++ = '.';
+                                        else w += fast_ftoa(v, w);
+                                        any = true;
+                                    }
+                                }
+                                k++;
+                            }
+                            if (!any) *w++ = '.';
+                        }
+
+                        for (size_t col = 0; col < df4.samp_string.size(); col++) {
+                            write_sep();
+                            bool any = false;
+                            long k = start_df4;
+                            while (k < (long)df4.var_id.size() && df4.var_id[k] == current_var_id) {
+                                if (df4.samp_id[k] == (unsigned short)s) {
+                                    const std::string& s_val = df4.samp_string[col].i_string[k];
+                                    if (any) *w++ = ',';
+                                    if (s_val.empty()) *w++ = '.';
+                                    else { memcpy(w, s_val.data(), s_val.size()); w += s_val.size(); }
+                                    any = true;
+                                }
+                                k++;
+                            }
+                            if (!any) *w++ = '.';
+                        }
+                    }
+                }
+
+                // Trailing missing fields can be dropped (VCF spec): "./.:.:." is written as "./."
+                while(w - w0 >= 2 && w[-2] == ':' && w[-1] == '.') w -= 2;
+
+                *w++ = '\0';
+
+                size_t cell_len = w - w0;
+
+                int global_idx = i_rel * num_samples + s;
+                cell_lens[global_idx] = (unsigned int)cell_len;
+                cell_offsets_in_scratch[tid].push_back((unsigned int)local_pos);
+                global_indices[tid].push_back(global_idx);
+                local_pos += cell_len;
+            }
+        }
+    }
+
+    // Prefix sum to calculate global offsets
+    size_t total_size = 0;
+    for (int k = 0; k < total_cells; k++) {
+        offsets[k] = (unsigned int)total_size;
+        total_size += cell_lens[k];
+    }
+
+    // Parallel Pass 2: Copy from thread-local scratch buffers to the final contiguous buffer
+    buffer.resize(total_size);
+    #pragma omp parallel for schedule(static) num_threads(num_threads)
+    for (int tid = 0; tid < num_threads; tid++) {
+        const auto& src_buf  = scratch[tid];
+        const auto& src_offs = cell_offsets_in_scratch[tid];
+        const auto& gidx     = global_indices[tid];
+        for (size_t k = 0; k < gidx.size(); k++) {
+            int g = gidx[k];
+            unsigned int len = cell_lens[g];
+            memcpy(buffer.data() + offsets[g],
+                   src_buf.data() + src_offs[k],
+                   len);
+        }
+    }
+}
+
+void VCFReconstructorGPU::prepareHostBuffers(const var_columns_df& df1,
+                                              const alt_columns_df& df2,
+                                              const sample_columns_df& df3,
+                                              const alt_format_df& df4,
+                                              HostBuffers& buffers) {
+    const int chunk_size = buffers.chunk_size;
+    const unsigned int* rows = buffers.rows; // DF1 rows of the chunk, sorted, not necessarily contiguous
+
+    // --- DF1 fixed-size columns, gathered for the selected rows ---
+    buffers.var_number_buf.resize(chunk_size);
+    buffers.chrom_buf.resize(chunk_size);
+    buffers.pos_buf.resize(chunk_size);
+    buffers.qual_buf.resize(chunk_size);
+    buffers.filter_buf.resize(chunk_size);
+    for (int r = 0; r < chunk_size; r++) {
+        const unsigned int i = rows[r];
+        buffers.var_number_buf[r] = df1.var_number[i];
+        buffers.chrom_buf[r]      = df1.chrom[i];
+        buffers.pos_buf[r]        = df1.pos[i];
+        buffers.qual_buf[r]       = df1.qual[i];
+        buffers.filter_buf[r]     = df1.filter[i];
+    }
+
+    // --- Prepare DF1 ID buffer ---
+    buffers.id_buffer.clear();
+    buffers.id_offsets.resize(chunk_size);
+    {
+        unsigned int offset = 0;
+        for (int r = 0; r < chunk_size; r++) {
+            const std::string& id = df1.id[rows[r]];
+            buffers.id_offsets[r] = offset;
+            for (char c : id) buffers.id_buffer.push_back(c);
+            buffers.id_buffer.push_back('\0');
+            offset += id.size() + 1;
+        }
+    }
+
+    // --- Prepare DF1 REF buffer ---
+    buffers.ref_buffer.clear();
+    buffers.ref_offsets.resize(chunk_size);
+    {
+        unsigned int offset = 0;
+        for (int r = 0; r < chunk_size; r++) {
+            const std::string& ref = df1.ref[rows[r]];
+            buffers.ref_offsets[r] = offset;
+            for (char c : ref) buffers.ref_buffer.push_back(c);
+            buffers.ref_buffer.push_back('\0');
+            offset += ref.size() + 1;
+        }
+    }
+
+    // --- Prepare DF1 INFO integers, floats and flags ---
+    // Field counts are dataset constants, identical in both slots (see
+    // initDeviceBuffers()); slot 0 is read here purely as a convenient handle.
+    buffers.in_int_buffer.assign(d_df1[0].num_int_fields * chunk_size, 0);
+    for (int f = 0; f < d_df1[0].num_int_fields; f++)
+        for (int r = 0; r < chunk_size; r++)
+            buffers.in_int_buffer[f * chunk_size + r] = df1.in_int[f].i_int[rows[r]];
+
+    buffers.in_float_buffer.assign(d_df1[0].num_float_fields * chunk_size, __half(0));
+    for (int f = 0; f < d_df1[0].num_float_fields; f++)
+        for (int r = 0; r < chunk_size; r++)
+            buffers.in_float_buffer[f * chunk_size + r] = df1.in_float[f].i_float[rows[r]];
+
+    buffers.in_flag_buffer.assign(d_df1[0].num_flag_fields * chunk_size, 0);
+    for (int f = 0; f < d_df1[0].num_flag_fields; f++)
+        for (int r = 0; r < chunk_size; r++)
+            buffers.in_flag_buffer[f * chunk_size + r] = df1.in_flag[f].i_flag[rows[r]];
+
+    // --- Prepare DF1 INFO Strings ---
+    buffers.in_string_buffer.clear();
+    buffers.in_string_offsets.assign(d_df1[0].num_string_fields * chunk_size, 0);
+    unsigned int current_offset = 0;
+    for (int f = 0; f < d_df1[0].num_string_fields; f++) {
+        for (int r = 0; r < chunk_size; r++) {
+            buffers.in_string_offsets[f * chunk_size + r] = current_offset;
+            const std::string& val = df1.in_string[f].i_string[rows[r]];
+            for (char c : val) buffers.in_string_buffer.push_back(c);
+            buffers.in_string_buffer.push_back('\0'); // C-style string terminator
+            current_offset += val.size() + 1;
+        }
+    }
+
+    // --- DF2: the allele rows of each selected variant ---
+    // DF2 is sorted by var_id and df2_start is the first row of the chunk's first variant:
+    // the rows of the variants left out of the selection are skipped.
+    buffers.df2_rows.clear();
+    buffers.alt_start_buf.assign(chunk_size, 0);
+    buffers.alt_count_buf.assign(chunk_size, 0);
+    {
+        size_t j = (size_t)buffers.df2_start;
+        for (int r = 0; r < chunk_size; r++) {
+            const unsigned int var_num = df1.var_number[rows[r]];
+            while (j < df2.var_id.size() && df2.var_id[j] < var_num) j++;
+            buffers.alt_start_buf[r] = (unsigned int)buffers.df2_rows.size();
+            while (j < df2.var_id.size() && df2.var_id[j] == var_num) buffers.df2_rows.push_back((unsigned int)j++);
+            buffers.alt_count_buf[r] = (unsigned int)buffers.df2_rows.size() - buffers.alt_start_buf[r];
+        }
+    }
+    const int df2_count = (int)buffers.df2_rows.size();
+    buffers.df2_count = df2_count;
+
+    // --- Prepare DF2 var_id and ALT strings ---
+    buffers.df2_var_id_buf.resize(df2_count);
+    buffers.alt_data_buffer.clear();
+    buffers.alt_data_offsets.resize(df2_count);
+    {
+        unsigned int offset = 0;
+        for (int a = 0; a < df2_count; a++) {
+            const unsigned int k = buffers.df2_rows[a];
+            buffers.df2_var_id_buf[a]   = df2.var_id[k];
+            buffers.alt_data_offsets[a] = offset;
+            for (char c : df2.alt[k]) buffers.alt_data_buffer.push_back(c);
+            buffers.alt_data_buffer.push_back('\0');
+            offset += df2.alt[k].size() + 1;
+        }
+    }
+
+    // --- Prepare DF2 ALT INFO fields ---
+    buffers.alt_int_buffer.assign(d_df2[0].num_alt_int_fields * df2_count, 0);
+    for (int f = 0; f < d_df2[0].num_alt_int_fields; f++)
+        for (int a = 0; a < df2_count; a++)
+            buffers.alt_int_buffer[f * df2_count + a] = df2.alt_int[f].i_int[buffers.df2_rows[a]];
+
+    buffers.alt_float_buffer.assign(d_df2[0].num_alt_float_fields * df2_count, __half(0));
+    for (int f = 0; f < d_df2[0].num_alt_float_fields; f++)
+        for (int a = 0; a < df2_count; a++)
+            buffers.alt_float_buffer[f * df2_count + a] = df2.alt_float[f].i_float[buffers.df2_rows[a]];
+
+    // --- Prepare DF2 INFO-ALT Strings ---
+    buffers.alt_string_buffer.clear();
+    buffers.alt_string_offsets.assign(d_df2[0].num_alt_string_fields * df2_count, 0);
+    current_offset = 0;
+    for (int f = 0; f < d_df2[0].num_alt_string_fields; f++) {
+        for (int a = 0; a < df2_count; a++) {
+            buffers.alt_string_offsets[f * df2_count + a] = current_offset;
+            const std::string& val = df2.alt_string[f].i_string[buffers.df2_rows[a]];
+            for (char c : val) buffers.alt_string_buffer.push_back(c);
+            buffers.alt_string_buffer.push_back('\0');
+            current_offset += val.size() + 1;
+        }
+    }
+
+    // --- Package complex sample strings (delegates to buildSampleStrings) ---
+    buildSampleStrings(df1, df2, df3, df4,
+                       chunk_size, rows, buffers.df2_start,
+                       buffers.sample_buffer, buffers.sample_offsets);
+
+    // --- Upper bound of each output line -> where it starts in d_output ---
+    // Each sample cell's '\0' leaves room for the '\t' before it in the line.
+    buffers.line_start.resize(chunk_size + 1);
+    {
+        const int num_samples = df3.numSample;
+        unsigned long long total = 0;
+        for (int r = 0; r < chunk_size; r++) {
+            const unsigned int i = rows[r];
+            unsigned long long len = line_fixed_bound + df1.id[i].size() + df1.ref[i].size();
+            for (int f = 0; f < d_df1[0].num_string_fields; f++) len += df1.in_string[f].i_string[i].size();
+            for (unsigned int a = 0; a < buffers.alt_count_buf[r]; a++) {
+                const unsigned int k = buffers.df2_rows[buffers.alt_start_buf[r] + a];
+                len += alt_fixed_bound + df2.alt[k].size();
+                for (int f = 0; f < d_df2[0].num_alt_string_fields; f++) len += df2.alt_string[f].i_string[k].size();
+            }
+            if (num_samples > 0) {
+                size_t first = buffers.sample_offsets[(size_t)r * num_samples];
+                size_t next  = (r + 1 < chunk_size) ? buffers.sample_offsets[(size_t)(r + 1) * num_samples]
+                                                    : buffers.sample_buffer.size();
+                len += next - first;
+            }
+            buffers.line_start[r] = (unsigned int)total;
+            total += len;
+        }
+        if (total > UINT_MAX)
+            throw std::runtime_error("VCFReconstructorGPU: a chunk of output exceeds 4 GB, lower CHUNK_SIZE");
+        buffers.line_start[chunk_size] = (unsigned int)total;
+    }
+}
+
+/**
+ * @brief Rebuilds inverse lookup dictionaries from the DF1 forward maps.
+ *
+ * The parser builds forward dictionaries (String -> char ID) to compress data in
+ * RAM. This method flips those dictionaries (char ID -> String) so that the GPU
+ * kernel can retrieve the original textual representation during reconstruction.
+ *
+ * @param df1 The parsed var_columns_df containing the forward dictionaries.
+ */
+void VCFReconstructorGPU::buildInverseMaps(const var_columns_df& df1) {
+    for (const auto& pair : df1.chrom_map) {
+        inv_chrom_map[pair.second] = pair.first;
+    }
+    for (const auto& pair : df1.filter_map) {
+        inv_filter_map[pair.second] = pair.first;
+    }
+}
+
+/**
+ * @brief Background thread that consumes compacted output buffers and writes them to disk.
+ *
+ * Implements a single-consumer queue: blocks on cv_job_available, drains the
+ * queue, performs sequential writes, and signals cv_buffer_free so the main
+ * thread can reuse a buffer slot. Exits when writer_should_stop is set and
+ * the queue is empty.
+ */
+void VCFReconstructorGPU::writerLoop() {
+    while (true) {
+        WriteJob job;
+
+        // Wait for a job or for the shutdown signal.
+        {
+            std::unique_lock<std::mutex> lock(write_mutex);
+            cv_job_available.wait(lock, [this]() {
+                return !write_queue.empty() || writer_should_stop;
+            });
+            if (write_queue.empty() && writer_should_stop) return;
+
+            job = write_queue.front();
+            write_queue.pop();
+        }
+
+        // Disk write happens outside the lock so the main thread is never
+        // blocked while we are flushing.
+        nvtxRangePushA("Async Disk Write");
+        writer_out->write(h_compacted_pool[job.buffer_idx], job.total_bytes);
+        nvtxRangePop();
+        const bool failed = !*writer_out; // e.g. disk full: ofstream does not throw
+
+        // Mark the slot as free and notify whoever is waiting on it.
+        {
+            std::lock_guard<std::mutex> lock(write_mutex);
+            write_buffer_busy[job.buffer_idx] = false;
+            if (failed) writer_failed = true;
+        }
+        cv_buffer_free.notify_all();
+    }
+}
+

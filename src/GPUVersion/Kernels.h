@@ -43,4 +43,7 @@ cudaError_t upload_map1_table(const char (&keys)[NUM_KEYS_MAP1][MAX_KEY_LENGTH_M
 /// Launches the parsing kernel on stream; returns the launch error, if any.
 cudaError_t launch_parse_kernel(int blocks, int threads, cudaStream_t stream, const KernelParams* params, char* my_mem, int batch_size, bool hasSamp);
 
+/// Fills n device cells with MISSING_INT / missing_half(): cudaMemset can only repeat a single byte.
+cudaError_t fill_missing(int* p, size_t n);
+cudaError_t fill_missing(__half* p, size_t n);
 #endif

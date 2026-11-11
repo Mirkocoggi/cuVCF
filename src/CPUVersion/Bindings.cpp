@@ -31,6 +31,9 @@
 #include "VCF_parsed.h"
 #include "VCF_var_columns_df.h"
 #include "VCFparser_mt_col_struct.h"   
+#include "Reconstructor/VCFReconstructor.h"
+#include <algorithm>
+#include <numeric>
 
 namespace py = pybind11;
 
@@ -176,7 +179,7 @@ static py::array_t<uint16_t> half_vector_to_uint16(const std::vector<half>& v){
 static py::dict get_var_columns_data(const var_columns_df& df){
     py::dict d;
     d["var_number"] = py::array_t<unsigned int>(df.var_number.size(),df.var_number.data());
-    d["chrom"]      = py::array_t<char>        (df.chrom.size(),df.chrom.data());
+    d["chrom"]      = py::array_t<uint16_t>    (df.chrom.size(),df.chrom.data());
     d["pos"]        = py::array_t<unsigned int>(df.pos.size(),df.pos.data());
     d["id"]         = py::cast(df.id);
     d["ref"]        = py::cast(df.ref);
@@ -248,6 +251,33 @@ static py::dict get_alt_format_data(const alt_format_df& df){
 }
 
 /**
+ * @brief Converts the variants= argument of reconstruct_vcf to the DF1 rows to write.
+ *
+ * None selects every variant. Otherwise any 1-D integer array of var_number values:
+ * sorted and deduplicated here, since var_number[i] == i they are the DF1 row indices.
+ */
+static std::vector<unsigned int> selected_rows(const py::object& variants, size_t n){
+    std::vector<unsigned int> rows;
+    if (variants.is_none()) {
+        rows.resize(n);
+        std::iota(rows.begin(), rows.end(), 0u);
+        return rows;
+    }
+    py::array_t<long long, py::array::c_style | py::array::forcecast> arr(variants);
+    if (arr.ndim() != 1) throw py::value_error("variants must be a 1-D array of var_number values");
+    auto v = arr.unchecked<1>();
+    rows.reserve(v.shape(0));
+    for (py::ssize_t k = 0; k < v.shape(0); k++) {
+        if (v(k) < 0 || v(k) >= (long long)n)
+            throw py::value_error("variants: " + std::to_string(v(k)) + " is not a var_number (must be >= 0 and < " + std::to_string(n) + ")");
+        rows.push_back(static_cast<unsigned int>(v(k)));
+    }
+    std::sort(rows.begin(), rows.end());
+    rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+    return rows;
+}
+
+/**
  * @brief Top‑level pybind11 module initialisation function.
  *
  * Name: ``CPUParser`` (mirrors ``GPUParser``).  All classes and helper
@@ -273,6 +303,8 @@ PYBIND11_MODULE(CPUParser, m) {
         .def("__repr__",&GTWrapper::to_string);
     py::bind_map<std::map<std::string,char>>(m, "FilterMap", py::module_local());
     m.attr("GTMapGlobal") = py::cast(&GTWrapper::GTMap);
+    m.attr("TSA_NAMES") = py::make_tuple("SNV","insertion","deletion","inversion","indel","substitution",
+        "sequence_alteration");
 
     /*  helper NumPy dict  */
     m.def("get_var_columns_data",   &get_var_columns_data);
@@ -388,12 +420,17 @@ PYBIND11_MODULE(CPUParser, m) {
         .def_readwrite("in_string",&var_columns_df::in_string)
         .def_readwrite("in_int",&var_columns_df::in_int)
         .def_readwrite("info_map1",&var_columns_df::info_map1)
+        .def_readwrite("format_map1",&var_columns_df::format_map1)
         .def("print",&var_columns_df::print);
 
     /*  parser main object  */
     py::class_<vcf_parsed>(m, "vcf_parsed", py::module_local())
         .def(py::init<>())
         .def("run",&vcf_parsed::run,py::arg("vcf_filename"),py::arg("num_threads"))
+        .def("reconstruct_vcf", [](const vcf_parsed& self, const std::string& path, int num_threads, py::object variants){
+            std::vector<unsigned int> rows = selected_rows(variants, self.var_columns.var_number.size());
+            VCFReconstructor(path, self.header).run(self.var_columns, self.alt_columns, self.samp_columns, self.alt_sample, num_threads, rows);
+        }, py::arg("vcf_filename"), py::arg("num_threads"), py::arg("variants") = py::none())
         .def_readwrite("id",&vcf_parsed::id)
         .def_readwrite("header",&vcf_parsed::header)
         .def_readwrite("INFO",&vcf_parsed::INFO)
