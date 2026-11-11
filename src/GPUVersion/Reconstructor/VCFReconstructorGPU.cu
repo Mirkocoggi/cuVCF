@@ -467,6 +467,7 @@ __global__ void reconstructKernel(
             first_alt = false;
             pos += device_strcpy(line + pos, df2.alt_data + df2.alt_offsets[j]);
         }
+        if (first_alt) line[pos++] = '.';   // no ALT rows: missing, as on the CPU
         line[pos++] = '\t';
 
         // --- 6. QUAL ---
@@ -1008,7 +1009,7 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
 
         line_fixed_bound = (max_chrom + 1) + (INT_LEN + 1) + 3   // CHROM, POS, and the ID/REF/ALT tabs
                          + (FLOAT_LEN + 1) + (max_filter + 1)    // QUAL, FILTER
-                         + 1 + 1;                                // '.' for an empty INFO, '\n'
+                         + 1 + 1 + 1;                            // '.' for an empty ALT and INFO, '\n'
         for (const auto& c : df1.in_flag)    line_fixed_bound += c.name.size() + 1;
         for (const auto& c : df1.in_int)     line_fixed_bound += c.name.size() + 2 + (c.name == "TSA" ? max_tsa : INT_LEN);
         for (const auto& c : df1.in_float)   line_fixed_bound += c.name.size() + 2 + FLOAT_LEN;
