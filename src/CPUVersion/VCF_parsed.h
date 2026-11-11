@@ -374,7 +374,7 @@ public:
             for(int i=0; i<iter; i++){ //create a vector of vectors
                 samp_GT tmp;
                 tmp.numb = iter;
-                tmp.GT.resize((num_lines-1)*samp_columns.numSample, (char)0);
+                tmp.GT.resize((num_lines-1)*samp_columns.numSample, static_cast<char>(255)); // ./. when a record has no GT
                 samp_columns.sample_GT.push_back(tmp);
             }   
         }

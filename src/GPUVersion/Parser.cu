@@ -355,7 +355,7 @@ void vcf_parsed::device_allocation(){
         // Allocate and initialize samp_GT
         tmp = samp_columns.sample_GT.size();
         CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_sample_GT->GT), tmp * (num_lines * samp_columns.numSample) * sizeof(char)));
-        CUDA_CHECK_ERROR(cudaMemset(d_SC_sample_GT->GT, 0, tmp * (num_lines * samp_columns.numSample) * sizeof(char)));
+        CUDA_CHECK_ERROR(cudaMemset(d_SC_sample_GT->GT, 0xFF, tmp * (num_lines * samp_columns.numSample) * sizeof(char))); // ./. when a record has no GT
         CUDA_CHECK_ERROR(cudaMalloc(&(d_SC_sample_GT->numb), sizeof(int)));
         // sample_GT is empty when GT is not declared (or is Number=A, parsed on the host)
         if(!samp_columns.sample_GT.empty())
@@ -609,7 +609,7 @@ void vcf_parsed::create_sample_vectors(int num_threads){
         for(int i=0; i<iter; i++){ 
             samp_GT tmp;
             tmp.numb = iter;
-            tmp.GT.resize((num_lines)*samp_columns.numSample, (char)0);
+            tmp.GT.resize((num_lines)*samp_columns.numSample, static_cast<char>(255));
             samp_columns.sample_GT.push_back(tmp);
         }
         samp_columns.sample_GT.resize(FORMAT.numGT-'0');   
