@@ -605,7 +605,7 @@ std::string VCFReconstructor::formatVariant(int index,
                             }
                             k++;
                         }
-                        sample_data += ":";
+                        if (!sample_data.empty()) sample_data += ":";
                         sample_data += field_val.empty() ? "." : field_val;
                     }
                 }
@@ -632,7 +632,7 @@ std::string VCFReconstructor::formatVariant(int index,
                             }
                             k++;
                         }
-                        sample_data += ":";
+                        if (!sample_data.empty()) sample_data += ":";
                         sample_data += field_val.empty() ? "." : field_val;
                     }
                 }
@@ -649,7 +649,7 @@ std::string VCFReconstructor::formatVariant(int index,
                         }
                         k++;
                     }
-                    sample_data += ":";
+                    if (!sample_data.empty()) sample_data += ":";
                     sample_data += field_val.empty() ? "." : field_val;
                 }
             }
