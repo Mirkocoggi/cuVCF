@@ -2,6 +2,7 @@
 #include "DeviceUtils.cuh"
 #include <sstream>
 #include <cctype>
+#include <cstdlib>
 #include <cstring>
 #include <algorithm>
 #include <omp.h>
@@ -13,16 +14,18 @@
 #include <cmath>
 #include <numeric>
 
-/*Strip trailing digits from a field name: cuVCF splits Number>1 into AD0, AD1,...*/
-static std::string stripTrailingDigits(const std::string& name){
-    std::string r = name;
-    while(!r.empty() && std::isdigit(static_cast<unsigned char>(r.back()))) r.pop_back();
-    return r;
-}
-
-/*Base ID of a FORMAT column: only split columns lose their digits, a declared ID like PS1 stays as it is*/
+/*Base ID of a FORMAT column. A declared ID like PS1 stays as it is. A split column (AD0, AD1, ...)
+  loses one digit at a time until it matches an ID declared with a fixed Number greater than 1,
+  so AF20 gives AF2 and not AF. Without a match all trailing digits are removed*/
 static std::string formatBase(const std::string& name, const std::map<std::string, std::string>& numbers){
-    return numbers.count(name) ? name : stripTrailingDigits(name);
+    if (numbers.count(name)) return name;
+    std::string r = name;
+    while (!r.empty() && std::isdigit(static_cast<unsigned char>(r.back()))) {
+        r.pop_back();
+        auto it = numbers.find(r);
+        if (it != numbers.end() && std::atoi(it->second.c_str()) > 1) return r;
+    }
+    return r;
 }
 
 // TSA codes written by the parser (Kernels.cu), same table as tsa_names in CPUVersion
