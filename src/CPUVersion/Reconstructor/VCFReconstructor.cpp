@@ -404,7 +404,29 @@ std::string VCFReconstructor::formatVariant(int index,
         }
     }
 
-    // 5e. Per-allele floats from DF2
+    // 5e. Per-allele ints from DF2
+    // Fetch integer data specific to each alternate allele. Join with commas.
+    for (size_t col = 0; col < df2.alt_int.size(); col++) {
+        std::string val_str = "";
+        bool has_data = false;
+        for (size_t idx = 0; idx < alt_indices.size(); idx++) {
+            int v = df2.alt_int[col].i_int[alt_indices[idx]];
+            if (idx > 0) val_str += ",";
+            if (v != MISSING_INT) {
+                val_str += std::to_string(v);
+                has_data = true;
+            } else {
+                val_str += ".";
+            }
+        }
+        if (has_data) {
+            if (!first_info) ss << ";";
+            ss << df2.alt_int[col].name << "=" << val_str;
+            first_info = false;
+        }
+    }
+
+    // 5f. Per-allele floats from DF2
     // Fetch float data that is specific to each alternate allele (using alt_indices).
     // Multiple values are joined by commas (e.g., "AF=0.5,0.2"). Missing values become ".".
     for (size_t col = 0; col < df2.alt_float.size(); col++) {
@@ -423,28 +445,6 @@ std::string VCFReconstructor::formatVariant(int index,
         if (has_data) {
             if (!first_info) ss << ";";
             ss << df2.alt_float[col].name << "=" << val_str;
-            first_info = false;
-        }
-    }
-
-    // 5f. Per-allele ints from DF2
-    // Fetch integer data specific to each alternate allele. Join with commas.
-    for (size_t col = 0; col < df2.alt_int.size(); col++) {
-        std::string val_str = "";
-        bool has_data = false;
-        for (size_t idx = 0; idx < alt_indices.size(); idx++) {
-            int v = df2.alt_int[col].i_int[alt_indices[idx]];
-            if (idx > 0) val_str += ",";
-            if (v != MISSING_INT) {
-                val_str += std::to_string(v);
-                has_data = true;
-            } else {
-                val_str += ".";
-            }
-        }
-        if (has_data) {
-            if (!first_info) ss << ";";
-            ss << df2.alt_int[col].name << "=" << val_str;
             first_info = false;
         }
     }
