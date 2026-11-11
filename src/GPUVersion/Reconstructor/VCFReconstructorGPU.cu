@@ -442,7 +442,9 @@ __global__ void reconstructKernel(
 
         // --- 1. CHROM ---
         uint16_t chrom_code = df1.chrom[i];
-        pos += device_strcpy(line + pos, maps.chrom_strings + maps.chrom_offsets[chrom_code]);
+        // A code not in chrom_map has offset 0, which points to "." (as on the CPU)
+        unsigned int chrom_off = chrom_code < maps.chrom_count ? maps.chrom_offsets[chrom_code] : 0;
+        pos += device_strcpy(line + pos, maps.chrom_strings + chrom_off);
         line[pos++] = '\t';
 
         // --- 2. POS ---
@@ -961,9 +963,10 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
         };
 
         // CHROM codes are 16 bit: one offset per code up to the largest one in chrom_map
-        std::vector<char> chrom_strings_buf;
+        // Both tables start with ".": codes not in the map keep offset 0 and are written as ".", as on the CPU
+        std::vector<char> chrom_strings_buf = {'.', '\0'};
         std::vector<unsigned int> chrom_offsets_buf(inv_chrom_map.empty() ? 1 : inv_chrom_map.rbegin()->first + 1, 0);
-        unsigned int offset = 0;
+        unsigned int offset = 2;
         for (const auto& pair : inv_chrom_map) {
             chrom_offsets_buf[pair.first] = offset;
             for (char c : pair.second) chrom_strings_buf.push_back(c);
@@ -971,9 +974,9 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
             offset += pair.second.size() + 1;
         }
 
-        std::vector<char> filter_strings_buf;
+        std::vector<char> filter_strings_buf = {'.', '\0'};
         std::vector<unsigned int> filter_offsets_buf(256, 0);
-        offset = 0;
+        offset = 2;
         for (const auto& pair : inv_filter_map) {
             int idx = static_cast<unsigned char>(pair.first); // codes >= 128 are negative as char
             filter_offsets_buf[idx] = offset;
@@ -993,6 +996,7 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
             offset += std::strlen(name) + 1;
         }
         d_maps.tsa_count = (int)tsa_offsets_buf.size();
+        d_maps.chrom_count = (int)chrom_offsets_buf.size();
 
         safe_map_alloc((void**)&d_maps.chrom_strings,  (void**)&d_maps.chrom_offsets,  chrom_strings_buf,  chrom_offsets_buf);
         safe_map_alloc((void**)&d_maps.filter_strings, (void**)&d_maps.filter_offsets, filter_strings_buf, filter_offsets_buf);
@@ -1002,7 +1006,7 @@ TimingResult VCFReconstructorGPU::run(const var_columns_df& df1,
     // Upper bound of the line parts that do not depend on the content; prepareHostBuffers() adds
     // ID/REF/ALT/INFO strings and the sample strings to get each line's bound
     {
-        size_t max_chrom = 0, max_filter = 0, max_tsa = 0;
+        size_t max_chrom = 1, max_filter = 1, max_tsa = 0;   // at least "." for an unknown code
         for (const auto& p : inv_chrom_map)  max_chrom  = std::max(max_chrom,  p.second.size());
         for (const auto& p : inv_filter_map) max_filter = std::max(max_filter, p.second.size());
         for (const char* name : tsa_names)   max_tsa    = std::max(max_tsa,    std::strlen(name));

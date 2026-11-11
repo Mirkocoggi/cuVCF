@@ -19,6 +19,7 @@ struct DeviceMaps {
     char* tsa_strings = nullptr;             ///< Buffer for TSA strings
     unsigned int* tsa_offsets = nullptr;     ///< Starting offsets for TSA
     int tsa_count = 0;
+    int chrom_count = 0;                     ///< Entries in chrom_offsets: codes from 0 to chrom_count - 1
 };
 
 
